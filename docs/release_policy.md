@@ -91,11 +91,13 @@ as part of the Device OS image lifecycle rather than the app package.
 
 ## History-Preserving Extraction
 
-The first Core repository is produced with a reproducible `git filter-repo`
-export that retains the history of `src/render_core`, its Core CMake boundary,
-standalone tests and Core-specific documents. The Runtime repository keeps its
-product history and replaces in-tree Core use with a pinned package-consumer
-commit. A history-free directory copy is not an acceptable extraction.
+The first Core repository was produced with a reproducible `git filter-repo`
+export that retained the history of the historical `src/render_core` tree, its
+Core CMake boundary, standalone tests and Core-specific documents. The current
+repository presents those retained files through its independent root layout.
+The Runtime repository keeps its product history and will replace in-tree Core
+use with a pinned package-consumer commit. A history-free directory copy is not
+an acceptable extraction.
 
 Before publishing the new repository, verify:
 
@@ -110,8 +112,9 @@ published packages are the release dependency mechanism.
 
 ## Rehearsal
 
-Before creating the first repository, run the committed-HEAD-only rehearsal in
-a disposable directory:
+The committed-HEAD-only export rehearsal remains maintained in the JellyFrame
+Runtime repository because it operates on the Runtime monorepo boundary. Run it
+there in a disposable directory:
 
 ```powershell
 python project_tools\rehearse_render_core_history_export.py `

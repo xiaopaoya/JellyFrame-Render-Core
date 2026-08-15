@@ -50,7 +50,7 @@ driver-owned 内存，或已经让 UI loop 在复用同一 framebuffer/target bu
 
 ## `plan_frame_loop`
 
-头文件：`src/render_core/frame_loop.h`
+头文件：`include/render_core/frame_loop.h`
 
 `plan_frame_loop_work(...)` 是一个很薄的宿主 UI task 辅助函数。它不拥有输入队列、timer 队列或
 animation 队列。宿主通过 `FrameLoopPendingWork` 告诉核心当前有多少待处理输入事件、到期 timer
@@ -84,7 +84,7 @@ Animation caps 与 timer caps 分开，因此带动效的页面不能饿死输�
 
 ## 滚动 Blit 计划
 
-头文件：`src/render_core/scroll_blit.h`
+头文件：`include/render_core/scroll_blit.h`
 
 `plan_vertical_scroll_blit(...)` 是给小屏滚动路径准备的无分配 helper。它不移动像素、不访问屏幕，
 只根据 viewport 高度、content 高度和前后 scrollY 返回：
@@ -121,7 +121,7 @@ Win32 壳用它驱动 BGRX viewport buffer 的快速滚动。嵌入式 port 可�
 
 ## `plan_frame_update`
 
-头文件：`src/render_core/frame_update.h`
+头文件：`include/render_core/frame_update.h`
 
 `plan_frame_update` 不拥有 DOM，也不执行布局。它只根据当前缓存状态和 dirty flags 给出更新策略。
 
@@ -173,7 +173,7 @@ framebuffer，并执行 full frame repaint。
 
 ## Dirty Region 诊断
 
-头文件：`src/render_core/dirty_region.h`
+头文件：`include/render_core/dirty_region.h`
 
 `compute_dirty_rects(...)` 仍保留为只需要矩形的宿主使用的兼容 API。
 `compute_dirty_region(...)` 返回同样的 rectangles，并额外给出：
@@ -208,7 +208,7 @@ rect 面积直接求和，不扣除重叠部分；这是刻意保守的嵌入式
 
 ## Display Invalidation 诊断
 
-头文件：`src/render_core/display_invalidation.h`
+头文件：`include/render_core/display_invalidation.h`
 
 `analyze_display_invalidation(...)` 会报告一组 dirty rectangles 映射到当前 layer tree 和
 display commands 后的覆盖情况。它会统计访问/命中的 layer、带 clip/composited 的命中 layer、
@@ -223,7 +223,7 @@ retained layer/display-command 结构。
 
 ## Animation Invalidation
 
-头文件：`src/render_core/animation_invalidation.h`
+头文件：`include/render_core/animation_invalidation.h`
 
 `compute_animation_dirty_region(...)` / `compute_animation_dirty_region_into(...)` 面向 animation frame。
 它们使用上一帧和当前帧的 `StyleOverride` 列表，在当前 layout tree 中找到对应节点，并把节点 subtree

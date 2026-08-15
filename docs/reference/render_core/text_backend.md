@@ -15,7 +15,7 @@ is meant for bring-up and diagnostics, not production CJK typography.
 
 ## Core API
 
-`src/render_core/text_backend.h` defines the layout-side API:
+`include/render_core/text_backend.h` defines the layout-side API:
 
 - `TextMetrics { width, line_height }`
 - `TextMeasureCallback`
@@ -39,7 +39,7 @@ matches a manifest-declared app font, layout passes a normalized 32-bit family
 hash so the backend can select that face without carrying family strings through
 the display list.
 
-`src/render_core/software_renderer.h` still owns the paint-side callback:
+`include/render_core/software_renderer.h` still owns the paint-side callback:
 
 - `TextPainter`
 - `TextPaintCallback`
@@ -55,7 +55,7 @@ Hosts that care about visual correctness should provide both measurement and
 painting from the same font engine. If they disagree, text can be clipped or
 wrapped differently from what is drawn.
 
-`src/render_core/text_adapter.h` provides `HostTextAdapter`, a tiny bridge for LVGL or
+`include/render_core/text_adapter.h` provides `HostTextAdapter`, a tiny bridge for LVGL or
 vendor engines that already expose both services. The adapter owns no resources;
 the host-owned context must outlive layout and rendering:
 
@@ -130,7 +130,7 @@ Recommended options:
 - vendor font engine for CJK products;
 - shaping-capable backend only for devices that need complex scripts.
 
-`src/render_core/bitmap_font.h` provides the first static bitmap font backend:
+`include/render_core/bitmap_font.h` provides the first static bitmap font backend:
 
 - `BitmapFontGlyph`: one monochrome glyph, addressed by Unicode codepoint;
 - `BitmapFont`: glyph table plus line-height and fallback advance. The glyph

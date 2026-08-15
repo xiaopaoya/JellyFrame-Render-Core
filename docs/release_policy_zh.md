@@ -59,7 +59,7 @@ Core release 是源码/package 基础设施，不是一份通用 native firmware
 
 ## 保留历史的拆分
 
-首个 Core 仓库使用可复现的 `git filter-repo` export，保留 `src/render_core`、Core CMake boundary、standalone tests 与 Core 专属文档的历史。Runtime 仓库保留完整产品历史，并以一笔明确的 package-consumer 提交替代 in-tree Core。禁止用无历史目录拷贝替代。
+首个 Core 仓库使用可复现的 `git filter-repo` export，保留历史上的 `src/render_core`、Core CMake boundary、standalone tests 与 Core 专属文档的历史；当前独立仓库以自己的根目录布局呈现这些保留内容。Runtime 仓库保留完整产品历史，并以一笔明确的 package-consumer 提交替代 in-tree Core。禁止用无历史目录拷贝替代。
 
 发布新仓库前必须验证：
 
@@ -72,7 +72,7 @@ Core release 是源码/package 基础设施，不是一份通用 native firmware
 
 ## 演练
 
-首次建仓前，在可丢弃目录中对 committed HEAD 运行演练：
+只接受 committed HEAD 的 export rehearsal 仍由 JellyFrame Runtime 仓库维护，因为它操作的是 Runtime monorepo 边界。请在该仓库的可丢弃目录中运行：
 
 ```powershell
 python project_tools\rehearse_render_core_history_export.py `

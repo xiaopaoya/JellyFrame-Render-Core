@@ -56,3 +56,20 @@ version and engine ABI according to their own compatibility policy.
 
 The JellyFrame Runtime repository owns App packages, JerryScript integration,
 desktop tooling and device-layer documentation.
+
+## Repository Map
+
+| Path | Contents | Primary audience |
+| --- | --- | --- |
+| `include/render_core/` | Installed C++ headers and the supported ABI surface | Core hosts and package consumers |
+| `src/` | Render Core implementation, grouped by pipeline responsibility in file names | Core maintainers |
+| `tests/unit/` | Platform-neutral C++ regression suite | Core maintainers |
+| `tests/render_core_source_archive_tests.py` | Archive reproducibility, extraction, build and install regression | Release maintainers |
+| `docs/` | Architecture, release policy and subsystem reference | Integrators and maintainers |
+| `samples/` | Standalone HTML/CSS and bitmap-font fixtures | Visual reviewers |
+| `benchmarks/` | Platform-neutral microbenchmarks | Performance work |
+| `tools/` | Release-source packaging utility | Release maintainers |
+
+The repository intentionally has no device ports, App packages, JavaScript
+runtime or launcher implementation. Those belong to the JellyFrame Runtime or
+Device OS layers.

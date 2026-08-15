@@ -1,46 +1,46 @@
 # Shared Render Core regression-test registration.
 
 set(JELLYFRAME_RENDER_CORE_TEST_SOURCES
-    src/render_core/tests/tokenizer_tests.cpp
-    src/render_core/tests/arena_tests.cpp
-    src/render_core/tests/animation_timeline_tests.cpp
-    src/render_core/tests/budget_stress_tests.cpp
-    src/render_core/tests/dom_mutation_tests.cpp
-    src/render_core/tests/dom_owner_tests.cpp
-    src/render_core/tests/document_script_tests.cpp
-    src/render_core/tests/display_invalidation_tests.cpp
-    src/render_core/tests/dirty_region_tests.cpp
-    src/render_core/tests/embedded_framebuffer_tests.cpp
-    src/render_core/tests/css_parser_tests.cpp
-    src/render_core/tests/event_tests.cpp
-    src/render_core/tests/form_submission_tests.cpp
-    src/render_core/tests/frame_loop_tests.cpp
-    src/render_core/tests/frame_update_tests.cpp
-    src/render_core/tests/hit_test_tests.cpp
-    src/render_core/tests/host_tests.cpp
-    src/render_core/tests/input_tests.cpp
-    src/render_core/tests/layout_tests.cpp
-    src/render_core/tests/pipeline_statistics_tests.cpp
-    src/render_core/tests/render_tree_tests.cpp
-    src/render_core/tests/layer_tree_tests.cpp
-    src/render_core/tests/scroll_blit_tests.cpp
-    src/render_core/tests/scroll_gesture_tests.cpp
-    src/render_core/tests/software_renderer_tests.cpp
-    src/render_core/tests/style_repaint_tests.cpp
-    src/render_core/tests/text_adapter_tests.cpp
-    src/render_core/tests/text_repaint_tests.cpp
-    src/render_core/tests/text_scan_tests.cpp
+    tests/unit/tokenizer_tests.cpp
+    tests/unit/arena_tests.cpp
+    tests/unit/animation_timeline_tests.cpp
+    tests/unit/budget_stress_tests.cpp
+    tests/unit/dom_mutation_tests.cpp
+    tests/unit/dom_owner_tests.cpp
+    tests/unit/document_script_tests.cpp
+    tests/unit/display_invalidation_tests.cpp
+    tests/unit/dirty_region_tests.cpp
+    tests/unit/embedded_framebuffer_tests.cpp
+    tests/unit/css_parser_tests.cpp
+    tests/unit/event_tests.cpp
+    tests/unit/form_submission_tests.cpp
+    tests/unit/frame_loop_tests.cpp
+    tests/unit/frame_update_tests.cpp
+    tests/unit/hit_test_tests.cpp
+    tests/unit/host_tests.cpp
+    tests/unit/input_tests.cpp
+    tests/unit/layout_tests.cpp
+    tests/unit/pipeline_statistics_tests.cpp
+    tests/unit/render_tree_tests.cpp
+    tests/unit/layer_tree_tests.cpp
+    tests/unit/scroll_blit_tests.cpp
+    tests/unit/scroll_gesture_tests.cpp
+    tests/unit/software_renderer_tests.cpp
+    tests/unit/style_repaint_tests.cpp
+    tests/unit/text_adapter_tests.cpp
+    tests/unit/text_repaint_tests.cpp
+    tests/unit/text_scan_tests.cpp
 )
 if(JELLYFRAME_ENABLE_CANVAS2D)
     list(APPEND JELLYFRAME_RENDER_CORE_TEST_SOURCES
-        src/render_core/tests/canvas2d_tests.cpp)
+        tests/unit/canvas2d_tests.cpp)
 else()
     list(APPEND JELLYFRAME_RENDER_CORE_TEST_SOURCES
-        src/render_core/tests/canvas2d_disabled_tests.cpp)
+        tests/unit/canvas2d_disabled_tests.cpp)
 endif()
 if(JELLYFRAME_ENABLE_MODERN_PAINT)
     list(APPEND JELLYFRAME_RENDER_CORE_TEST_SOURCES
-        src/render_core/tests/modern_paint_tests.cpp)
+        tests/unit/modern_paint_tests.cpp)
 endif()
 
 foreach(test_source IN LISTS JELLYFRAME_RENDER_CORE_TEST_SOURCES)
@@ -53,7 +53,7 @@ foreach(test_source IN LISTS JELLYFRAME_RENDER_CORE_TEST_SOURCES)
 endforeach()
 
 add_executable(jellyframe_render_core_tests
-    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/src/render_core/tests/render_core_tests.cpp"
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/render_core_tests.cpp"
     ${JELLYFRAME_RENDER_CORE_TEST_SOURCES_ABSOLUTE})
 target_link_libraries(jellyframe_render_core_tests PRIVATE jellyframe_render_core)
 target_compile_definitions(jellyframe_render_core_tests PRIVATE JELLYFRAME_TEST_ASSERTS_ENABLED=1)

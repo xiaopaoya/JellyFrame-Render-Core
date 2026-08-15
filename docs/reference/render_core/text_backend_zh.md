@@ -14,7 +14,7 @@ JellyFrame 不把字体加载和平台文本 API 放进 `jellyframe_render_core`
 
 ## 核心 API
 
-`src/render_core/text_backend.h` 定义 layout 侧 API：
+`include/render_core/text_backend.h` 定义 layout 侧 API：
 
 - `TextMetrics { width, line_height }`
 - `TextMeasureCallback`
@@ -35,7 +35,7 @@ layout engine 会用这个宽度在可用内容宽度内估算换行。provider 
 当计算后的 CSS `font-family` 命中 manifest 声明的 app 字体时，layout 会传入规范化的 32-bit family
 hash，让后端选择对应字体，而不把 family 字符串带进 display list。
 
-`src/render_core/software_renderer.h` 仍然负责绘制侧回调：
+`include/render_core/software_renderer.h` 仍然负责绘制侧回调：
 
 - `TextPainter`
 - `TextPaintCallback`
@@ -49,7 +49,7 @@ hash，让后端选择对应字体，而不把 family 字符串带进 display li
 
 重视视觉正确性的宿主应让测量和绘制来自同一个字体引擎。二者不一致时，文本可能被裁切，或换行位置与实际绘制不一致。
 
-`src/render_core/text_adapter.h` 提供 `HostTextAdapter`，用于桥接已经同时提供测量和绘制能力的
+`include/render_core/text_adapter.h` 提供 `HostTextAdapter`，用于桥接已经同时提供测量和绘制能力的
 LVGL 或厂商字体引擎。adapter 不持有资源；宿主拥有的 context 必须覆盖 layout 和 render 生命周期：
 
 ```cpp
@@ -113,7 +113,7 @@ provider 传给 `LayerTreeBuilderOptions::text_measure`。builder 会据此按 l
 - 面向中文产品的厂商字体引擎；
 - 只有确实需要复杂文字系统时，才接入 shaping-capable backend。
 
-`src/render_core/bitmap_font.h` 提供第一版静态 bitmap font backend：
+`include/render_core/bitmap_font.h` 提供第一版静态 bitmap font backend：
 
 - `BitmapFontGlyph`：一个按 Unicode codepoint 寻址的单色 glyph；
 - `BitmapFont`：glyph table、line-height 和 fallback advance。glyph table 必须按 Unicode codepoint 升序排列，因为大 CJK 字库查找使用二分搜索；

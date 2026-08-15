@@ -32,10 +32,25 @@ TEXT_ARCHIVE_SUFFIXES = frozenset(
         ".in",
         ".json",
         ".md",
+        ".py",
         ".txt",
     }
 )
 TEXT_ARCHIVE_FILENAMES = frozenset({"CMakeLists.txt", "LICENSE"})
+ARCHIVE_INPUTS = (
+    "LICENSE",
+    "CMakeLists.txt",
+    "CMakePresets.json",
+    "README.md",
+    "cmake",
+    "include",
+    "src",
+    "tests",
+    "docs",
+    "benchmarks",
+    "samples",
+    "tools/package_render_core_source.py",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,7 +59,7 @@ def parse_args() -> argparse.Namespace:
         "--source-root",
         type=Path,
         default=Path(__file__).resolve().parents[1],
-        help="JellyFrame source checkout containing Render Core",
+        help="Render Core source checkout",
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args()
@@ -74,7 +89,7 @@ def git_tracked_files(source_root: Path) -> set[Path] | None:
     """
     result = subprocess.run(
         ["git", "-C", str(source_root), "ls-files", "-z", "--",
-         "LICENSE", "cmake", "src/render_core"],
+         *ARCHIVE_INPUTS],
         text=False,
         capture_output=True,
         check=False,
@@ -89,25 +104,19 @@ def git_tracked_files(source_root: Path) -> set[Path] | None:
 
 
 def source_files(source_root: Path) -> list[Path]:
-    files = {
-        require_file(source_root / "LICENSE"),
-        require_file(source_root / "cmake" / "JellyFrameRenderCoreConfig.cmake.in"),
-        require_file(source_root / "cmake" / "render_core_feature_registry.csv"),
-    }
-    cmake_dir = source_root / "cmake"
-    for pattern in ("render_core_*.cmake", "render_core_*.json.in"):
-        files.update(path for path in cmake_dir.glob(pattern) if path.is_file())
-    render_core_dir = source_root / "src" / "render_core"
-    if not render_core_dir.is_dir():
-        raise RuntimeError(f"Render Core source directory is missing: {render_core_dir}")
-    files.update(path for path in render_core_dir.rglob("*") if path.is_file())
+    files: set[Path] = set()
+    for relative in ARCHIVE_INPUTS:
+        path = source_root / relative
+        if path.is_file():
+            files.add(path)
+        elif path.is_dir():
+            files.update(candidate for candidate in path.rglob("*") if candidate.is_file())
+        else:
+            raise RuntimeError(f"required Render Core archive input is missing: {path}")
     tracked_files = git_tracked_files(source_root)
     if tracked_files is not None:
-        required_files = {
-            source_root / "LICENSE",
-            source_root / "cmake" / "JellyFrameRenderCoreConfig.cmake.in",
-            source_root / "cmake" / "render_core_feature_registry.csv",
-        }
+        required_files = {source_root / relative for relative in ARCHIVE_INPUTS
+                          if (source_root / relative).is_file()}
         missing_required = required_files - tracked_files
         if missing_required:
             missing = ", ".join(
@@ -116,12 +125,6 @@ def source_files(source_root: Path) -> list[Path]:
             raise RuntimeError(f"tracked Render Core checkout is missing required source files: {missing}")
         files.intersection_update(tracked_files)
     return sorted(files, key=lambda path: path.relative_to(source_root).as_posix())
-
-
-def standalone_entry_file(source_root: Path, monorepo_path: Path, standalone_path: Path) -> Path:
-    if monorepo_path.is_file():
-        return monorepo_path
-    return require_file(standalone_path)
 
 
 def archive_member(root_name: str, source_root: Path, path: Path) -> str:
@@ -156,38 +159,12 @@ def archive_content(path: Path) -> bytes:
 def create_archive(source_root: Path, output_dir: Path) -> tuple[Path, Path]:
     source_root = source_root.resolve()
     output_dir = output_dir.resolve()
-    render_core_dir = source_root / "src" / "render_core"
-    if output_dir.is_relative_to(render_core_dir):
-        raise RuntimeError(
-            "--output-dir must not be inside src/render_core; generated archives "
-            "must not become source-archive inputs"
-        )
     version = package_version(source_root)
     root_name = f"{ARCHIVE_PREFIX}-{version}"
     output_dir.mkdir(parents=True, exist_ok=True)
     archive_path = output_dir / f"{root_name}.tar.gz"
     checksum_path = archive_path.with_suffix(archive_path.suffix + ".sha256")
-    root_cmake = standalone_entry_file(
-        source_root,
-        source_root / "cmake" / "render_core_standalone_root.cmake",
-        source_root / "CMakeLists.txt",
-    )
-    presets = standalone_entry_file(
-        source_root,
-        source_root / "cmake" / "render_core_standalone_presets.json.in",
-        source_root / "CMakePresets.json",
-    )
-    standalone_readme = standalone_entry_file(
-        source_root,
-        source_root / "src" / "render_core" / "STANDALONE_README.md",
-        source_root / "README.md",
-    )
-
-    archive_entries = {
-        f"{root_name}/CMakeLists.txt": archive_content(root_cmake),
-        f"{root_name}/CMakePresets.json": archive_content(presets),
-        f"{root_name}/README.md": archive_content(standalone_readme),
-    }
+    archive_entries: dict[str, bytes] = {}
     for path in source_files(source_root):
         archive_entries[archive_member(root_name, source_root, path)] = archive_content(path)
 

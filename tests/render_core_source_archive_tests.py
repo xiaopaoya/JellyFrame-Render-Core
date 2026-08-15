@@ -79,13 +79,9 @@ def rewrite_text_as_crlf(path: Path) -> None:
 
 
 def packager_path(source_root: Path) -> Path:
-    for relative in (
-        Path("project_tools") / "package_render_core_source.py",
-        Path("tools") / "package_render_core_source.py",
-    ):
-        candidate = source_root / relative
-        if candidate.is_file():
-            return candidate
+    candidate = source_root / "tools" / "package_render_core_source.py"
+    if candidate.is_file():
+        return candidate
     raise RuntimeError(f"Render Core source packager is missing under: {source_root}")
 
 
@@ -119,31 +115,15 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
             crlf_output = root / "crlf"
 
             crlf_source.mkdir()
-            copy2(self.source_root / "LICENSE", crlf_source / "LICENSE")
-            copytree(self.source_root / "cmake", crlf_source / "cmake")
-            copytree(self.source_root / "src" / "render_core", crlf_source / "src" / "render_core")
-            entry_paths = [
-                packager.standalone_entry_file(
-                    self.source_root,
-                    self.source_root / "cmake" / "render_core_standalone_root.cmake",
-                    self.source_root / "CMakeLists.txt",
-                ),
-                packager.standalone_entry_file(
-                    self.source_root,
-                    self.source_root / "cmake" / "render_core_standalone_presets.json.in",
-                    self.source_root / "CMakePresets.json",
-                ),
-                packager.standalone_entry_file(
-                    self.source_root,
-                    self.source_root / "src" / "render_core" / "STANDALONE_README.md",
-                    self.source_root / "README.md",
-                ),
-            ]
             staged_entry_paths = []
-            for source_path in entry_paths:
-                staged_path = crlf_source / source_path.relative_to(self.source_root)
-                staged_path.parent.mkdir(parents=True, exist_ok=True)
-                copy2(source_path, staged_path)
+            for relative in packager.ARCHIVE_INPUTS:
+                source_path = self.source_root / relative
+                staged_path = crlf_source / relative
+                if source_path.is_dir():
+                    copytree(source_path, staged_path)
+                else:
+                    staged_path.parent.mkdir(parents=True, exist_ok=True)
+                    copy2(source_path, staged_path)
                 staged_entry_paths.append(staged_path)
             text_paths = [
                 crlf_source / "LICENSE",
@@ -172,7 +152,7 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
             checkout_output = root / "checkout-output"
             run(["git", "clone", "--no-local", "--no-hardlinks", str(self.source_root), str(checkout)],
                 cwd=self.source_root)
-            sentinel = checkout / "src" / "render_core" / "untracked_archive_sentinel.txt"
+            sentinel = checkout / "src" / "untracked_archive_sentinel.txt"
             sentinel.write_text("must not enter an archive\n", encoding="utf-8")
 
             run([sys.executable, str(packager), "--source-root", str(self.source_root),
@@ -184,7 +164,7 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
             self.assertEqual(canonical_archive.read_bytes(), checkout_archive.read_bytes())
             with tarfile.open(checkout_archive, "r:gz") as archive:
                 self.assertNotIn(
-                    f"{checkout_archive.name.removesuffix('.tar.gz')}/src/render_core/"
+                    f"{checkout_archive.name.removesuffix('.tar.gz')}/src/"
                     "untracked_archive_sentinel.txt",
                     archive.getnames(),
                 )
@@ -221,7 +201,9 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
                 self.assertIn(f"{root_name}/README.md", members)
                 self.assertIn(f"{root_name}/cmake/render_core_build.cmake", members)
                 self.assertIn(f"{root_name}/cmake/render_core_feature_registry.csv", members)
-                self.assertIn(f"{root_name}/src/render_core/tests/render_core_tests.cpp", members)
+                self.assertIn(f"{root_name}/include/render_core/html_parser.h", members)
+                self.assertIn(f"{root_name}/src/html_parser.cpp", members)
+                self.assertIn(f"{root_name}/tests/unit/render_core_tests.cpp", members)
                 # Python 3.14 changes the default extraction filter. The
                 # archive was produced by this test, but selecting the data
                 # filter now keeps the test warning-free and preserves the

@@ -25,18 +25,13 @@ It owns:
 It must not depend on JerryScript, app installation, registries, networking,
 filesystems, OS APIs, RTOS APIs or vendor display/input libraries.
 
-The target name is `jellyframe_render_core`. The top-level build can configure
-this target without the upper layers:
+The target name is `jellyframe_render_core`. This repository configures it
+without upper-layer dependencies:
 
 ```powershell
-cmake -S . -B build\render-core-standalone `
-  -DJELLYFRAME_BUILD_APP_RUNTIME=OFF `
-  -DJELLYFRAME_BUILD_SCRIPTING=OFF `
-  -DJELLYFRAME_BUILD_EXAMPLES=OFF `
-  -DJELLYFRAME_BUILD_BENCHMARKS=OFF `
-  -DJELLYFRAME_BUILD_SAMPLE_REGRESSION_TESTS=OFF
-cmake --build build\render-core-standalone --config Release --target jellyframe_render_core_tests
-ctest --test-dir build\render-core-standalone -C Release --output-on-failure
+cmake -S . -B build\release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build\release --parallel
+ctest --test-dir build\release --output-on-failure
 ```
 
 For a downstream CMake consumer, set `JELLYFRAME_INSTALL_RENDER_CORE=ON` and
@@ -57,7 +52,7 @@ To validate the actual extraction boundary rather than the monorepo-only
 configuration, maintainers can create a standalone source archive:
 
 ```powershell
-python project_tools\package_render_core_source.py --output-dir build\dist
+python tools\package_render_core_source.py --output-dir build\dist
 tar -xzf build\dist\jellyframe-render-core-0.6.0.tar.gz -C build\unpacked
 cmake -S build\unpacked\jellyframe-render-core-0.6.0 -B build\core-from-archive
 cmake --build build\core-from-archive --config Release --parallel
@@ -65,14 +60,16 @@ ctest --test-dir build\core-from-archive -C Release --output-on-failure
 ```
 
 The archive has a deterministic member order and metadata, plus a SHA-256
-sidecar. CI independently unpacks, builds, tests and installs it before the
-Runtime package-provider check. It is a source-distribution gate, not a signed
-release or a promise that ordinary `.jfapp` packages can load native modules.
+sidecar. Core CI independently unpacks, builds, tests and installs it; the
+Runtime repository separately verifies package-consumer integration. It is a
+source-distribution gate, not a signed release or a promise that ordinary
+`.jfapp` packages can load native modules.
 
 ## Source layout
 
-The directory is intentionally a flat C++ module today. The files are split by
-pipeline responsibility rather than by HTML tag or CSS property:
+`include/render_core/` contains the supported installed headers and `src/`
+contains the matching implementation units. Files are split by pipeline
+responsibility rather than by HTML tag or CSS property:
 
 | Area | Files | Responsibility |
 |---|---|---|
@@ -85,9 +82,9 @@ pipeline responsibility rather than by HTML tag or CSS property:
 | Text/resources | `text_*.*`, `bitmap_font*.*` | Text backend contracts, scanning, bitmap fonts and `.jffont` data |
 | Contracts/telemetry | `host.h`, `budget.h`, `diagnostics.h`, `geometry.h`, `pipeline_statistics.*`, `arena.*` | Host boundary, budgets, diagnostics and bounded storage |
 
-The flat layout is not a claim that all code belongs in one inseparable binary.
-It reflects the current include graph and keeps the 0.5 public headers stable
-while the pipeline is still being validated. In particular, `style.cpp`,
+This layout is not a claim that all code belongs in one inseparable binary. It
+reflects the current include graph and keeps the public headers stable while the
+pipeline is still being validated. In particular, `style.cpp`,
 `layout.cpp`, `layer_tree.cpp`, `software_renderer.cpp` and `css_parser.cpp`
 are currently large cross-cutting units; moving them into arbitrary folders
 would not by itself reduce firmware size or runtime cost.
@@ -99,9 +96,8 @@ the first optional slices are `graphics.canvas2d`, `css.modern-paint`,
 layout, paint and input files, but it must have an explicit registration point,
 dependency list, budget and profile gate. The generated profile records source
 ownership for both mandatory families and every separately compiled optional
-family; the profile regression rejects gaps or overlaps in the mandatory split. See
-`project_docs/render_pipeline_modularity_plan_zh.md` for the build-profile and
-manifest contract. Ordinary App packages remain data/code at the declared
+family; the profile regression rejects gaps or overlaps in the mandatory split.
+Ordinary App packages remain data/code at the declared
 runtime level; they do not load native Render Core modules.
 
 The feature catalog is declared in `cmake/render_core_feature_registry.csv`.
@@ -145,8 +141,9 @@ storage and dirty-region inputs, not a complete structural display-list diff. St
 still uses the conservative rebuild/full-frame fallback. The default compositor also still owns a
 logical framebuffer; compact dirty-rect/strip output is provided by the embedded adapter. Candidate
 fingerprinting and a no-full-framebuffer tile/scanline target are deferred, opt-in 0.6 work with
-separate memory, pixel and frame-time gates. See `docs/retained_rendering_scope.md` and
-`docs/retained_rendering_scope_zh.md`.
+separate memory, pixel and frame-time gates. See
+`docs/reference/render_core/retained_rendering_scope.md` and its Chinese
+counterpart.
 
 `JELLYFRAME_ENABLE_ADVANCED_FORMS` is ON by default. It owns local constraint
 validation, custom validity, bounded `FormData`, `SubmitEvent`, `requestSubmit`
@@ -196,28 +193,12 @@ fully opaque row count, opaque-span count and coverage-sampled row count. These
 plain counters do not read a clock and distinguish copy-friendly output from
 alpha-fragmented or corner-coverage work before further composite tuning.
 
-Desktop validation builds also emit `jellyframe_render_core_microbench.map` and
-`jellyframe_render_core_tests.map`. Check a map against its generated profile
-with:
-
-```powershell
-python project_tools\check_render_core_link_map.py `
-  --profile build\module-on\generated\jellyframe_render_core_profile.json `
-  --map build\module-on\jellyframe_render_core_microbench.map
-```
-
-CTest also checks the generated `jellyframe_render_core_tests` map against the
-active profile through CMake target metadata, so a default CI build cannot
-silently advertise a separately compiled family that its validation executable
-failed to link. A scoped map check is still needed for an embedded workload that
-intentionally does not exercise every enabled family.
-
-The Render Core microbench reports both legacy `avg_us` smoke metrics and
+The Render Core microbench sources are platform-neutral attribution probes; a
+host harness may build them beside an integration workload. They report legacy
+`avg_us` smoke metrics and
 `modern_paint_*_stats` lines with p50/p95 latency, display-command count and
 the measured wearable surface byte count. These are desktop attribution
 signals, not MCU frame-rate or flash/RAM claims; those remain port evidence.
-The link-map checker can prove separately linked Canvas and modern-paint
-objects. Flex/grid is compile-gated inside shared parser/style/layout/layer
-units, so its checker entry deliberately reports `not-applicable` rather than
-pretending that a shared object marker proves the feature. Use the generated
+Flex/grid is compile-gated inside shared parser/style/layout/layer units, so
+object-file presence cannot prove that feature independently. Use the generated
 profile regression plus a real ON/OFF behavior workload for that family.
