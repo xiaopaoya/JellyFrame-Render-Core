@@ -12,7 +12,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
-from shutil import copy2, copytree
+from shutil import copy2
 from pathlib import Path
 
 
@@ -116,14 +116,10 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
 
             crlf_source.mkdir()
             staged_entry_paths = []
-            for relative in packager.ARCHIVE_INPUTS:
-                source_path = self.source_root / relative
-                staged_path = crlf_source / relative
-                if source_path.is_dir():
-                    copytree(source_path, staged_path)
-                else:
-                    staged_path.parent.mkdir(parents=True, exist_ok=True)
-                    copy2(source_path, staged_path)
+            for source_path in packager.source_files(self.source_root):
+                staged_path = crlf_source / source_path.relative_to(self.source_root)
+                staged_path.parent.mkdir(parents=True, exist_ok=True)
+                copy2(source_path, staged_path)
                 staged_entry_paths.append(staged_path)
             text_paths = [
                 crlf_source / "LICENSE",

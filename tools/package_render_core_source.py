@@ -32,6 +32,7 @@ TEXT_ARCHIVE_SUFFIXES = frozenset(
         ".in",
         ".json",
         ".md",
+        ".ps1",
         ".py",
         ".txt",
     }
