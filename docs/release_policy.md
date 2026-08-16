@@ -39,6 +39,13 @@ bytes and checksum. When run from a Git checkout, the packer admits only
 tracked Core inputs, so untracked editor or build artifacts cannot enter a
 candidate archive. A signed release is still created from the reviewed tag.
 
+The repository-local operational procedure is
+[`tools/README.md`](../tools/README.md). Its scripts generate a local,
+passphrase-protected signing key through GnuPG, configure only this checkout,
+verify the signed tag and create the deterministic archive. They do not store a
+passphrase, private key or revocation certificate in the checkout, and they do
+not push by default.
+
 ## Versions And Compatibility
 
 - Render Core begins independent publication at `0.6.0`, with Core ABI `1`.

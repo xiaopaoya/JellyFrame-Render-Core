@@ -29,6 +29,10 @@ Runtime 在带签名的 Core artifact 发布并通过显式 dependency-lock 更�
 
 tag 签名建立发布权威；source manifest/checksum 建立 artifact identity，两者不可互相替代。现有确定性 archive 是该发布单元的前身。归档会先将声明为文本的成员规范为 LF，再打包；不透明二进制成员保持原始字节，因此等价的 CRLF/LF checkout 会生成相同的 archive 字节和 checksum。在 Git checkout 中运行时，打包器只接纳已跟踪的 Core 输入，未跟踪的编辑器或构建产物不会进入候选 archive；带签名 release 仍必须从已评审 tag 生成。
 
+仓库内的操作流程见 [`tools/README.md`](../tools/README.md)。脚本通过 GnuPG 生成本地、受
+passphrase 保护的 signing key，只配置当前 checkout，验证 signed tag 并创建确定性 archive。
+它们不会把 passphrase、private key 或 revocation certificate 写进 checkout，默认也不会 push。
+
 ## 版本与兼容性
 
 - Render Core 从独立 `0.6.0`、Core ABI `1` 开始发布。

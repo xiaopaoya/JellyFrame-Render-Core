@@ -201,6 +201,8 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
                 self.assertIn(f"{root_name}/README.md", members)
                 self.assertIn(f"{root_name}/cmake/render_core_build.cmake", members)
                 self.assertIn(f"{root_name}/cmake/render_core_feature_registry.csv", members)
+                self.assertIn(f"{root_name}/tools/initialize_release_signing.ps1", members)
+                self.assertIn(f"{root_name}/tools/prepare_signed_release.ps1", members)
                 self.assertIn(f"{root_name}/include/render_core/html_parser.h", members)
                 self.assertIn(f"{root_name}/src/html_parser.cpp", members)
                 self.assertIn(f"{root_name}/tests/unit/render_core_tests.cpp", members)

@@ -49,7 +49,7 @@ ARCHIVE_INPUTS = (
     "docs",
     "benchmarks",
     "samples",
-    "tools/package_render_core_source.py",
+    "tools",
 )
 
 
