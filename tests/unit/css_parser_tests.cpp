@@ -1346,6 +1346,22 @@ void invalid_hsl_preserves_prior_fallback() {
           "invalid hsl cannot override an earlier supported color fallback");
 }
 
+void balanced_text_wrap_applies_and_respects_the_white_space_cascade() {
+    auto panel = make_element("p");
+    panel->attributes["class"] = "panel";
+    StyleResolver resolver(parse(
+        "@supports (text-wrap: balance) { .panel { text-wrap: balance; } }"
+        ".panel { white-space: nowrap; }"));
+    const Style style = resolver.resolve(*panel);
+    check(style.white_space_nowrap && !style.text_wrap_balance,
+          "white-space shares the text-wrap cascade slot and clears balance");
+
+    StyleResolver balanced_resolver(parse(".panel { text-wrap: balance; }"));
+    const Style balanced = balanced_resolver.resolve(*panel);
+    check(!balanced.white_space_nowrap && balanced.text_wrap_balance,
+          "text-wrap balance resolves as a wrapping style hint");
+}
+
 void style_candidate_cache_preserves_selector_context() {
     auto root = make_element("main");
     auto sidebar = make_element("section");
@@ -1564,6 +1580,7 @@ int main() {
         logical_properties_and_hsl_apply();
         supports_queries_accept_logical_properties_and_hsl();
         invalid_hsl_preserves_prior_fallback();
+        balanced_text_wrap_applies_and_respects_the_white_space_cascade();
         style_candidate_cache_preserves_selector_context();
         style_candidate_cache_respects_tiny_budget_and_inline_style();
         style_candidate_cache_ignores_irrelevant_identifiers();

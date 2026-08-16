@@ -1,6 +1,6 @@
 # CSSOM And Cascade Scope
 
-> Last updated: 2026-07-22; Applies to: 0.5.0
+> Last updated: 2026-08-17; Applies to: 0.6.0-dev
 
 Last checked against CSSOM and CSS Cascade references on 2026-06-13:
 
@@ -80,13 +80,15 @@ exist as fallbacks.
 ## Current UI-Oriented Computed Fields
 
 - `display`: block, inline, inline-block, flex, grid, none.
-- `margin`, `padding`, `border-width` and their physical edge longhands,
-  plus `border-color`, `border-radius`.
+- `margin`, `padding`, `border-width` and their physical edge longhands, plus
+  the documented LTR/horizontal logical aliases, `border-color`, `border-radius`.
 - `width`, `height`, `min-width`, `min-height`, `max-width`, `max-height`, including
+  their documented LTR/horizontal logical aliases and
   layout-resolved percentage values for these sizing properties.
-- `color`, `background-color`, bounded gradient/background-image layers and
+- `color`/`background-color` including `rgb()`/`rgba()` and `hsl()`/`hsla()`, bounded gradient/background-image layers and
   package-local image backgrounds.
-- `font-size`, `line-height`, `letter-spacing`, `white-space`, `text-wrap`,
+- `font-size`, `line-height`, `letter-spacing`, `white-space`, `text-wrap`
+  (`wrap`, `nowrap`, bounded `balance`),
   `overflow-wrap`, `text-overflow`, `text-align`, `text-indent` and
   ASCII-subset `text-transform`.
 - `box-sizing`, `visibility`, `overflow`, `opacity`, `position`, `z-index`,

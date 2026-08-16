@@ -366,6 +366,27 @@ void normal_text_wrap_matches_layout_line_breaks() {
           "ordinary breakable text paint lines follow the layout line height");
 }
 
+void balanced_text_wrap_matches_layout_and_paint_lines() {
+    auto pipeline = build_pipeline(
+        "<body><p id='label'>one two three four five</p></body>",
+        "p { width: 60px; margin: 0; font-size: 10px; line-height: 12px; text-wrap: balance; }");
+    const LayoutBox* label = find_layout_by_id(*pipeline.layout_tree, "label");
+    check(label != nullptr && label->style.text_wrap_balance && label->rect.height >= 36,
+          "balanced text wrap reaches layout with a matching multi-line height");
+
+    LayerTreeBuilder builder;
+    const DisplayList commands = builder.flatten(*pipeline.layer_tree);
+    std::vector<std::string> lines;
+    for (const DisplayCommand& command : commands) {
+        if (command.type == DisplayCommandType::Text && !command.text.empty()) {
+            lines.push_back(command.text);
+        }
+    }
+    check(lines.size() == 3 && lines[0] == "one two" && lines[1] == "three" &&
+              lines[2] == "four five",
+          "balanced paint uses the same selected lines as layout");
+}
+
 void scroll_container_offsets_descendant_paint() {
     HtmlParser html_parser;
     CssParser css_parser;
@@ -1547,6 +1568,7 @@ int main() {
         visibility_preserves_layout_and_suppresses_hidden_paint_and_hit_testing();
         text_spacing_and_anywhere_wrap_emit_only_declared_extra_commands();
         normal_text_wrap_matches_layout_line_breaks();
+        balanced_text_wrap_matches_layout_and_paint_lines();
         scroll_container_offsets_descendant_paint();
         scroll_container_keeps_absolute_sibling_navigation_fixed();
         scroll_indicator_is_opt_in_overlay();

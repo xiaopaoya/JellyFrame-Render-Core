@@ -111,6 +111,29 @@ void extreme_letter_spacing_uses_one_bounded_value() {
           "measurement uses the bounded positive letter spacing");
 }
 
+void balanced_wrap_keeps_the_ordinary_line_count_with_less_ragged_lines() {
+    ProbeTextBackend probe;
+    const TextMeasureProvider measure{probe_measure, &probe};
+    const std::vector<std::string> ordinary = wrap_text_at_opportunities(
+        measure, "one two three four five", 10, 400, 0, 0, 100);
+    const std::vector<std::string> balanced = wrap_text_balanced(
+        measure, "one two three four five", 10, 400, 0, 0, 100);
+    check(ordinary.size() == 3 && balanced.size() == ordinary.size(),
+          "balanced wrapping preserves the bounded ordinary line count");
+    check(balanced[0] == "one two" && balanced[1] == "three" && balanced[2] == "four five",
+          "balanced wrapping selects the lower-raggedness legal breaks");
+    for (const std::string& line : balanced) {
+        check(measure_text(measure, line, 10, 400).width <= 100,
+              "balanced wrapping never exceeds the ordinary width limit");
+    }
+
+    const std::string long_text = "one two three four five six seven eight nine ten eleven twelve "
+                                  "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty";
+    check(wrap_text_balanced(measure, long_text, 10, 400, 0, 0, 100) ==
+              wrap_text_at_opportunities(measure, long_text, 10, 400, 0, 0, 100),
+          "long text exceeds the balance budget and uses ordinary wrapping");
+}
+
 } // namespace
 
 int main() {
@@ -119,6 +142,7 @@ int main() {
         incomplete_adapter_degrades_to_core_fallbacks();
         letter_spacing_and_utf8_anywhere_wrap_share_scalar_boundaries();
         extreme_letter_spacing_uses_one_bounded_value();
+        balanced_wrap_keeps_the_ordinary_line_count_with_less_ragged_lines();
     } catch (const std::exception& error) {
         std::cerr << "text adapter test failed: " << error.what() << '\n';
         return 1;

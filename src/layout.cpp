@@ -933,6 +933,14 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
                                      box.style.font_family_hash,
                                      box.style.letter_spacing,
                                      usable_text_width)
+                : box.style.text_wrap_balance
+                ? wrap_text_balanced(text_measure_,
+                                     text,
+                                     box.style.font_size,
+                                     box.style.font_weight,
+                                     box.style.font_family_hash,
+                                     box.style.letter_spacing,
+                                     usable_text_width)
                 : wrap_text_at_opportunities(text_measure_,
                                              text,
                                              box.style.font_size,

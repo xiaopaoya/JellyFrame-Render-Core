@@ -972,7 +972,7 @@ bool is_supported_declaration_feature(std::string_view feature) {
         return supported_keyword(value, {"normal", "nowrap"});
     }
     if (property == "text-wrap") {
-        return supported_keyword(value, {"wrap", "nowrap"});
+        return supported_keyword(value, {"wrap", "nowrap", "balance"});
     }
     if (property == "text-overflow") {
         return supported_keyword(value, {"clip", "ellipsis"});

@@ -48,6 +48,7 @@ Style inherit_text_style(Style style, const Style& parent_style) {
     }
     if (!style.white_space_specified) {
         style.white_space_nowrap = parent_style.white_space_nowrap;
+        style.text_wrap_balance = parent_style.text_wrap_balance;
     }
     // text-overflow is not generally inherited. The render tree represents a
     // direct text run as its own node, so carry the owning inline container's

@@ -387,6 +387,7 @@ void push_text_with_layout(DisplayList& display_list,
     const bool wrap_anywhere = style.overflow_wrap_anywhere && !style.white_space_nowrap;
     const bool wrap_at_opportunities = !wrap_anywhere && !style.white_space_nowrap &&
         has_text_wrap_opportunity(rendered_text);
+    const bool wrap_balanced = style.text_wrap_balance && wrap_at_opportunities;
     const bool split_scalars = style.letter_spacing != 0;
     if (!wrap_anywhere && !wrap_at_opportunities && !split_scalars) {
         push_text(display_list, rect, color, rendered_text, style.font_size, style.font_weight,
@@ -396,6 +397,14 @@ void push_text_with_layout(DisplayList& display_list,
 
     const std::vector<std::string> lines = wrap_anywhere
         ? wrap_text_anywhere(text_measure,
+                             rendered_text,
+                             style.font_size,
+                             style.font_weight,
+                             style.font_family_hash,
+                             style.letter_spacing,
+                             rect.width)
+        : wrap_balanced
+        ? wrap_text_balanced(text_measure,
                              rendered_text,
                              style.font_size,
                              style.font_weight,

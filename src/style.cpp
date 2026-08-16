@@ -3735,14 +3735,22 @@ bool apply_declaration(Style& style,
         return true;
     } else if (property == "white-space" || property == "text-wrap") {
         const std::string lowered = lowercase(trim(value));
+        if (property == "text-wrap" && lowered == "balance") {
+            style.white_space_nowrap = false;
+            style.text_wrap_balance = true;
+            style.white_space_specified = true;
+            return true;
+        }
         if ((property == "white-space" && lowered == "normal") ||
             (property == "text-wrap" && lowered == "wrap")) {
             style.white_space_nowrap = false;
+            style.text_wrap_balance = false;
             style.white_space_specified = true;
             return true;
         }
         if (lowered == "nowrap") {
             style.white_space_nowrap = true;
+            style.text_wrap_balance = false;
             style.white_space_specified = true;
             return true;
         }

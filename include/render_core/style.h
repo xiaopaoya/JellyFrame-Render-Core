@@ -316,6 +316,9 @@ struct Style {
     bool overflow_wrap_anywhere = false;
     bool overflow_wrap_specified = false;
     bool white_space_nowrap = false;
+    // Bounded text-wrap: balance hint. It is meaningful only while wrapping
+    // remains enabled and uses the same inherited cascade slot as text-wrap.
+    bool text_wrap_balance = false;
     bool white_space_specified = false;
     bool text_overflow_ellipsis = false;
     bool text_overflow_specified = false;

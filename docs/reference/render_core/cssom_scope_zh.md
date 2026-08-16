@@ -1,6 +1,6 @@
 # CSSOM 与 Cascade 裁剪范围
 
-> 最后更新：2026-07-07；适用版本：0.5.0
+> 最后更新：2026-08-17；适用版本：0.6.0-dev
 
 最后对照 CSSOM 和 CSS Cascade 相关资料的时间：2026-06-13。
 
@@ -75,12 +75,14 @@ CssStyleSheet
 ## 当前面向 UI 的 computed fields
 
 - `display`：block、inline、inline-block、flex、grid、none。
-- `margin`、`padding`、`border-width` 及其物理单边 longhands，
-  以及 `border-color`、`border-radius`。
-- `width`、`height`、`min-width`、`min-height`、`max-width`、`max-height`，包括这些 sizing
+- `margin`、`padding`、`border-width` 及其物理单边 longhands，以及文档化的 LTR/horizontal
+  逻辑属性映射、`border-color`、`border-radius`。
+- `width`、`height`、`min-width`、`min-height`、`max-width`、`max-height` 及其文档化的
+  LTR/horizontal 逻辑属性映射，包括这些 sizing
   属性在 layout 阶段解析的百分比值。
-- `color`、`background-color`。
-- `font-size`、`line-height`、`text-align`、`text-indent`、ASCII 子集
+- `color`、`background-color`，包括 `rgb()`/`rgba()` 与 `hsl()`/`hsla()`。
+- `font-size`、`line-height`、`letter-spacing`、`white-space`、`text-wrap`（`wrap`、`nowrap`、
+  有界 `balance`）、`overflow-wrap`、`text-align`、`text-indent`、ASCII 子集
   `text-transform`。
 - `box-sizing`、`overflow`、`opacity`、`position`、`z-index`、`transform`。
 - 面向嵌入式应用的 layout 字段：`aspect-ratio`、`gap`、`column-gap`、

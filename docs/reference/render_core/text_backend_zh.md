@@ -1,6 +1,6 @@
 # 文本后端
 
-> 最后更新：2026-07-07；适用版本：0.5.0
+> 最后更新：2026-08-17；适用版本：0.6.0-dev
 
 
 JellyFrame 不把字体加载和平台文本 API 放进 `jellyframe_render_core`。核心只需要两类服务：
@@ -61,9 +61,11 @@ LayerTreeBuilder layers(layer_options);
 SoftwareCompositor compositor(text_painter_from_adapter(adapter));
 ```
 
-App 使用文档化的 `letter-spacing` 或 `overflow-wrap: anywhere` 子集时，必须把同一个 measure
+App 使用文档化的 `letter-spacing`、`overflow-wrap: anywhere` 或 `text-wrap: balance` 子集时，必须把同一个 measure
 provider 传给 `LayerTreeBuilderOptions::text_measure`。builder 会据此按 layout 使用的同一 advance
 发出 scalar 定位命令。普通文本继续走原有单条 command 路径，构建 layer 时不会查询该 provider。
+
+`text-wrap: balance` 最多计算 16 个断行单元，并保持普通换行得到的二至四行行数。显式换行、较长文本或普通换行超过四行时使用普通换行。它是有界的视觉改善，不是浏览器级断词或多语言断行实现。
 
 这个 helper 只是为了让板级 port 的接入形态一致，不会把字体发现、shaping 或 cache 放进核心。
 

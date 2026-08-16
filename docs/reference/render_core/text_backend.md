@@ -1,6 +1,6 @@
 # Text Backend
 
-> Last updated: 2026-07-07; Applies to: 0.5.0
+> Last updated: 2026-08-17; Applies to: 0.6.0-dev
 
 
 JellyFrame keeps font loading and platform text APIs outside `jellyframe_render_core`.
@@ -68,11 +68,17 @@ LayerTreeBuilder layers(layer_options);
 SoftwareCompositor compositor(text_painter_from_adapter(adapter));
 ```
 
-When an app uses the documented `letter-spacing` or `overflow-wrap: anywhere`
-subset, pass the same measure provider to `LayerTreeBuilderOptions::text_measure`.
+When an app uses the documented `letter-spacing`, `overflow-wrap: anywhere` or
+`text-wrap: balance` subset, pass the same measure provider to
+`LayerTreeBuilderOptions::text_measure`.
 The builder then emits scalar-positioned commands using exactly the advances
 used by layout. Ordinary text keeps the old single-command path and does not
 consult this provider during layer construction.
+
+`text-wrap: balance` evaluates no more than 16 break units and preserves the
+ordinary wrapper's two-to-four line count. Explicit line breaks, longer text or
+more than four ordinary lines use ordinary wrapping. It is a bounded visual
+improvement, not browser-grade hyphenation or multilingual line breaking.
 
 This helper exists to keep board ports consistent. It does not add font
 discovery, shaping or caching to the core.

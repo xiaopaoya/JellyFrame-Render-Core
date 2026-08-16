@@ -1,6 +1,6 @@
 # CSS Parser Scope
 
-> Last updated: 2026-07-22; Applies to: 0.5.0
+> Last updated: 2026-08-17; Applies to: 0.6.0-dev
 
 Last checked against CSS Syntax Module Level 3, Media Queries and browser
 parser source layout on 2026-06-16:
@@ -81,6 +81,8 @@ layout behavior.
   physical `margin-*`/`padding-*`/`border-*-width` longhands,
   `outline`, `text-shadow`, `text-decoration`, `text-transform`, `letter-spacing`,
   `white-space: normal`/`nowrap`, their `text-wrap: wrap`/`nowrap` aliases,
+  and a bounded `text-wrap: balance` approximation for short, naturally
+  breakable text,
   inherited `visibility: visible`/`hidden` (layout stays in flow while hidden
   paint and hit targets are suppressed),
   `overflow-wrap: anywhere`, `aspect-ratio`, `gap`, `column-gap`, `row-gap`, `flex`,
@@ -128,6 +130,10 @@ layout behavior.
 - Complete `object-position` four-value syntax and length offsets.
 - Container query evaluation. This is intentionally deferred until layout/style
   feedback can be bounded without cycles.
+- Browser-grade unbounded text balancing, hyphenation dictionaries, shaping-aware
+  line breaking and language-specific typography. `text-wrap: balance` keeps
+  ordinary wrapping for explicit line breaks, more than 16 break units or more
+  than four ordinary lines.
 
 ## Current Parser Limits
 
