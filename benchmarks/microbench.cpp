@@ -901,7 +901,8 @@ int run_render_core_microbench(int argc, char** argv) {
 
     auto typography_document = html_parser.parse(
         "<body><p class='spaced'>TelemetryStatusLabelWithoutSpaces</p>"
-        "<p class='wrapped'>ABCDEFGHIJKLMNOPQRSTUVWXYZ</p></body>");
+        "<p class='wrapped'>ABCDEFGHIJKLMNOPQRSTUVWXYZ</p>"
+        "<p class='balanced'>System status remains stable after reconnect</p></body>");
     auto plain_typography_document = html_parser.parse(
         "<body><p>TelemetryStatusLabelWithoutSpaces</p><p>ABCDEFGHIJKLMNOPQRSTUVWXYZ</p></body>");
     StyleResolver plain_typography_resolver(css_parser.parse(
@@ -924,7 +925,8 @@ int run_render_core_microbench(int argc, char** argv) {
     StyleResolver typography_resolver(css_parser.parse(
         "p { margin: 0; width: 96px; font-size: 12px; line-height: 14px; }"
         ".spaced { letter-spacing: 1px; }"
-        ".wrapped { overflow-wrap: anywhere; }"));
+        ".wrapped { overflow-wrap: anywhere; }"
+        ".balanced { text-wrap: balance; }"));
     RenderTreeBuilder typography_builder(typography_resolver);
     auto typography_render_tree = typography_builder.build(*typography_document);
     LayoutEngine typography_layout_engine(typography_resolver, fixed_text_measure());
@@ -937,6 +939,14 @@ int run_render_core_microbench(int argc, char** argv) {
     }));
     auto typography_layout_tree = typography_layout_engine.layout(*typography_render_tree, 172, 320);
     print_result("text_spacing_anywhere_layer", iterations, average_microseconds(iterations, [&] {
+        auto typography_layer_tree = typography_layer_builder.build(*typography_layout_tree);
+        (void)typography_layer_tree;
+    }));
+    print_result("text_balance_layout", iterations, average_microseconds(iterations, [&] {
+        auto typography_layout_tree = typography_layout_engine.layout(*typography_render_tree, 172, 320);
+        (void)typography_layout_tree;
+    }));
+    print_result("text_balance_layer", iterations, average_microseconds(iterations, [&] {
         auto typography_layer_tree = typography_layer_builder.build(*typography_layout_tree);
         (void)typography_layer_tree;
     }));

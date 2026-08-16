@@ -245,6 +245,16 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
                 cwd=archive_source)
             run(["ctest", "--test-dir", str(core_build), "-C", "Release", "--output-on-failure"],
                 cwd=self.source_root)
+
+            run([str(self.cmake), "--preset", "benchmarks"], cwd=archive_source)
+            run([str(self.cmake), "--build", "--preset", "benchmarks", "--parallel"],
+                cwd=archive_source)
+            benchmark_executable = archive_source / "build" / "benchmarks" / (
+                "jellyframe_render_core_microbench.exe" if sys.platform.startswith("win")
+                else "jellyframe_render_core_microbench"
+            )
+            run([str(benchmark_executable), "1"], cwd=archive_source)
+
             run([str(self.cmake), "--install", str(core_build), "--config", "Release",
                  "--prefix", str(install_dir)],
                 cwd=self.source_root)

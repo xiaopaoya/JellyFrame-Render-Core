@@ -18,6 +18,9 @@ cmake --build --preset default
 
 cmake --preset minimal
 cmake --build --preset minimal
+
+cmake --preset benchmarks
+cmake --build --preset benchmarks
 ```
 
 The following explicit commands remain compatible with the minimum required
@@ -34,7 +37,10 @@ The install exports `JellyFrame::jellyframe_render_core`, public headers, a
 feature profile and a deterministic source manifest. Optional build families
 are selected with `JELLYFRAME_ENABLE_CANVAS2D`,
 `JELLYFRAME_ENABLE_MODERN_PAINT`, `JELLYFRAME_ENABLE_FLEX_GRID` and
-`JELLYFRAME_ENABLE_ADVANCED_FORMS`.
+`JELLYFRAME_ENABLE_ADVANCED_FORMS`. The optional
+`JELLYFRAME_BUILD_BENCHMARKS` target builds the platform-neutral
+`jellyframe_render_core_microbench` executable; it is off by default and has
+no effect on the library profile.
 
 ## C++ Integration Surface
 

@@ -6,7 +6,13 @@ Microbenchmarks in this directory measure the platform-neutral render pipeline:
 HTML parsing, CSS parsing, style resolution, render tree, layout, layer tree,
 display-list flattening and software rendering.
 
-Executable: `jellyframe_render_core_microbench`.
+Executable: `jellyframe_render_core_microbench`. It is intentionally opt-in:
+
+```powershell
+cmake --preset benchmarks
+cmake --build --preset benchmarks
+.\build\benchmarks\jellyframe_render_core_microbench.exe 200
+```
 
 Retained repaint probes:
 
@@ -29,6 +35,11 @@ Retained repaint probes:
 - `style_resolve` measures the equivalent batched resolver path for a normal
   page with no custom properties. It guards the invariant that an unused
   custom-property feature does not allocate per-node cache entries.
+- `text_balance_layout` and `text_balance_layer` measure the bounded
+  `text-wrap: balance` path beside the existing letter-spacing and
+  `overflow-wrap: anywhere` fixture. The text deliberately remains within the
+  documented short, naturally wrapped range; this is a layout/display-list
+  cost probe, not a device frame-rate claim.
 - Radial gradients and rounded shadows share the same integer-only 13/32
   diagonal distance approximation. It avoids per-pixel square roots while
   keeping circular highlights and shadow contours visually close at axis and
