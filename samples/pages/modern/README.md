@@ -1,7 +1,18 @@
 # Modern Cases
 
-> Last updated: 2026-07-07; Applies to: 0.5.0
+> Last updated: 2026-08-17; Applies to: 0.6.0-dev
 
-Modern HTML/CSS compatibility samples. These pages intentionally use features
-that JellyFrame may support, degrade or ignore so the degradation policy can be
-reviewed visually.
+These are standalone HTML/CSS review fixtures, not complete `.jfapp` packages.
+They are intentionally split between ordinary supported patterns and explicit
+degradation probes, so a visual reviewer can distinguish an engine regression
+from a browser-only expectation.
+
+| Fixture | Primary review purpose | Intentional non-default syntax |
+| --- | --- | --- |
+| `article_cards.*` | Parser recovery, common cards and bounded text layout | Optional HTML end tags, `picture`/`source`, `:where()` and a media query are degradation probes. |
+| `app_shell.*` | Custom element boxes, popover/dialog markup and basic cards | `@container` and `:is()` are deferred-selector/query probes. |
+| `search_home.*` | Compact search-style layout | See the fixture source for its documented CSS subset. |
+
+Use the Core scope references, rather than browser rendering, as the expected
+behavior for every marked probe. New capability fixtures must state their
+expected fallback in this file and add a focused automated regression.
