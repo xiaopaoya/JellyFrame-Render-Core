@@ -71,9 +71,26 @@ if ([string]::IsNullOrWhiteSpace($fingerprint)) {
 
 $publicKeyPath = Join-Path $resolvedHome 'jellyframe-release-signing-public-key.asc'
 & $GpgExecutable --homedir $resolvedHome --armor --export $fingerprint |
-    Set-Content -LiteralPath $publicKeyPath -Encoding ascii -NoNewline
+    Set-Content -LiteralPath $publicKeyPath -Encoding ascii
 if ($LASTEXITCODE -ne 0) {
     throw "GnuPG public-key export failed with exit code $LASTEXITCODE."
+}
+
+# PowerShell receives GnuPG armor as individual output lines. Keeping their
+# terminators is required for the base64 payload and checksum to remain valid.
+$exportedKey = & $GpgExecutable --with-colons --import-options show-only --import $publicKeyPath 2>$null
+if ($LASTEXITCODE -ne 0) {
+    throw 'GnuPG rejected the exported armored public key.'
+}
+$exportedFingerprint = $null
+foreach ($line in $exportedKey) {
+    if ($line.StartsWith('fpr:')) {
+        $exportedFingerprint = $line.Split(':')[9]
+        break
+    }
+}
+if ($exportedFingerprint -ne $fingerprint) {
+    throw 'The exported armored public key does not match the newly created signing key.'
 }
 
 & git -C $repositoryRoot config --local gpg.program $GpgExecutable
