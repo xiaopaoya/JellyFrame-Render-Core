@@ -18,11 +18,20 @@ $ErrorActionPreference = 'Stop'
 function Get-SecretFingerprint {
     param(
         [Parameter(Mandatory = $true)][string]$Executable,
-        [Parameter(Mandatory = $true)][string]$Home,
+        [Parameter(Mandatory = $true)][string]$GpgHome,
         [Parameter(Mandatory = $true)][string]$Selector
     )
 
-    $lines = & $Executable --homedir $Home --with-colons --list-secret-keys $Selector 2>$null
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $lines = & $Executable --homedir $GpgHome --with-colons --list-secret-keys $Selector 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            return $null
+        }
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     foreach ($line in $lines) {
         if ($line.StartsWith('fpr:')) {
             return $line.Split(':')[9]
@@ -43,7 +52,7 @@ if (-not $resolvedHome.StartsWith($localAppDataRoot, [System.StringComparison]::
 }
 
 New-Item -ItemType Directory -Force -Path $resolvedHome | Out-Null
-$existingFingerprint = Get-SecretFingerprint -Executable $GpgExecutable -Home $resolvedHome -Selector $Identity
+$existingFingerprint = Get-SecretFingerprint -Executable $GpgExecutable -GpgHome $resolvedHome -Selector $Identity
 if ($null -ne $existingFingerprint) {
     throw "A signing key already exists for this identity: $existingFingerprint. Refusing to create a second key."
 }
@@ -55,7 +64,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "GnuPG key generation failed with exit code $LASTEXITCODE."
 }
 
-$fingerprint = Get-SecretFingerprint -Executable $GpgExecutable -Home $resolvedHome -Selector $Identity
+$fingerprint = Get-SecretFingerprint -Executable $GpgExecutable -GpgHome $resolvedHome -Selector $Identity
 if ([string]::IsNullOrWhiteSpace($fingerprint)) {
     throw 'GnuPG completed without exposing a local secret-key fingerprint.'
 }
