@@ -16,9 +16,11 @@ build/install CI、确定性源码归档，并完成以下低成本作者能力�
 - 文字 `letter-spacing`、scalar-safe `overflow-wrap: anywhere`、ellipsis，及短文本
   自然换行的有界 `text-wrap: balance`。
 
-`text-wrap: balance` 已在 `0fa5c41` 实现，并通过独立 CI 验证。只有带签名的 Core
-release 被 Runtime dependency lock 消费后，它才成为正式能力；旧 Runtime 默认构建
-不得提前宣称支持。
+`text-wrap: balance` 已在 `0fa5c41` 实现。其 unit、standalone、benchmark 和三 target
+desktop candidate evidence 见
+[`validation/text_wrap_balance_candidate_20260817_zh.md`](validation/text_wrap_balance_candidate_20260817_zh.md)。
+只有带签名的 Core release 被 Runtime dependency lock 消费后，它才成为正式能力；旧 Runtime
+默认构建不得提前宣称支持。
 
 ## 下一发布门槛
 

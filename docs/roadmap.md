@@ -18,10 +18,12 @@ completed low-cost authoring subset:
 - Text letter spacing, scalar-safe `overflow-wrap: anywhere`, ellipsis and
   bounded `text-wrap: balance` for short natural text.
 
-`text-wrap: balance` is implemented in `0fa5c41` and independently verified
-by standalone CI. It remains a candidate capability until the signed Core
-release is consumed by a locked Runtime dependency; it must not be advertised
-by an older Runtime default build.
+`text-wrap: balance` is implemented in `0fa5c41`. Its unit, standalone,
+benchmark and three-target desktop candidate evidence is recorded in
+[`validation/text_wrap_balance_candidate_20260817.md`](validation/text_wrap_balance_candidate_20260817.md).
+It remains a candidate capability until the signed Core release is consumed by
+a locked Runtime dependency; it must not be advertised by an older Runtime
+default build.
 
 ## Next Release Gate
 

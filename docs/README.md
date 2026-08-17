@@ -9,6 +9,8 @@ documentation.
   provenance rules. It does not change licensing or contributor policy.
 - [roadmap.md](roadmap.md): the active Core-only delivery queue, release gate
   and explicitly deferred work.
+- [validation/](validation/): versioned desktop candidate evidence that does
+  not make hardware or Runtime-default capability claims.
 - [reference/render_core/](reference/render_core/): subsystem contracts for
   parsing, style, layout, input, paint, frame scheduling and host adapters.
 
