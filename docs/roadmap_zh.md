@@ -1,14 +1,14 @@
 # Render Core 活动路线图
 
-> 最后更新：2026-08-17；适用版本：0.6.0-dev
+> 最后更新：2026-08-19；适用版本：0.6.1
 
 本文只安排 Render Core 工作，不安排 JellyFrame App Runtime、设备 port、launcher
 策略、JerryScript 或 developer image。何时采用已发布的 Core 版本由其消费者决定。
 
-## 当前候选线
+## 当前发布候选
 
-`master` 是未签名的 `0.6.0-dev` 迁移线，Core ABI 为 `1`。它已有独立的
-build/install CI、确定性源码归档，并完成以下低成本作者能力子集：
+带签名的 `v0.6.0` 已建立 Core ABI `1`。`master` 现在准备兼容的 `0.6.1`
+patch release，保留独立 build/install CI、确定性源码归档，并完成以下作者能力子集：
 
 - LTR horizontal writing mode 的逻辑尺寸、间距与 inset 映射。
 - 常用 flex/grid placement（`order`、`align-self`、`place-*`、有界 row）。
@@ -22,12 +22,15 @@ desktop candidate evidence 见
 只有带签名的 Core release 被 Runtime dependency lock 消费后，它才成为正式能力；旧 Runtime
 默认构建不得提前宣称支持。
 
-## 下一发布门槛
+本 patch 还关闭了 HTML parser 的 depth budget 缺口：`max_depth` 计入合成 `document`
+根节点，任何会超限的 child 会在进入 DOM 前被丢弃；固定 malformed-input corpus 保护该行为。
+
+## 0.6.1 发布门槛
 
 下一项 Core 工作是发布收束，而不是继续加入未经验证的 CSS 特性：
 
 1. 复核候选源码、公开头文件与生成 profile 的改动。
-2. 创建带签名的 annotated `0.6.0` tag，发布确定性源码归档及 SHA-256 sidecar。
+2. 创建带签名的 annotated `0.6.1` tag，发布确定性源码归档及 SHA-256 sidecar。
 3. 由 JellyFrame Runtime 更新精确 package/version/ABI/source lock，并运行
    installed-package 与 local-source-override 回归。
 4. Device OS 在命名板卡 profile 中记录准确的 Runtime/Core provenance，之后才可以
@@ -36,7 +39,7 @@ desktop candidate evidence 见
 在门槛完成前，宿主可用 local source override 做跨仓库开发；生产消费者不得浮动依赖
 此分支。
 
-## 0.6.0 后的候选受理
+## 0.6.1 后的候选受理
 
 每个新能力必须有作者可复现的需求和有界提案。接受后需要正/负行为测试、三个 target
 desktop capture、capability/diagnostic/recipe 更新；触及 layout 或 paint 时还需 hot-path

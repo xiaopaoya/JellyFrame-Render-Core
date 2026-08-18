@@ -1,16 +1,16 @@
 # Render Core Active Roadmap
 
-> Last updated: 2026-08-17; Applies to: 0.6.0-dev
+> Last updated: 2026-08-19; Applies to: 0.6.1
 
 This is the Core-only planning document. It does not schedule JellyFrame App
 Runtime, device ports, launcher policy, JerryScript or developer-image work.
 Those consumers decide when a released Core version is adopted.
 
-## Current Candidate
+## Current Release Candidate
 
-`master` is an unsigned `0.6.0-dev` migration line with Core ABI `1`. It has
-standalone build/install CI, deterministic source archives and the following
-completed low-cost authoring subset:
+Signed `v0.6.0` established Core ABI `1`. `master` now prepares the compatible
+`0.6.1` patch release. It retains standalone build/install CI and deterministic source
+archives, and includes the following completed authoring subset:
 
 - LTR horizontal logical size, spacing and inset mapping.
 - Common flex/grid placement (`order`, `align-self`, `place-*`, bounded rows).
@@ -25,12 +25,16 @@ It remains a candidate capability until the signed Core release is consumed by
 a locked Runtime dependency; it must not be advertised by an older Runtime
 default build.
 
-## Next Release Gate
+This patch also closes an HTML parser depth-budget gap: `max_depth` includes the
+synthetic `document` root, and a child that would exceed the bound is dropped before
+it enters the DOM. A malformed-input corpus now protects the behavior.
+
+## 0.6.1 Release Gate
 
 The next Core change is release closure, not another speculative CSS feature:
 
 1. Review the candidate source, public-header and generated-profile changes.
-2. Create an annotated, signed `0.6.0` tag and publish its deterministic source
+2. Create an annotated, signed `0.6.1` tag and publish its deterministic source
    archive plus SHA-256 sidecar.
 3. Have JellyFrame Runtime update its exact package/version/ABI/source lock and
    run its installed-package and local-source-override regressions.
@@ -41,7 +45,7 @@ Until those gates are complete, a host may use a local source override for
 cross-repository development, but production consumers must not float on this
 branch.
 
-## Candidate Intake After 0.6.0
+## Candidate Intake After 0.6.1
 
 A new Core capability starts only with an author-facing need and a bounded
 proposal. Each accepted item requires positive and negative behavior tests,
