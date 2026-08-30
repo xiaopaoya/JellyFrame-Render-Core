@@ -316,9 +316,6 @@ struct Style {
     bool overflow_wrap_anywhere = false;
     bool overflow_wrap_specified = false;
     bool white_space_nowrap = false;
-    // Bounded text-wrap: balance hint. It is meaningful only while wrapping
-    // remains enabled and uses the same inherited cascade slot as text-wrap.
-    bool text_wrap_balance = false;
     bool white_space_specified = false;
     bool text_overflow_ellipsis = false;
     bool text_overflow_specified = false;
@@ -486,6 +483,14 @@ struct StyleResolverOptions {
     const Node* focused_node = nullptr;
     DiagnosticSink* diagnostics = nullptr;
     std::size_t max_background_image_resources = 128;
+    // CSS var() expansion can repeat a custom property many times. Keep the
+    // resolved intermediate value bounded even when each source declaration
+    // is within the parser's individual value limit.
+    std::size_t max_resolved_value_bytes = 16 * 1024;
+    // Inline style attributes do not pass through CssParserOptions, so bound
+    // their source and declaration count independently.
+    std::size_t max_inline_style_bytes = 4096;
+    std::size_t max_inline_declarations = 64;
 };
 
 struct StyleResolverStatistics {
@@ -505,12 +510,23 @@ struct InteractionInvalidationHints {
 
 using CustomPropertyMap = std::unordered_map<std::string, std::string>;
 
+class StyleResolver;
+
 struct StyleResolveContext {
+    // A context caches pointers into one resolver, DOM revision and
+    // interaction state. StyleResolver refreshes it when any of those inputs
+    // changes.
+    const StyleResolver* resolver = nullptr;
+    const Node* document_root = nullptr;
+    std::uint64_t document_mutation_generation = 0;
+    std::uint64_t interaction_state_generation = 0;
     std::unordered_map<const Node*, const CustomPropertyMap*> custom_property_cache;
     std::vector<std::unique_ptr<CustomPropertyMap>> custom_property_scopes;
     std::unordered_map<const Node*, std::vector<const CssRule*>> matched_rule_cache;
     const Node* custom_property_scan_root = nullptr;
     bool has_inline_custom_properties = false;
+
+    void clear();
 };
 
 class StyleResolver {
@@ -539,6 +555,7 @@ private:
     mutable std::vector<const CssRule*> uncached_candidates_;
     mutable StyleResolverStatistics statistics_;
     InteractionInvalidationHints interaction_hints_;
+    std::uint64_t interaction_state_generation_ = 0;
     bool has_custom_property_declarations_ = false;
     // Lazily populated only by a supported CSS url(). The id is packed in the
     // existing optional background overlay word, so pages without url() do not
@@ -546,6 +563,7 @@ private:
     mutable std::vector<std::string> background_image_resources_;
 
     void build_rule_index();
+    void prepare_context(StyleResolveContext& context, const Node& node) const;
     const std::vector<const CssRule*>& candidate_rules_for(const Node& node) const;
     bool apply_custom_properties_for_node(CustomPropertyMap& inherited,
                                           const Node& node,

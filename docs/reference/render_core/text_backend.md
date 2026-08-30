@@ -1,6 +1,6 @@
 # Text Backend
 
-> Last updated: 2026-08-17; Applies to: 0.6.0-dev
+> Last updated: 2026-07-07; Applies to: 0.5.0
 
 
 JellyFrame keeps font loading and platform text APIs outside `jellyframe_render_core`.
@@ -15,7 +15,7 @@ is meant for bring-up and diagnostics, not production CJK typography.
 
 ## Core API
 
-`include/render_core/text_backend.h` defines the layout-side API:
+`src/render_core/text_backend.h` defines the layout-side API:
 
 - `TextMetrics { width, line_height }`
 - `TextMeasureCallback`
@@ -39,7 +39,7 @@ matches a manifest-declared app font, layout passes a normalized 32-bit family
 hash so the backend can select that face without carrying family strings through
 the display list.
 
-`include/render_core/software_renderer.h` still owns the paint-side callback:
+`src/render_core/software_renderer.h` still owns the paint-side callback:
 
 - `TextPainter`
 - `TextPaintCallback`
@@ -55,7 +55,7 @@ Hosts that care about visual correctness should provide both measurement and
 painting from the same font engine. If they disagree, text can be clipped or
 wrapped differently from what is drawn.
 
-`include/render_core/text_adapter.h` provides `HostTextAdapter`, a tiny bridge for LVGL or
+`src/render_core/text_adapter.h` provides `HostTextAdapter`, a tiny bridge for LVGL or
 vendor engines that already expose both services. The adapter owns no resources;
 the host-owned context must outlive layout and rendering:
 
@@ -68,17 +68,11 @@ LayerTreeBuilder layers(layer_options);
 SoftwareCompositor compositor(text_painter_from_adapter(adapter));
 ```
 
-When an app uses the documented `letter-spacing`, `overflow-wrap: anywhere` or
-`text-wrap: balance` subset, pass the same measure provider to
-`LayerTreeBuilderOptions::text_measure`.
+When an app uses the documented `letter-spacing` or `overflow-wrap: anywhere`
+subset, pass the same measure provider to `LayerTreeBuilderOptions::text_measure`.
 The builder then emits scalar-positioned commands using exactly the advances
 used by layout. Ordinary text keeps the old single-command path and does not
 consult this provider during layer construction.
-
-`text-wrap: balance` evaluates no more than 16 break units and preserves the
-ordinary wrapper's two-to-four line count. Explicit line breaks, longer text or
-more than four ordinary lines use ordinary wrapping. It is a bounded visual
-improvement, not browser-grade hyphenation or multilingual line breaking.
 
 This helper exists to keep board ports consistent. It does not add font
 discovery, shaping or caching to the core.
@@ -136,7 +130,7 @@ Recommended options:
 - vendor font engine for CJK products;
 - shaping-capable backend only for devices that need complex scripts.
 
-`include/render_core/bitmap_font.h` provides the first static bitmap font backend:
+`src/render_core/bitmap_font.h` provides the first static bitmap font backend:
 
 - `BitmapFontGlyph`: one monochrome glyph, addressed by Unicode codepoint;
 - `BitmapFont`: glyph table plus line-height and fallback advance. The glyph

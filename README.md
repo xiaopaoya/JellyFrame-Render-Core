@@ -1,6 +1,6 @@
 # JellyFrame Render Core
 
-> Last updated: 2026-08-19; Applies to: 0.6.1
+> Last updated: 2026-08-30; Applies to: 0.6.2-dev
 
 JellyFrame Render Core is a platform-neutral, modular HTML/CSS subset,
 document/layout pipeline and CPU software renderer for bounded embedded and
@@ -18,9 +18,6 @@ cmake --build --preset default
 
 cmake --preset minimal
 cmake --build --preset minimal
-
-cmake --preset benchmarks
-cmake --build --preset benchmarks
 ```
 
 The following explicit commands remain compatible with the minimum required
@@ -33,14 +30,23 @@ ctest --test-dir build --output-on-failure
 cmake --install build --prefix install
 ```
 
+Performance work can use the opt-in benchmark preset:
+
+```sh
+cmake --preset benchmarks
+cmake --build --preset benchmarks
+```
+
 The install exports `JellyFrame::jellyframe_render_core`, public headers, a
 feature profile and a deterministic source manifest. Optional build families
 are selected with `JELLYFRAME_ENABLE_CANVAS2D`,
 `JELLYFRAME_ENABLE_MODERN_PAINT`, `JELLYFRAME_ENABLE_FLEX_GRID` and
-`JELLYFRAME_ENABLE_ADVANCED_FORMS`. The optional
-`JELLYFRAME_BUILD_BENCHMARKS` target builds the platform-neutral
-`jellyframe_render_core_microbench` executable; it is off by default and has
-no effect on the library profile.
+`JELLYFRAME_ENABLE_ADVANCED_FORMS`.
+
+The repository intentionally contains no App Runtime, JerryScript integration,
+device ports or launcher implementation. Those belong to the Runtime and
+Device OS layers. The `benchmarks/`, `tests/unit/`, `docs/` and `samples/`
+directories contain platform-neutral Core maintenance material.
 
 ## C++ Integration Surface
 
@@ -62,20 +68,3 @@ version and engine ABI according to their own compatibility policy.
 
 The JellyFrame Runtime repository owns App packages, JerryScript integration,
 desktop tooling and device-layer documentation.
-
-## Repository Map
-
-| Path | Contents | Primary audience |
-| --- | --- | --- |
-| `include/render_core/` | Installed C++ headers and the supported ABI surface | Core hosts and package consumers |
-| `src/` | Render Core implementation, grouped by pipeline responsibility in file names | Core maintainers |
-| `tests/unit/` | Platform-neutral C++ regression suite | Core maintainers |
-| `tests/render_core_source_archive_tests.py` | Archive reproducibility, extraction, build and install regression | Release maintainers |
-| `docs/` | Architecture, release policy and subsystem reference | Integrators and maintainers |
-| `samples/` | Standalone HTML/CSS and bitmap-font fixtures | Visual reviewers |
-| `benchmarks/` | Platform-neutral microbenchmarks | Performance work |
-| `tools/` | Release-source packaging utility | Release maintainers |
-
-The repository intentionally has no device ports, App packages, JavaScript
-runtime or launcher implementation. Those belong to the JellyFrame Runtime or
-Device OS layers.

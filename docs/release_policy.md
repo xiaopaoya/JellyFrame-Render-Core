@@ -1,6 +1,6 @@
 # Render Core Release And Extraction Policy
 
-> Last updated: 2026-08-16; Applies to: 0.6.0-dev
+> Last updated: 2026-08-30; Applies to: 0.6.2-dev
 
 This policy governs the transition from the current monorepo boundary to an independently governed `jellyframe-render-core` project. It complements [engine_architecture.md](engine_architecture.md); it is not a user-facing app compatibility promise.
 
@@ -14,12 +14,13 @@ This policy governs the transition from the current monorepo boundary to an inde
 
 ## Migration Status
 
-The history-preserving `xiaopaoya/JellyFrame-Render-Core` repository has been
-created with the existing license and contributor history unchanged. Its
-`master` branch is an unsigned pre-release migration branch, not a `0.6.0`
+The history-preserving `xiaopaoya/JellyFrame-Render-Core` repository retains
+the existing license and contributor history unchanged. Its current `master`
+line is an unsigned `0.6.2-dev` synchronization candidate, not a signed
 release: no license change, contributor-policy change or open-source intent is
-implied. The Runtime continues to use its in-tree provider until a signed Core
-artifact is released and accepted by an explicit dependency-lock update.
+implied. The Runtime continues to consume its locked `v0.6.1` release until a
+new signed Core artifact is reviewed and accepted by an explicit dependency-lock
+update.
 
 ## Release Unit
 

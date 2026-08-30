@@ -1,6 +1,7 @@
 ﻿#include "render_core/text_adapter.h"
 
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 using namespace jellyframe;
@@ -111,27 +112,17 @@ void extreme_letter_spacing_uses_one_bounded_value() {
           "measurement uses the bounded positive letter spacing");
 }
 
-void balanced_wrap_keeps_the_ordinary_line_count_with_less_ragged_lines() {
-    ProbeTextBackend probe;
-    const TextMeasureProvider measure{probe_measure, &probe};
-    const std::vector<std::string> ordinary = wrap_text_at_opportunities(
-        measure, "one two three four five", 10, 400, 0, 0, 100);
-    const std::vector<std::string> balanced = wrap_text_balanced(
-        measure, "one two three four five", 10, 400, 0, 0, 100);
-    check(ordinary.size() == 3 && balanced.size() == ordinary.size(),
-          "balanced wrapping preserves the bounded ordinary line count");
-    check(balanced[0] == "one two" && balanced[1] == "three" && balanced[2] == "four five",
-          "balanced wrapping selects the lower-raggedness legal breaks");
-    for (const std::string& line : balanced) {
-        check(measure_text(measure, line, 10, 400).width <= 100,
-              "balanced wrapping never exceeds the ordinary width limit");
-    }
-
-    const std::string long_text = "one two three four five six seven eight nine ten eleven twelve "
-                                  "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty";
-    check(wrap_text_balanced(measure, long_text, 10, 400, 0, 0, 100) ==
-              wrap_text_at_opportunities(measure, long_text, 10, 400, 0, 0, 100),
-          "long text exceeds the balance budget and uses ordinary wrapping");
+void extreme_fallback_font_sizes_remain_defined() {
+    const int maximum = std::numeric_limits<int>::max();
+    const TextMetrics metrics = fallback_text_metrics("A", maximum, 700);
+    check(metrics.width == maximum && metrics.line_height == maximum,
+          "fallback metrics saturate extreme font sizes");
+    check(bounded_letter_spacing(maximum, maximum) == maximum,
+          "extreme font size keeps spacing bound representable");
+    const std::vector<std::string> lines = wrap_text_anywhere(
+        TextMeasureProvider{}, "AB", maximum, 400, 0, maximum, 10);
+    check(lines.size() == 2 && lines[0] == "A" && lines[1] == "B",
+          "extreme fallback widths wrap without arithmetic overflow");
 }
 
 } // namespace
@@ -142,7 +133,7 @@ int main() {
         incomplete_adapter_degrades_to_core_fallbacks();
         letter_spacing_and_utf8_anywhere_wrap_share_scalar_boundaries();
         extreme_letter_spacing_uses_one_bounded_value();
-        balanced_wrap_keeps_the_ordinary_line_count_with_less_ragged_lines();
+        extreme_fallback_font_sizes_remain_defined();
     } catch (const std::exception& error) {
         std::cerr << "text adapter test failed: " << error.what() << '\n';
         return 1;
