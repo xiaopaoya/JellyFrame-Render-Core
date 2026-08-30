@@ -142,6 +142,10 @@ int fixed_scroll_offset(const Node& node, int max_scroll_y, void*) {
     return 0;
 }
 
+int maximum_scroll_offset(const Node&, int max_scroll_y, void*) {
+    return max_scroll_y;
+}
+
 void overflow_hidden_creates_clip_layer() {
     auto pipeline = build_pipeline("<body><section class='clip'><p>Visible</p></section></body>",
                                    ".clip { overflow: hidden; height: 20px; background: #ffffff; }");
@@ -162,6 +166,30 @@ void overflow_y_auto_creates_vertical_scroll_clip_layer() {
     check(layer->has_clip, "overflow-y auto layer has clip");
 }
 
+void extreme_scroll_geometry_remains_scrollable_and_bounded() {
+    auto root_node = make_element("section");
+    LayoutBox root;
+    root.node = root_node.get();
+    root.rect = Rect{0, 0, 100, 100};
+    root.style.overflow = "scroll";
+    auto child = LayoutBoxPtr(new LayoutBox, LayoutBoxDeleter{false});
+    child->rect = Rect{0, std::numeric_limits<int>::max() - 4, 20, 8};
+    child->style.background_color = Color{1, 2, 3, 255};
+    root.children.push_back(std::move(child));
+
+    LayerTreeBuilderOptions options;
+    options.scroll_resolver = ScrollOffsetResolver{maximum_scroll_offset, nullptr};
+    options.paint_scroll_indicators = true;
+    const LayerNodePtr layer_tree = LayerTreeBuilder(options).build(root);
+
+    check(layer_tree->max_scroll_y > 0,
+          "saturated child bottom still produces a positive scroll range");
+    check(layer_tree->scroll_y == layer_tree->max_scroll_y,
+          "host scroll resolver remains clamped to the saturated range");
+    const DisplayList flattened = LayerTreeBuilder(options).flatten(*layer_tree);
+    check(!flattened.empty(), "extreme scroll geometry still flattens a bounded display list");
+}
+
 void rounded_overflow_clip_keeps_geometry_on_clip_layer() {
     auto pipeline = build_pipeline(
         "<body><section class='clip'><p>Visible</p></section></body>",
@@ -171,6 +199,19 @@ void rounded_overflow_clip_keeps_geometry_on_clip_layer() {
     check(layer != nullptr, "rounded overflow layer exists");
     check(layer->has_clip, "rounded overflow layer keeps rectangular clip bounds");
     check(has_corner_radius(layer->clip_border_radius), "rounded overflow layer keeps corner radii");
+}
+
+void maximum_percentage_radius_does_not_overflow() {
+    LayoutBox root;
+    root.style.overflow = "hidden";
+    root.style.border_radius_percent = std::numeric_limits<int>::max();
+    root.rect = Rect{0, 0, std::numeric_limits<int>::max(), std::numeric_limits<int>::max()};
+
+    LayerTreeBuilder builder;
+    auto layer = builder.build(root);
+    check(layer != nullptr && layer->has_clip, "maximum percentage radius creates a clip layer");
+    check(layer->clip_border_radius == std::numeric_limits<int>::max() / 2,
+          "maximum percentage radius is clamped without integer overflow");
 }
 
 void flatten_clip_metadata_preserves_unclipped_commands() {
@@ -364,27 +405,6 @@ void normal_text_wrap_matches_layout_line_breaks() {
     check(text_rects.size() >= 2, "ordinary breakable text emits multiple paint commands");
     check(text_rects[0].y != text_rects[1].y,
           "ordinary breakable text paint lines follow the layout line height");
-}
-
-void balanced_text_wrap_matches_layout_and_paint_lines() {
-    auto pipeline = build_pipeline(
-        "<body><p id='label'>one two three four five</p></body>",
-        "p { width: 60px; margin: 0; font-size: 10px; line-height: 12px; text-wrap: balance; }");
-    const LayoutBox* label = find_layout_by_id(*pipeline.layout_tree, "label");
-    check(label != nullptr && label->style.text_wrap_balance && label->rect.height >= 36,
-          "balanced text wrap reaches layout with a matching multi-line height");
-
-    LayerTreeBuilder builder;
-    const DisplayList commands = builder.flatten(*pipeline.layer_tree);
-    std::vector<std::string> lines;
-    for (const DisplayCommand& command : commands) {
-        if (command.type == DisplayCommandType::Text && !command.text.empty()) {
-            lines.push_back(command.text);
-        }
-    }
-    check(lines.size() == 3 && lines[0] == "one two" && lines[1] == "three" &&
-              lines[2] == "four five",
-          "balanced paint uses the same selected lines as layout");
 }
 
 void scroll_container_offsets_descendant_paint() {
@@ -704,6 +724,22 @@ void progress_and_meter_emit_value_fill() {
     check(colored_bar_count == 2, "progress and meter emit filled bars");
 }
 
+void progress_and_meter_ignore_invalid_numeric_attributes() {
+    auto pipeline = build_pipeline(
+        "<body><progress value='nan' max='100'></progress>"
+        "<meter min='0' max='10' value='8junk'></meter></body>",
+        "");
+
+    LayerTreeBuilder layer_tree_builder;
+    const DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
+    for (const DisplayCommand& command : flattened) {
+        check(command.type != DisplayCommandType::FillRect ||
+                  !((command.color.r == 37 && command.color.g == 99 && command.color.b == 235) ||
+                    (command.color.r == 22 && command.color.g == 163 && command.color.b == 74)),
+              "invalid progress and meter values do not produce a filled bar");
+    }
+}
+
 void inline_mark_background_shrinks_to_text() {
     auto pipeline = build_pipeline("<body><p>Use <mark>mark</mark> text</p></body>", "");
 
@@ -818,6 +854,20 @@ void form_paint_only_state_changes_rebuild_visible_commands() {
     };
     check(widest_blue_fill(after_range) > widest_blue_fill(before_range),
           "range paint-only rebuild changes the visible fill command");
+
+    check(set_form_control_value(*range, "999999999999999999999"),
+          "out-of-range range value becomes paint dirty");
+    auto malformed_range_tree = builder.build(*range_pipeline.layout_tree);
+    const DisplayList malformed_range = builder.flatten(*malformed_range_tree);
+    bool painted_range_fill = false;
+    for (const DisplayCommand& command : malformed_range) {
+        if (command.type == DisplayCommandType::FillRect && command.color.r == 37 &&
+            command.color.g == 99 && command.color.b == 235 && command.rect.height == 4) {
+            painted_range_fill = command.rect.width > 0;
+            break;
+        }
+    }
+    check(!painted_range_fill, "out-of-range range value paints as the minimum without narrowing");
 
     auto select_pipeline = build_pipeline(
         "<body><select id='choice'><option>Alpha</option><option>Beta</option></select></body>",
@@ -1560,7 +1610,9 @@ int main() {
     try {
         overflow_hidden_creates_clip_layer();
         overflow_y_auto_creates_vertical_scroll_clip_layer();
+        extreme_scroll_geometry_remains_scrollable_and_bounded();
         rounded_overflow_clip_keeps_geometry_on_clip_layer();
+        maximum_percentage_radius_does_not_overflow();
         flatten_clip_metadata_preserves_unclipped_commands();
         flatten_clip_metadata_exports_rounded_clip_geometry();
         flatten_clip_metadata_preserves_nested_parent_and_translation();
@@ -1568,7 +1620,6 @@ int main() {
         visibility_preserves_layout_and_suppresses_hidden_paint_and_hit_testing();
         text_spacing_and_anywhere_wrap_emit_only_declared_extra_commands();
         normal_text_wrap_matches_layout_line_breaks();
-        balanced_text_wrap_matches_layout_and_paint_lines();
         scroll_container_offsets_descendant_paint();
         scroll_container_keeps_absolute_sibling_navigation_fixed();
         scroll_indicator_is_opt_in_overlay();
@@ -1581,6 +1632,7 @@ int main() {
         outline_offset_expands_focus_stroke_without_affecting_layout();
         z_index_orders_child_layers();
         progress_and_meter_emit_value_fill();
+        progress_and_meter_ignore_invalid_numeric_attributes();
         inline_mark_background_shrinks_to_text();
         inline_run_flows_horizontally();
         centered_inline_text_aligns_in_parent();

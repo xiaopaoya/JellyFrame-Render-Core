@@ -16,6 +16,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -3216,9 +3217,19 @@ DeclarationApplyResult apply_sizing_declaration(Style& style,
                                                 const std::string& property,
                                                 const std::string& value) {
     if (property == "width") {
+        if (lowercase(trim(value)) == "auto") {
+            style.width = -1;
+            style.width_percent = -1;
+            return DeclarationApplyResult::Applied;
+        }
         return apply_length_or_percent(style.width, style.width_percent, value, style.font_size);
     }
     if (property == "height") {
+        if (lowercase(trim(value)) == "auto") {
+            style.height = -1;
+            style.height_percent = -1;
+            return DeclarationApplyResult::Applied;
+        }
         return apply_length_or_percent(style.height, style.height_percent, value, style.font_size);
     }
     if (property == "min-width") {
@@ -3735,22 +3746,14 @@ bool apply_declaration(Style& style,
         return true;
     } else if (property == "white-space" || property == "text-wrap") {
         const std::string lowered = lowercase(trim(value));
-        if (property == "text-wrap" && lowered == "balance") {
-            style.white_space_nowrap = false;
-            style.text_wrap_balance = true;
-            style.white_space_specified = true;
-            return true;
-        }
         if ((property == "white-space" && lowered == "normal") ||
             (property == "text-wrap" && lowered == "wrap")) {
             style.white_space_nowrap = false;
-            style.text_wrap_balance = false;
             style.white_space_specified = true;
             return true;
         }
         if (lowered == "nowrap") {
             style.white_space_nowrap = true;
-            style.text_wrap_balance = false;
             style.white_space_specified = true;
             return true;
         }
@@ -3967,7 +3970,7 @@ bool apply_declaration(Style& style,
         return true;
     } else if (property == "flex-wrap") {
         const std::string lowered = lowercase(trim(value));
-        if (lowered == "wrap" || lowered == "wrap-reverse") {
+        if (lowered == "wrap") {
             style.flex_wrap = true;
         } else if (lowered == "nowrap") {
             style.flex_wrap = false;
@@ -4171,15 +4174,25 @@ std::size_t find_matching_paren(std::string_view value, std::size_t open) {
 bool resolve_css_vars(std::string_view value,
                       const CustomPropertyMap& custom_properties,
                       std::string& output,
+                      std::size_t max_output_bytes,
                       int depth = 0) {
     constexpr int kMaxVarDepth = 8;
     if (depth > kMaxVarDepth) {
         return false;
     }
 
-    if (value.find("var(") == std::string_view::npos) {
-        output = std::string(value);
+    const auto append_bounded = [&](std::string_view part) {
+        if (max_output_bytes != 0 &&
+            (part.size() > max_output_bytes || output.size() > max_output_bytes - part.size())) {
+            return false;
+        }
+        output.append(part);
         return true;
+    };
+
+    if (value.find("var(") == std::string_view::npos) {
+        output.clear();
+        return append_bounded(value);
     }
 
     output.clear();
@@ -4187,13 +4200,14 @@ bool resolve_css_vars(std::string_view value,
     while (cursor < value.size()) {
         const std::size_t start = value.find("var(", cursor);
         if (start == std::string_view::npos) {
-            output.append(value.substr(cursor));
-            return true;
+            return append_bounded(value.substr(cursor));
         }
-        output.append(value.substr(cursor, start - cursor));
+        if (!append_bounded(value.substr(cursor, start - cursor))) {
+            return false;
+        }
         const std::size_t close = find_matching_paren(value, start + 3);
         if (close == std::string_view::npos) {
-            output.append(value.substr(start));
+            append_bounded(value.substr(start));
             return false;
         }
 
@@ -4201,26 +4215,31 @@ bool resolve_css_vars(std::string_view value,
         const std::size_t comma = body.find(',');
         const std::string name_token = trim(body.substr(0, comma));
         if (name_token.empty()) {
-            output.append(value.substr(start, close - start + 1));
+            if (!append_bounded(value.substr(start, close - start + 1))) {
+                return false;
+            }
             return false;
         }
         const std::string name = lowercase(name_token);
         std::string replacement;
         const auto found = custom_properties.find(name);
         if (found != custom_properties.end()) {
-            if (!resolve_css_vars(found->second, custom_properties, replacement, depth + 1)) {
+            if (!resolve_css_vars(found->second, custom_properties, replacement, max_output_bytes, depth + 1)) {
                 return false;
             }
         } else if (comma != std::string_view::npos) {
-            if (!resolve_css_vars(body.substr(comma + 1), custom_properties, replacement, depth + 1)) {
+            if (!resolve_css_vars(body.substr(comma + 1), custom_properties, replacement,
+                                  max_output_bytes, depth + 1)) {
                 return false;
             }
             replacement = trim(replacement);
         } else {
-            output.append(value.substr(start, close - start + 1));
+            append_bounded(value.substr(start, close - start + 1));
             return false;
         }
-        output.append(replacement);
+        if (!append_bounded(replacement)) {
+            return false;
+        }
         cursor = close + 1;
     }
     return true;
@@ -4228,13 +4247,14 @@ bool resolve_css_vars(std::string_view value,
 
 const CssDeclaration& resolve_declaration_value(const CssDeclaration& declaration,
                                                 const CustomPropertyMap& custom_properties,
-                                                CssDeclaration& scratch) {
+                                                CssDeclaration& scratch,
+                                                std::size_t max_resolved_value_bytes) {
     if (declaration.value.find("var(") == std::string::npos) {
         return declaration;
     }
     scratch = declaration;
     std::string value;
-    if (resolve_css_vars(declaration.value, custom_properties, value)) {
+    if (resolve_css_vars(declaration.value, custom_properties, value, max_resolved_value_bytes)) {
         scratch.value = trim(value);
     }
     return scratch;
@@ -4676,14 +4696,16 @@ void apply_declarations(Style& style,
                         CssPseudoElement pseudo_element,
                         const CustomPropertyMap& custom_properties,
                         DiagnosticSink* diagnostics,
-                        const StyleResolver* resolver) {
+                        const StyleResolver* resolver,
+                        std::size_t max_resolved_value_bytes) {
     CssDeclaration resolved_scratch;
     for (const CssDeclaration& declaration : declarations) {
         if (is_custom_property_name(declaration.property)) {
             continue;
         }
         const CssDeclaration& resolved_declaration =
-            resolve_declaration_value(declaration, custom_properties, resolved_scratch);
+            resolve_declaration_value(declaration, custom_properties, resolved_scratch,
+                                      max_resolved_value_bytes);
         LogicalDeclarationExpansion expansion;
         const bool is_logical = expand_logical_declaration(resolved_declaration, expansion);
         if (is_logical && expansion.count == 0) {
@@ -4786,13 +4808,39 @@ void apply_declarations(Style& style,
     }
 }
 
-std::vector<CssDeclaration> parse_inline_style(const std::string& source, DiagnosticSink* diagnostics = nullptr) {
+std::vector<CssDeclaration> parse_inline_style(const std::string& source,
+                                               std::size_t max_source_bytes,
+                                               std::size_t max_declarations,
+                                               DiagnosticSink* diagnostics = nullptr) {
     std::vector<CssDeclaration> declarations;
+    std::size_t source_size = source.size();
+    if (max_source_bytes != 0 && source_size > max_source_bytes) {
+        const std::size_t bounded_end = source.rfind(';', max_source_bytes - 1);
+        source_size = bounded_end == std::string::npos ? 0 : bounded_end + 1;
+        report_diagnostic(diagnostics,
+                          DiagnosticStage::Style,
+                          DiagnosticSeverity::Warning,
+                          "style-inline-input-limit",
+                          "Inline style exceeded its byte budget; trailing declarations were skipped",
+                          {});
+    }
+    if (source_size == 0) {
+        return declarations;
+    }
     std::size_t index = 0;
-    while (index < source.size()) {
+    while (index < source_size) {
+        if (max_declarations != 0 && declarations.size() >= max_declarations) {
+            report_diagnostic(diagnostics,
+                              DiagnosticStage::Style,
+                              DiagnosticSeverity::Warning,
+                              "style-inline-declaration-limit",
+                              "Inline style declaration budget was reached; trailing declarations were skipped",
+                              {});
+            break;
+        }
         const std::size_t colon = source.find(':', index);
-        if (colon == std::string::npos) {
-            const std::string remaining = trim(std::string_view(source).substr(index));
+        if (colon == std::string::npos || colon >= source_size) {
+            const std::string remaining = trim(std::string_view(source).substr(index, source_size - index));
             if (!remaining.empty()) {
                 report_diagnostic(diagnostics,
                                   DiagnosticStage::Style,
@@ -4804,7 +4852,9 @@ std::vector<CssDeclaration> parse_inline_style(const std::string& source, Diagno
             break;
         }
         const std::size_t semicolon = source.find(';', colon + 1);
-        const std::size_t end = semicolon == std::string::npos ? source.size() : semicolon;
+        const std::size_t end = semicolon == std::string::npos || semicolon >= source_size
+            ? source_size
+            : semicolon;
         CssDeclaration declaration;
         declaration.property = lowercase(trim(std::string_view(source).substr(index, colon - index)));
         declaration.value = trim(std::string_view(source).substr(colon + 1, end - colon - 1));
@@ -4818,7 +4868,7 @@ std::vector<CssDeclaration> parse_inline_style(const std::string& source, Diagno
                               "Inline style declaration had an empty property or value and was ignored",
                               trim(std::string_view(source).substr(index, end - index)));
         }
-        index = end + 1;
+        index = end < source_size ? end + 1 : source_size;
     }
     return declarations;
 }
@@ -5238,6 +5288,14 @@ const std::vector<const CssRule*>& StyleResolver::candidate_rules_for(const Node
             key.append(id);
         }
         key.push_back('\n');
+
+        // Selector matching treats the class attribute as an unordered set.
+        // Keep the bounded candidate cache aligned with that meaning so a
+        // reordered or repeated relevant class does not consume another entry.
+        constexpr std::size_t kInlineIndexedClasses = 8;
+        std::array<std::string_view, kInlineIndexedClasses> inline_indexed_classes;
+        std::size_t inline_indexed_class_count = 0;
+        std::vector<std::string_view> overflow_indexed_classes;
         std::size_t index = 0;
         while (index < classes.size()) {
             while (index < classes.size() && std::isspace(static_cast<unsigned char>(classes[index])) != 0) {
@@ -5250,8 +5308,35 @@ const std::vector<const CssRule*>& StyleResolver::candidate_rules_for(const Node
             if (begin == index) {
                 continue;
             }
-            const std::string class_name = classes.substr(begin, index - begin);
-            if (class_rules_.find(class_name) != class_rules_.end()) {
+            const std::string_view class_name(classes.data() + begin, index - begin);
+            if (class_rules_.find(std::string(class_name)) != class_rules_.end()) {
+                if (inline_indexed_class_count < inline_indexed_classes.size()) {
+                    inline_indexed_classes[inline_indexed_class_count++] = class_name;
+                } else {
+                    overflow_indexed_classes.push_back(class_name);
+                }
+            }
+        }
+        if (overflow_indexed_classes.empty()) {
+            auto indexed_end = inline_indexed_classes.begin() +
+                static_cast<std::ptrdiff_t>(inline_indexed_class_count);
+            std::sort(inline_indexed_classes.begin(), indexed_end);
+            indexed_end = std::unique(inline_indexed_classes.begin(), indexed_end);
+            for (auto current = inline_indexed_classes.begin(); current != indexed_end; ++current) {
+                key.append(*current);
+                key.push_back('\n');
+            }
+        } else {
+            overflow_indexed_classes.reserve(overflow_indexed_classes.size() + inline_indexed_class_count);
+            overflow_indexed_classes.insert(overflow_indexed_classes.end(),
+                                            inline_indexed_classes.begin(),
+                                            inline_indexed_classes.begin() +
+                                                static_cast<std::ptrdiff_t>(inline_indexed_class_count));
+            std::sort(overflow_indexed_classes.begin(), overflow_indexed_classes.end());
+            overflow_indexed_classes.erase(
+                std::unique(overflow_indexed_classes.begin(), overflow_indexed_classes.end()),
+                overflow_indexed_classes.end());
+            for (const std::string_view class_name : overflow_indexed_classes) {
                 key.append(class_name);
                 key.push_back('\n');
             }
@@ -5269,15 +5354,14 @@ const std::vector<const CssRule*>& StyleResolver::candidate_rules_for(const Node
 
     std::vector<const CssRule*> candidates;
     candidates.reserve(16);
-    const auto already_added = [&](const CssRule* candidate) {
-        return std::find(candidates.begin(), candidates.end(), candidate) != candidates.end();
-    };
+    std::unordered_set<const CssRule*> seen_rules;
+    seen_rules.reserve(32);
     const auto append_bucket = [&](const std::vector<const CssRule*>* bucket) {
         if (bucket == nullptr) {
             return;
         }
         for (const CssRule* rule : *bucket) {
-            if (!already_added(rule)) {
+            if (seen_rules.insert(rule).second) {
                 candidates.push_back(rule);
             }
         }
@@ -5390,7 +5474,10 @@ bool StyleResolver::apply_custom_properties_for_node(CustomPropertyMap& inherite
         CssSpecificity inline_specificity;
         inline_specificity.ids = 1;
         apply_custom_declarations(local,
-                                  parse_inline_style(node.attribute("style"), options_.diagnostics),
+                                  parse_inline_style(node.attribute("style"),
+                                                     options_.max_inline_style_bytes,
+                                                     options_.max_inline_declarations,
+                                                     options_.diagnostics),
                                   inline_specificity,
                                   static_cast<std::size_t>(-1));
     }
@@ -5429,6 +5516,35 @@ CustomPropertyMap StyleResolver::custom_properties_for(const Node& node) const {
 Style StyleResolver::resolve(const Node& node) const {
     const CustomPropertyMap custom_properties = custom_properties_for(node);
     return resolve_with_custom_properties(node, custom_properties);
+}
+
+void StyleResolveContext::clear() {
+    custom_property_cache.clear();
+    custom_property_scopes.clear();
+    matched_rule_cache.clear();
+    resolver = nullptr;
+    document_root = nullptr;
+    document_mutation_generation = 0;
+    interaction_state_generation = 0;
+    custom_property_scan_root = nullptr;
+    has_inline_custom_properties = false;
+}
+
+void StyleResolver::prepare_context(StyleResolveContext& context, const Node& node) const {
+    const Node* root = &node;
+    while (root->parent != nullptr) {
+        root = root->parent;
+    }
+    if (context.resolver != this ||
+        context.document_root != root ||
+        context.document_mutation_generation != root->mutation_generation ||
+        context.interaction_state_generation != interaction_state_generation_) {
+        context.clear();
+        context.resolver = this;
+        context.document_root = root;
+        context.document_mutation_generation = root->mutation_generation;
+        context.interaction_state_generation = interaction_state_generation_;
+    }
 }
 
 const CustomPropertyMap& StyleResolver::custom_properties_for(const Node& node, StyleResolveContext& context) const {
@@ -5476,6 +5592,7 @@ const CustomPropertyMap& StyleResolver::custom_properties_for(const Node& node, 
 }
 
 Style StyleResolver::resolve(const Node& node, StyleResolveContext& context) const {
+    prepare_context(context, node);
     const CustomPropertyMap& custom_properties = custom_properties_for(node, context);
     const std::vector<const CssRule*>* matched_rules = has_custom_property_declarations_
         ? &matching_rules_for(node, context)
@@ -5515,16 +5632,21 @@ Style StyleResolver::resolve_with_custom_properties(const Node& node,
         }
         apply_declarations(style, slots, rule->declarations, rule->specificity,
                            rule->source_order, rule->pseudo_element, custom_properties,
-                           options_.diagnostics, this);
+                           options_.diagnostics, this, options_.max_resolved_value_bytes);
     }
     if (node.type == NodeType::Element) {
         CssSpecificity inline_specificity;
         inline_specificity.ids = 1;
         inline_specificity.classes = 0;
         inline_specificity.elements = 0;
-        apply_declarations(style, slots, parse_inline_style(node.attribute("style"), options_.diagnostics), inline_specificity,
+        apply_declarations(style, slots,
+                           parse_inline_style(node.attribute("style"),
+                                              options_.max_inline_style_bytes,
+                                              options_.max_inline_declarations,
+                                              options_.diagnostics),
+                           inline_specificity,
                            static_cast<std::size_t>(-1), CssPseudoElement::None, custom_properties,
-                           options_.diagnostics, this);
+                           options_.diagnostics, this, options_.max_resolved_value_bytes);
     }
     return style;
 }
@@ -5572,6 +5694,11 @@ InteractionInvalidationHints StyleResolver::interaction_invalidation_hints() con
 void StyleResolver::set_interaction_state(const Node* hovered_node,
                                           const Node* active_node,
                                           const Node* focused_node) {
+    if (options_.hovered_node != hovered_node ||
+        options_.active_node != active_node ||
+        options_.focused_node != focused_node) {
+        ++interaction_state_generation_;
+    }
     options_.hovered_node = hovered_node;
     options_.active_node = active_node;
     options_.focused_node = focused_node;

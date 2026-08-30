@@ -50,11 +50,13 @@ bool rounded_clip_affects_rect(const RasterRoundedRect& rounded, Rect rect) {
     };
     const CornerRadii& radii = rounded.radii;
     return overlaps_corner(rounded.left, rounded.top, radii.top_left) ||
-        overlaps_corner(rounded.right - radii.top_right, rounded.top, radii.top_right) ||
-        overlaps_corner(rounded.right - radii.bottom_right,
-                        rounded.bottom - radii.bottom_right,
+        overlaps_corner(safe_add(rounded.right, safe_negate(radii.top_right)), rounded.top, radii.top_right) ||
+        overlaps_corner(safe_add(rounded.right, safe_negate(radii.bottom_right)),
+                        safe_add(rounded.bottom, safe_negate(radii.bottom_right)),
                         radii.bottom_right) ||
-        overlaps_corner(rounded.left, rounded.bottom - radii.bottom_left, radii.bottom_left);
+        overlaps_corner(rounded.left,
+                        safe_add(rounded.bottom, safe_negate(radii.bottom_left)),
+                        radii.bottom_left);
 }
 
 bool rounded_clip_affects_row(const RasterRoundedRect& rounded, int y) {
@@ -62,10 +64,10 @@ bool rounded_clip_affects_row(const RasterRoundedRect& rounded, int y) {
         return false;
     }
     const CornerRadii& radii = rounded.radii;
-    return (radii.top_left > 0 && y >= rounded.top && y < rounded.top + radii.top_left) ||
-        (radii.top_right > 0 && y >= rounded.top && y < rounded.top + radii.top_right) ||
-        (radii.bottom_left > 0 && y >= rounded.bottom - radii.bottom_left && y < rounded.bottom) ||
-        (radii.bottom_right > 0 && y >= rounded.bottom - radii.bottom_right && y < rounded.bottom);
+    return (radii.top_left > 0 && y >= rounded.top && y < safe_add(rounded.top, radii.top_left)) ||
+        (radii.top_right > 0 && y >= rounded.top && y < safe_add(rounded.top, radii.top_right)) ||
+        (radii.bottom_left > 0 && y >= safe_add(rounded.bottom, safe_negate(radii.bottom_left)) && y < rounded.bottom) ||
+        (radii.bottom_right > 0 && y >= safe_add(rounded.bottom, safe_negate(radii.bottom_right)) && y < rounded.bottom);
 }
 
 // Returns the conservative horizontal span for which one rounded clip is
@@ -462,8 +464,10 @@ void fill_opaque_rounded_rect(FrameBuffer& target, Rect rect, Rect clip, Color c
           radii.top_left == radii.bottom_left)) {
         const RasterRoundedRect rounded = prepare_rounded_rect(rect, border_radius);
         const Rect visible = clipped_target_rect(target, rect, clip);
-        for (int y = visible.y; y < visible.y + visible.height; ++y) {
-            for (int x = visible.x; x < visible.x + visible.width; ++x) {
+        const int y_end = safe_edge(visible.y, visible.height);
+        const int x_end = safe_edge(visible.x, visible.width);
+        for (int y = visible.y; y < y_end; ++y) {
+            for (int x = visible.x; x < x_end; ++x) {
                 const int coverage = rounded_rect_coverage(rounded, x, y);
                 if (coverage == 255) {
                     target.pixel(x, y) = color;
@@ -475,18 +479,21 @@ void fill_opaque_rounded_rect(FrameBuffer& target, Rect rect, Rect clip, Color c
     }
     border_radius = std::min(radii.top_left, std::min(rect.width, rect.height) / 2);
 
+    const int twice_radius = safe_add(border_radius, border_radius);
+    const int inner_width = std::max(0, safe_add(rect.width, safe_negate(twice_radius)));
+    const int inner_height = std::max(0, safe_add(rect.height, safe_negate(twice_radius)));
     fill_opaque_region(target,
-                       Rect{rect.x, rect.y + border_radius, rect.width, rect.height - border_radius * 2},
+                       Rect{rect.x, safe_add(rect.y, border_radius), rect.width, inner_height},
                        clip,
                        color);
     fill_opaque_region(target,
-                       Rect{rect.x + border_radius, rect.y, rect.width - border_radius * 2, border_radius},
+                       Rect{safe_add(rect.x, border_radius), rect.y, inner_width, border_radius},
                        clip,
                        color);
     fill_opaque_region(target,
-                       Rect{rect.x + border_radius,
-                            rect.y + rect.height - border_radius,
-                            rect.width - border_radius * 2,
+                       Rect{safe_add(rect.x, border_radius),
+                            safe_add(rect.y, safe_add(rect.height, safe_negate(border_radius))),
+                            inner_width,
                             border_radius},
                        clip,
                        color);
@@ -554,8 +561,10 @@ void fill_rect_clipped(FrameBuffer& target, Rect rect, Rect clip, Color color, i
         return;
     }
     const RasterRoundedRect rounded = prepare_rounded_rect(rect, border_radius);
-    for (int y = clipped.y; y < clipped.y + clipped.height; ++y) {
-        for (int x = clipped.x; x < clipped.x + clipped.width; ++x) {
+    const int y_end = safe_edge(clipped.y, clipped.height);
+    const int x_end = safe_edge(clipped.x, clipped.width);
+    for (int y = clipped.y; y < y_end; ++y) {
+        for (int x = clipped.x; x < x_end; ++x) {
             const int coverage = rounded_rect_coverage(rounded, x, y);
             if (coverage <= 0) {
                 continue;
@@ -579,11 +588,12 @@ void stroke_rect(FrameBuffer& target, Rect rect, Color color, int stroke_width, 
         return;
     }
 
+    const int twice_stroke = safe_add(stroke_width, stroke_width);
     const Rect inner{
-        rect.x + stroke_width,
-        rect.y + stroke_width,
-        std::max(0, rect.width - stroke_width * 2),
-        std::max(0, rect.height - stroke_width * 2),
+        safe_add(rect.x, stroke_width),
+        safe_add(rect.y, stroke_width),
+        std::max(0, safe_add(rect.width, safe_negate(twice_stroke))),
+        std::max(0, safe_add(rect.height, safe_negate(twice_stroke))),
     };
     const int inner_radius = expand_corner_radii(border_radius, -stroke_width);
     const RasterRoundedRect outer = prepare_rounded_rect(rect, border_radius);
@@ -620,11 +630,12 @@ void stroke_rect_clipped(FrameBuffer& target, Rect rect, Rect clip, Color color,
         return;
     }
 
+    const int twice_stroke = safe_add(stroke_width, stroke_width);
     const Rect inner{
-        rect.x + stroke_width,
-        rect.y + stroke_width,
-        std::max(0, rect.width - stroke_width * 2),
-        std::max(0, rect.height - stroke_width * 2),
+        safe_add(rect.x, stroke_width),
+        safe_add(rect.y, stroke_width),
+        std::max(0, safe_add(rect.width, safe_negate(twice_stroke))),
+        std::max(0, safe_add(rect.height, safe_negate(twice_stroke))),
     };
     const int inner_radius = expand_corner_radii(border_radius, -stroke_width);
     const RasterRoundedRect outer = prepare_rounded_rect(rect, border_radius);
@@ -879,19 +890,21 @@ void draw_text(FrameBuffer& target,
     const int advance = 6 * scale;
     const int glyph_height = 7 * scale;
     const int stroke_passes = font_weight >= 600 ? 2 : 1;
-    int glyph_count = 0;
+    std::size_t glyph_count = 0;
     for (std::size_t index = 0; index < text.size();) {
         fallback_glyph_for_codepoint(text, index);
         ++glyph_count;
     }
-    const int text_width = std::min(rect.width, glyph_count * advance);
+    const int text_width = std::min(rect.width, clamp_int64_to_int(
+        std::min<std::int64_t>(std::numeric_limits<int>::max(),
+                               static_cast<std::int64_t>(glyph_count) * advance)));
     int cursor_x = rect.x;
     if (align == TextCommandAlign::Center) {
-        cursor_x += std::max(0, (rect.width - text_width) / 2);
+        cursor_x = safe_add(cursor_x, std::max(0, (rect.width - text_width) / 2));
     } else if (align == TextCommandAlign::End) {
-        cursor_x += std::max(0, rect.width - text_width);
+        cursor_x = safe_add(cursor_x, std::max(0, rect.width - text_width));
     }
-    const int baseline_y = rect.y + std::max(0, (rect.height - glyph_height) / 2);
+    const int baseline_y = safe_add(rect.y, std::max(0, (rect.height - glyph_height) / 2));
     for (std::size_t index = 0; index < text.size();) {
         if (static_cast<std::int64_t>(cursor_x) + glyph_width >
             static_cast<std::int64_t>(safe_edge(rect.x, rect.width))) {
@@ -906,12 +919,13 @@ void draw_text(FrameBuffer& target,
                 }
                 for (int pass = 0; pass < stroke_passes; ++pass) {
                     fill_rect(target,
-                              Rect{cursor_x + col * scale + pass, baseline_y + row * scale, scale, scale},
+                              Rect{safe_add(safe_add(cursor_x, col * scale), pass),
+                                   safe_add(baseline_y, row * scale), scale, scale},
                               color);
                 }
             }
         }
-        cursor_x += advance;
+        cursor_x = safe_add(cursor_x, advance);
     }
 }
 
@@ -999,11 +1013,11 @@ Rect transformed_destination_rect(Rect source_rect,
             max_y = std::max(max_y, y);
         }
     }
-    const int x = static_cast<int>(std::floor(min_x));
-    const int y = static_cast<int>(std::floor(min_y));
-    const int right = static_cast<int>(std::ceil(max_x));
-    const int bottom = static_cast<int>(std::ceil(max_y));
-    return Rect{x, y, std::max(1, right - x), std::max(1, bottom - y)};
+    const int x = floor_float_to_int(min_x);
+    const int y = floor_float_to_int(min_y);
+    const int right = ceil_float_to_int(max_x);
+    const int bottom = ceil_float_to_int(max_y);
+    return Rect{x, y, std::max(1, safe_span(x, right)), std::max(1, safe_span(y, bottom))};
 }
 
 void composite_transformed_buffer(FrameBuffer& target,
@@ -1046,7 +1060,8 @@ void composite_transformed_buffer(FrameBuffer& target,
                 (unrotated_y - origin_y) / std::max(0.01F, transform.scale_y);
             const float source_x = source_world_x - static_cast<float>(source_rect.x);
             const float source_y = source_world_y - static_cast<float>(source_rect.y);
-            if (source_x < 0.0F || source_y < 0.0F ||
+            if (!std::isfinite(source_x) || !std::isfinite(source_y) ||
+                source_x < 0.0F || source_y < 0.0F ||
                 source_x >= static_cast<float>(source.width) ||
                 source_y >= static_cast<float>(source.height)) {
                 continue;
@@ -1073,10 +1088,6 @@ void composite_transformed_buffer(FrameBuffer& target,
                         with_opacity(source_pixel, opacity));
         }
     }
-}
-
-int round_transform_offset(float value) {
-    return static_cast<int>(value >= 0.0F ? value + 0.5F : value - 0.5F);
 }
 
 bool offscreen_fits_budget(Rect bounds,
@@ -1123,8 +1134,8 @@ OpaqueFillPrefix opaque_fill_prefix(const DisplayList& display_list,
             break;
         }
         Rect rect = command.rect;
-        rect.x += offset_x;
-        rect.y += offset_y;
+        rect.x = safe_add(rect.x, offset_x);
+        rect.y = safe_add(rect.y, offset_y);
         if (contains_rect(rect, clip)) {
             prefix.first_command = index;
             prefix.covers_clip = true;
@@ -1193,8 +1204,10 @@ void prepare_composite_bounds(const LayerNode& root, SoftwareCompositor::Scratch
         entry.source_bounds = source_bounds;
 
         Rect transformed_source = source_bounds;
-        transformed_source.x += round_transform_offset(current.layer->transform.translate_x);
-        transformed_source.y += round_transform_offset(current.layer->transform.translate_y);
+        transformed_source.x = safe_add(transformed_source.x,
+                                        round_float_to_int(current.layer->transform.translate_x));
+        transformed_source.y = safe_add(transformed_source.y,
+                                        round_float_to_int(current.layer->transform.translate_y));
         const bool has_scale_or_rotate =
             std::abs(current.layer->transform.scale_x - 1.0F) >= 0.001F ||
             std::abs(current.layer->transform.scale_y - 1.0F) >= 0.001F ||
@@ -1203,8 +1216,10 @@ void prepare_composite_bounds(const LayerNode& root, SoftwareCompositor::Scratch
             entry.visual_bounds = transformed_source;
         } else {
             Rect transform_reference_bounds = current.layer->bounds;
-            transform_reference_bounds.x += round_transform_offset(current.layer->transform.translate_x);
-            transform_reference_bounds.y += round_transform_offset(current.layer->transform.translate_y);
+            transform_reference_bounds.x = safe_add(
+                transform_reference_bounds.x, round_float_to_int(current.layer->transform.translate_x));
+            transform_reference_bounds.y = safe_add(
+                transform_reference_bounds.y, round_float_to_int(current.layer->transform.translate_y));
             entry.visual_bounds = transformed_destination_rect(transformed_source,
                                                                 transform_reference_bounds,
                                                                 current.layer->transform,
@@ -1279,6 +1294,9 @@ void SoftwareRasterizerScratch::release() {
     FrameBuffer{}.pixels.swap(temporary_surface.pixels);
     temporary_surface.width = 0;
     temporary_surface.height = 0;
+    FrameBuffer{}.pixels.swap(transformed_surface.pixels);
+    transformed_surface.width = 0;
+    transformed_surface.height = 0;
 }
 
 void SoftwareRasterizerStatistics::reset() {
@@ -1545,8 +1563,10 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                           Color{226, 232, 240, 255});
             }
             const RasterRoundedRect rounded = prepare_rounded_rect(rect, command.border_radius);
-            for (int y = visible.y; y < visible.y + visible.height; ++y) {
-                for (int x = visible.x; x < visible.x + visible.width; ++x) {
+            const int y_end = safe_edge(visible.y, visible.height);
+            const int x_end = safe_edge(visible.x, visible.width);
+            for (int y = visible.y; y < y_end; ++y) {
+                for (int x = visible.x; x < x_end; ++x) {
                     blend_pixel(target,
                                 x,
                                 y,
@@ -1965,15 +1985,15 @@ void SoftwareCompositor::composite_layer(const LayerNode& layer,
                                          std::size_t active_offscreen_pixels,
                                          SoftwareRasterizerScratch* scratch,
                                          const Scratch* compositor_scratch) const {
-    const int transform_x = round_transform_offset(layer.transform.translate_x);
-    const int transform_y = round_transform_offset(layer.transform.translate_y);
-    const int layer_offset_x = offset_x + transform_x;
-    const int layer_offset_y = offset_y + transform_y;
+    const int transform_x = round_float_to_int(layer.transform.translate_x);
+    const int transform_y = round_float_to_int(layer.transform.translate_y);
+    const int layer_offset_x = safe_add(offset_x, transform_x);
+    const int layer_offset_y = safe_add(offset_y, transform_y);
     Rect layer_clip = clip;
     if (layer.has_clip) {
         Rect translated_clip = layer.clip_rect;
-        translated_clip.x += layer_offset_x;
-        translated_clip.y += layer_offset_y;
+        translated_clip.x = safe_add(translated_clip.x, layer_offset_x);
+        translated_clip.y = safe_add(translated_clip.y, layer_offset_y);
         layer_clip = intersect_rect(layer_clip, translated_clip);
         if (empty_rect(layer_clip)) {
             return;
@@ -1985,11 +2005,11 @@ void SoftwareCompositor::composite_layer(const LayerNode& layer,
         layer.opacity < 0.999F || has_corner_radius(layer.clip_border_radius);
     if (needs_offscreen) {
         Rect source_bounds = bounds.source_bounds;
-        source_bounds.x += layer_offset_x;
-        source_bounds.y += layer_offset_y;
+        source_bounds.x = safe_add(source_bounds.x, layer_offset_x);
+        source_bounds.y = safe_add(source_bounds.y, layer_offset_y);
         Rect transform_reference_bounds = layer.bounds;
-        transform_reference_bounds.x += layer_offset_x;
-        transform_reference_bounds.y += layer_offset_y;
+        transform_reference_bounds.x = safe_add(transform_reference_bounds.x, layer_offset_x);
+        transform_reference_bounds.y = safe_add(transform_reference_bounds.y, layer_offset_y);
         const bool has_scale_or_rotate =
             std::abs(layer.transform.scale_x - 1.0F) >= 0.001F ||
             std::abs(layer.transform.scale_y - 1.0F) >= 0.001F ||
@@ -2008,23 +2028,9 @@ void SoftwareCompositor::composite_layer(const LayerNode& layer,
         }
         Rect offscreen_bounds = has_scale_or_rotate ? source_bounds : visible_destination;
         std::size_t offscreen_pixels = 0;
-        if (!offscreen_fits_budget(offscreen_bounds, options_, active_offscreen_pixels, offscreen_pixels)) {
-            if (has_scale_or_rotate) {
-                report_diagnostic(options_.diagnostics,
-                                  DiagnosticStage::Paint,
-                                  DiagnosticSeverity::Warning,
-                                  "paint-transform-budget",
-                                  "Transformed layer exceeded the aggregate live offscreen pixel budget and was skipped",
-                                  std::to_string(offscreen_bounds.width) + "x" +
-                                      std::to_string(offscreen_bounds.height));
-                return;
-            }
-            report_diagnostic(options_.diagnostics,
-                              DiagnosticStage::Paint,
-                              DiagnosticSeverity::Warning,
-                              "paint-offscreen-budget",
-                              "Offscreen compositing buffer exceeded aggregate live budget; layer was painted by direct opacity fallback",
-                              std::to_string(offscreen_bounds.width) + "x" + std::to_string(offscreen_bounds.height));
+        const bool requires_offscreen_for_correctness = has_scale_or_rotate ||
+            has_corner_radius(layer.clip_border_radius);
+        const auto direct_opacity_fallback = [&]() {
             rasterize_with_opacity(rasterizer_,
                                    layer.display_list,
                                    target,
@@ -2037,9 +2043,34 @@ void SoftwareCompositor::composite_layer(const LayerNode& layer,
             for (std::size_t index = 0; index < layer.children.size(); ++index) {
                 composite_layer(*layer.children[index],
                                 compositor_scratch->composite_bounds[bounds.children[index]],
-                                target, layer_clip, layer_offset_x, layer_offset_y, layer_opacity,
-                                active_offscreen_pixels, scratch, compositor_scratch);
+                                target,
+                                layer_clip,
+                                layer_offset_x,
+                                layer_offset_y,
+                                layer_opacity,
+                                active_offscreen_pixels,
+                                scratch,
+                                compositor_scratch);
             }
+        };
+        if (!offscreen_fits_budget(offscreen_bounds, options_, active_offscreen_pixels, offscreen_pixels)) {
+            if (requires_offscreen_for_correctness) {
+                report_diagnostic(options_.diagnostics,
+                                  DiagnosticStage::Paint,
+                                  DiagnosticSeverity::Warning,
+                                  has_scale_or_rotate ? "paint-transform-budget" : "paint-offscreen-budget",
+                                  "Layer requiring an offscreen surface exceeded the aggregate live pixel budget and was skipped",
+                                  std::to_string(offscreen_bounds.width) + "x" +
+                                      std::to_string(offscreen_bounds.height));
+                return;
+            }
+            report_diagnostic(options_.diagnostics,
+                              DiagnosticStage::Paint,
+                              DiagnosticSeverity::Warning,
+                              "paint-offscreen-budget",
+                              "Offscreen compositing buffer exceeded aggregate live budget; layer was painted by direct opacity fallback",
+                              std::to_string(offscreen_bounds.width) + "x" + std::to_string(offscreen_bounds.height));
+            direct_opacity_fallback();
             return;
         }
 
@@ -2051,27 +2082,40 @@ void SoftwareCompositor::composite_layer(const LayerNode& layer,
                               DiagnosticStage::Paint,
                               DiagnosticSeverity::Warning,
                               "paint-offscreen-allocation-failed",
-                              "Offscreen compositing allocation failed; layer was painted by direct opacity fallback",
+                              requires_offscreen_for_correctness
+                                  ? "Offscreen compositing allocation failed; layer was skipped to preserve paint semantics"
+                                  : "Offscreen compositing allocation failed; layer was painted by direct opacity fallback",
                               std::to_string(offscreen_bounds.width) + "x" + std::to_string(offscreen_bounds.height));
-            rasterize_with_opacity(rasterizer_, layer.display_list, target, layer_clip,
-                                   layer_offset_x, layer_offset_y, layer_opacity, 0, scratch);
-            for (std::size_t index = 0; index < layer.children.size(); ++index) {
-                composite_layer(*layer.children[index],
-                                compositor_scratch->composite_bounds[bounds.children[index]],
-                                target, layer_clip, layer_offset_x, layer_offset_y, layer_opacity,
-                                active_offscreen_pixels, scratch, compositor_scratch);
+            if (!requires_offscreen_for_correctness) {
+                direct_opacity_fallback();
             }
             return;
         }
-        const int child_offset_x = layer_offset_x - offscreen_bounds.x;
-        const int child_offset_y = layer_offset_y - offscreen_bounds.y;
+        if (offscreen.width != offscreen_bounds.width ||
+            offscreen.height != offscreen_bounds.height ||
+            offscreen.pixels.size() != offscreen_pixels) {
+            report_diagnostic(options_.diagnostics,
+                              DiagnosticStage::Paint,
+                              DiagnosticSeverity::Warning,
+                              "paint-offscreen-allocation-failed",
+                              requires_offscreen_for_correctness
+                                  ? "Offscreen compositing allocation failed; layer was skipped to preserve paint semantics"
+                                  : "Offscreen compositing allocation failed; layer was painted by direct opacity fallback",
+                              std::to_string(offscreen_bounds.width) + "x" + std::to_string(offscreen_bounds.height));
+            if (!requires_offscreen_for_correctness) {
+                direct_opacity_fallback();
+            }
+            return;
+        }
+        const int child_offset_x = safe_add(layer_offset_x, safe_negate(offscreen_bounds.x));
+        const int child_offset_y = safe_add(layer_offset_y, safe_negate(offscreen_bounds.y));
         const Rect offscreen_clip{0, 0, offscreen_bounds.width, offscreen_bounds.height};
         Rect local_layer_clip = offscreen_clip;
         if (layer.has_clip) {
             local_layer_clip = intersect_rect(
                 local_layer_clip,
-                Rect{layer_clip.x - offscreen_bounds.x,
-                     layer_clip.y - offscreen_bounds.y,
+                Rect{safe_add(layer_clip.x, safe_negate(offscreen_bounds.x)),
+                     safe_add(layer_clip.y, safe_negate(offscreen_bounds.y)),
                      layer_clip.width,
                      layer_clip.height});
         }
@@ -2090,11 +2134,11 @@ void SoftwareCompositor::composite_layer(const LayerNode& layer,
         }
         if (has_corner_radius(layer.clip_border_radius)) {
             Rect rounded_clip = layer.clip_rect;
-            rounded_clip.x += layer_offset_x;
-            rounded_clip.y += layer_offset_y;
+            rounded_clip.x = safe_add(rounded_clip.x, layer_offset_x);
+            rounded_clip.y = safe_add(rounded_clip.y, layer_offset_y);
             apply_rounded_clip(offscreen,
-                               Rect{rounded_clip.x - offscreen_bounds.x,
-                                    rounded_clip.y - offscreen_bounds.y,
+                               Rect{safe_add(rounded_clip.x, safe_negate(offscreen_bounds.x)),
+                                    safe_add(rounded_clip.y, safe_negate(offscreen_bounds.y)),
                                     rounded_clip.width,
                                     rounded_clip.height},
                                layer.clip_border_radius);
@@ -2168,9 +2212,23 @@ void write_bmp(const FrameBuffer& frame_buffer, const std::string& path) {
         throw std::runtime_error("failed to open output image");
     }
 
-    const int row_stride = ((frame_buffer.width * 3 + 3) / 4) * 4;
-    const int pixel_bytes = row_stride * frame_buffer.height;
-    const int file_bytes = 14 + 40 + pixel_bytes;
+    if (frame_buffer.width <= 0 || frame_buffer.height <= 0) {
+        throw std::runtime_error("cannot write an empty BMP frame");
+    }
+    std::size_t row_bytes = 0;
+    std::size_t row_stride = 0;
+    std::size_t pixel_bytes = 0;
+    std::size_t file_bytes = 0;
+    if (!checked_multiply(static_cast<std::size_t>(frame_buffer.width), 3U, row_bytes) ||
+        !checked_add(row_bytes, 3U, row_stride)) {
+        throw std::runtime_error("BMP row size overflow");
+    }
+    row_stride = (row_stride / 4U) * 4U;
+    if (!checked_multiply(row_stride, static_cast<std::size_t>(frame_buffer.height), pixel_bytes) ||
+        !checked_add(14U + 40U, pixel_bytes, file_bytes) ||
+        file_bytes > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error("BMP image is too large");
+    }
 
     const auto put_u16 = [&](std::uint16_t value) {
         output.put(static_cast<char>(value & 0xffU));
@@ -2218,7 +2276,7 @@ void write_bmp(const FrameBuffer& frame_buffer, const std::string& path) {
             output.put(static_cast<char>(pixel.g));
             output.put(static_cast<char>(pixel.r));
         }
-        output.write(padding.data(), row_stride - frame_buffer.width * 3);
+        output.write(padding.data(), static_cast<std::streamsize>(row_stride - row_bytes));
     }
 }
 

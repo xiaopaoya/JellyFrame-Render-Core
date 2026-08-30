@@ -547,6 +547,7 @@ void soft_box_shadow_row_path_matches_reference_pixels() {
 #if !JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
     return;
 #endif
+#if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
     struct ShadowCase {
         Rect rect;
         Rect clip;
@@ -582,6 +583,7 @@ void soft_box_shadow_row_path_matches_reference_pixels() {
         check_equal_pixels(actual, expected,
                            "row-wise soft shadow path preserves reference pixels for all geometry classes");
     }
+#endif
 }
 
 void rounded_stroke_keeps_corner_pixels_clear() {
@@ -1177,6 +1179,31 @@ void compositor_offsets_rounded_overflow_clip_with_layer_transform() {
           "translated rounded overflow clip keeps its moved top edge");
 }
 
+void compositor_bounds_extreme_manual_transform_coordinates() {
+    check(round_float_to_int(std::numeric_limits<float>::infinity()) == std::numeric_limits<int>::max(),
+          "positive infinite transforms clamp to the positive coordinate limit");
+    check(round_float_to_int(-std::numeric_limits<float>::infinity()) == std::numeric_limits<int>::min(),
+          "negative infinite transforms clamp to the negative coordinate limit");
+    check(round_float_to_int(std::numeric_limits<float>::quiet_NaN()) == 0,
+          "NaN transforms resolve to a neutral coordinate");
+
+    LayerNode root;
+    root.type = LayerType::Root;
+    root.bounds = Rect{0, 0, 4, 4};
+    auto child = LayerNodePtr(new LayerNode, LayerNodeDeleter{false});
+    child->type = LayerType::Paint;
+    child->bounds = Rect{0, 0, 4, 4};
+    child->transform.translate_x = std::numeric_limits<float>::infinity();
+    DisplayCommand fill = black_fill(Rect{0, 0, 4, 4});
+    fill.color = Color{20, 120, 240, 255};
+    child->display_list.push_back(fill);
+    root.children.push_back(std::move(child));
+
+    const FrameBuffer output = SoftwareCompositor().render(root, 4, 4, Color{255, 255, 255, 255});
+    check(output.pixel(0, 0).r == 255 && output.pixel(0, 0).g == 255 && output.pixel(0, 0).b == 255,
+          "an extreme manual transform does not wrap paint into the target");
+}
+
 void dirty_render_skips_contained_dirty_rects() {
     LayerNode root;
     root.type = LayerType::Root;
@@ -1328,6 +1355,41 @@ void compositor_degrades_oversized_offscreen_layers_without_crashing() {
           "offscreen budget fallback uses bounded direct compositing");
     check(degraded.pixel(1, 0).r == 255, "fallback keeps untouched pixels");
     check(has_diagnostic_code(diagnostics, "paint-offscreen-budget"), "offscreen fallback is reported");
+}
+
+void compositor_does_not_bypass_rounded_clip_when_offscreen_budget_is_exceeded() {
+    LayerNode root;
+    root.type = LayerType::Root;
+    root.bounds = Rect{0, 0, 12, 12};
+
+    auto clip = LayerNodePtr(new LayerNode, LayerNodeDeleter{false});
+    clip->type = LayerType::Clip;
+    clip->bounds = Rect{2, 2, 8, 8};
+    clip->clip_rect = clip->bounds;
+    clip->has_clip = true;
+    clip->clip_border_radius = 4;
+
+    auto content = LayerNodePtr(new LayerNode, LayerNodeDeleter{false});
+    content->bounds = clip->bounds;
+    DisplayCommand fill = black_fill(clip->bounds);
+    fill.color = Color{20, 120, 240, 255};
+    content->display_list.push_back(fill);
+    clip->children.push_back(std::move(content));
+    root.children.push_back(std::move(clip));
+
+    VectorDiagnosticSink diagnostics;
+    SoftwareCompositor::Options options;
+    options.max_offscreen_pixels = 1;
+    options.diagnostics = &diagnostics;
+    const FrameBuffer output =
+        SoftwareCompositor({}, options).render(root, 12, 12, Color{255, 255, 255, 255});
+
+    check(output.pixel(2, 2).r == 255 && output.pixel(2, 2).g == 255,
+          "rounded clip budget failure does not expose an unclipped corner");
+    check(output.pixel(6, 6).r == 255 && output.pixel(6, 6).b == 255,
+          "rounded clip budget failure skips the incomplete layer consistently");
+    check(has_diagnostic_code(diagnostics, "paint-offscreen-budget"),
+          "rounded clip budget failure is reported as an offscreen budget diagnostic");
 }
 
 void compositor_keeps_composited_paint_outside_layout_bounds() {
@@ -2018,6 +2080,7 @@ int main() {
         rasterizer_records_opt_in_rounded_clip_replay_timing();
         rasterizer_skips_rounded_clip_surface_when_dirty_rect_misses_corners();
         compositor_offsets_rounded_overflow_clip_with_layer_transform();
+        compositor_bounds_extreme_manual_transform_coordinates();
         dirty_render_skips_contained_dirty_rects();
         compositor_skips_covered_opaque_fill_prefix();
         compositor_keeps_non_fill_prefix_side_effects();
@@ -2030,6 +2093,7 @@ int main() {
         rasterizer_scratch_reuses_clipped_image_storage();
         compositor_smooths_scaled_layers();
         compositor_degrades_oversized_offscreen_layers_without_crashing();
+        compositor_does_not_bypass_rounded_clip_when_offscreen_budget_is_exceeded();
         compositor_keeps_composited_paint_outside_layout_bounds();
         compositor_keeps_nested_composited_paint_outside_parent_layout_bounds();
         compositor_expanded_visual_bounds_keep_border_box_transform_origin();

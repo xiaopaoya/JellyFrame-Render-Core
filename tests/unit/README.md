@@ -16,6 +16,5 @@ Group failures by pipeline area before editing:
 - Runtime interaction: events, hit testing, focus, scroll and dirty-region
   invalidation.
 
-Use focused unit fixtures for Core-only reproduction. App-package fixtures,
-desktop captures and device evidence are owned by the JellyFrame Runtime or
-Device OS repositories and must not become a dependency of this suite.
+Use `tests/fixtures/apps/` for a cross-module reproducer and
+`tools/native/README.md` for the matching desktop dump or capture tool.

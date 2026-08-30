@@ -10,9 +10,11 @@
 #include <algorithm>
 #include <cerrno>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <utility>
 
 namespace jellyframe {
@@ -112,9 +114,10 @@ bool has_text_shadow(const Style& style) {
 int resolved_border_radius(const LayoutBox& box) {
     const int max_radius = std::max(0, std::min(box.rect.width, box.rect.height) / 2);
     if (box.style.border_radius_percent >= 0) {
-        return std::min(max_radius,
-                        (std::max(0, std::min(box.rect.width, box.rect.height)) *
-                         box.style.border_radius_percent + 50) / 100);
+        const std::int64_t min_dimension = std::max(0, std::min(box.rect.width, box.rect.height));
+        const std::int64_t percent = box.style.border_radius_percent;
+        const std::int64_t radius = (min_dimension * percent + 50) / 100;
+        return static_cast<int>(std::min<std::int64_t>(max_radius, std::max<std::int64_t>(0, radius)));
     }
     CornerRadii radii = decode_corner_radii(box.style.border_radius);
     radii.top_left = std::min(max_radius, radii.top_left);
@@ -387,7 +390,6 @@ void push_text_with_layout(DisplayList& display_list,
     const bool wrap_anywhere = style.overflow_wrap_anywhere && !style.white_space_nowrap;
     const bool wrap_at_opportunities = !wrap_anywhere && !style.white_space_nowrap &&
         has_text_wrap_opportunity(rendered_text);
-    const bool wrap_balanced = style.text_wrap_balance && wrap_at_opportunities;
     const bool split_scalars = style.letter_spacing != 0;
     if (!wrap_anywhere && !wrap_at_opportunities && !split_scalars) {
         push_text(display_list, rect, color, rendered_text, style.font_size, style.font_weight,
@@ -397,14 +399,6 @@ void push_text_with_layout(DisplayList& display_list,
 
     const std::vector<std::string> lines = wrap_anywhere
         ? wrap_text_anywhere(text_measure,
-                             rendered_text,
-                             style.font_size,
-                             style.font_weight,
-                             style.font_family_hash,
-                             style.letter_spacing,
-                             rect.width)
-        : wrap_balanced
-        ? wrap_text_balanced(text_measure,
                              rendered_text,
                              style.font_size,
                              style.font_weight,
@@ -423,11 +417,16 @@ void push_text_with_layout(DisplayList& display_list,
     const int bounded_spacing = bounded_letter_spacing(style.font_size, style.letter_spacing);
     for (std::size_t line_index = 0; line_index < lines.size(); ++line_index) {
         const std::string& line = lines[line_index];
-        const int y = rect.y + static_cast<int>(line_index) * line_height;
-        if (y >= safe_edge(rect.y, rect.height)) {
+        const std::size_t bounded_line_index = std::min<std::size_t>(
+            line_index, static_cast<std::size_t>(std::numeric_limits<int>::max()));
+        const int line_offset = clamp_int64_to_int(
+            static_cast<std::int64_t>(bounded_line_index) * line_height);
+        const int y = safe_add(rect.y, line_offset);
+        const int rect_bottom = safe_edge(rect.y, rect.height);
+        if (y >= rect_bottom) {
             break;
         }
-        Rect line_rect{rect.x, y, rect.width, std::min(line_height, safe_edge(rect.y, rect.height) - y)};
+        Rect line_rect{rect.x, y, rect.width, std::min(line_height, safe_span(y, rect_bottom))};
         if (!split_scalars) {
             push_text(display_list, line_rect, color, line, style.font_size, style.font_weight,
                       style.font_family_hash, align, true);
@@ -441,9 +440,9 @@ void push_text_with_layout(DisplayList& display_list,
                                                                  style.letter_spacing).width;
         int cursor_x = line_rect.x;
         if (align == TextCommandAlign::Center) {
-            cursor_x += std::max(0, (line_rect.width - line_width) / 2);
+            cursor_x = safe_add(cursor_x, std::max(0, safe_span(line_width, line_rect.width) / 2));
         } else if (align == TextCommandAlign::End) {
-            cursor_x += std::max(0, line_rect.width - line_width);
+            cursor_x = safe_add(cursor_x, std::max(0, safe_span(line_width, line_rect.width)));
         }
         std::size_t scalar_index = 0;
         while (scalar_index < line.size()) {
@@ -464,9 +463,9 @@ void push_text_with_layout(DisplayList& display_list,
                       style.font_family_hash,
                       TextCommandAlign::Start,
                       true);
-            cursor_x += scalar_width;
+            cursor_x = safe_add(cursor_x, scalar_width);
             if (scalar_index < line.size()) {
-                cursor_x += bounded_spacing;
+                cursor_x = safe_add(cursor_x, bounded_spacing);
             }
         }
     }
@@ -502,9 +501,9 @@ void push_text_decorations(DisplayList& display_list, const LayoutBox& box, Rect
     const int thickness = std::max(1, box.style.font_size / 12);
     const int inset = std::max(0, box.style.font_size / 12);
     const Rect line_rect_base{
-        rect.x + inset,
+        safe_add(rect.x, inset),
         rect.y,
-        std::max(0, rect.width - inset * 2),
+        std::max(0, safe_add(rect.width, safe_negate(safe_add(inset, inset)))),
         thickness,
     };
     if (line_rect_base.width <= 0) {
@@ -512,12 +511,14 @@ void push_text_decorations(DisplayList& display_list, const LayoutBox& box, Rect
     }
     if (box.style.text_decoration_line_through) {
         Rect strike = line_rect_base;
-        strike.y = rect.y + std::max(0, (rect.height - thickness) / 2);
+        strike.y = safe_add(rect.y, std::max(0, safe_span(thickness, rect.height) / 2));
         push_fill_rect(display_list, strike, box.style.color);
     }
     if (box.style.text_decoration_underline) {
         Rect underline = line_rect_base;
-        underline.y = rect.y + std::max(0, rect.height - std::max(thickness + 1, box.style.font_size / 5));
+        underline.y = safe_add(
+            rect.y,
+            std::max(0, safe_span(std::max(thickness + 1, box.style.font_size / 5), rect.height)));
         push_fill_rect(display_list, underline, box.style.color);
     }
 }
@@ -535,11 +536,13 @@ TextCommandAlign text_command_align(TextAlign align) {
 }
 
 int estimate_marker_width(const std::string& text, int font_size) {
-    int units = 0;
+    std::int64_t units = 0;
     for (char ch : text) {
-        units += ch == '.' || ch == ' ' ? 4 : 8;
+        units = std::min<std::int64_t>(std::numeric_limits<int>::max(),
+                                       units + (ch == '.' || ch == ' ' ? 4 : 8));
     }
-    return std::max(font_size, (font_size * units + 7) / 14);
+    const std::int64_t width = (static_cast<std::int64_t>(std::max(0, font_size)) * units + 7) / 14;
+    return std::max(font_size, clamp_int64_to_int(width));
 }
 
 int list_item_ordinal(const Node& node) {
@@ -646,10 +649,10 @@ void paint_generated_inline_content(const LayoutBox& box,
             : (box.style.before_color_specified ? box.style.before_color : box.style.color);
         Rect rect = content;
         if (!after && box.style.before_left_specified) {
-            rect.x += box.style.before_left;
+            rect.x = safe_add(rect.x, box.style.before_left);
             rect.width = std::max(0, rect.width - box.style.before_left);
         } else if (after && box.style.after_left_specified) {
-            rect.x += box.style.after_left;
+            rect.x = safe_add(rect.x, box.style.after_left);
             rect.width = std::max(0, rect.width - box.style.after_left);
         }
         push_text(display_list,
@@ -678,7 +681,13 @@ bool parse_float_attribute(const Node& node, const char* name, float& output) {
     char* end = nullptr;
     errno = 0;
     const float parsed = std::strtof(value.c_str(), &end);
-    if (end == value.c_str() || errno == ERANGE) {
+    if (end == value.c_str() || errno == ERANGE || !std::isfinite(parsed)) {
+        return false;
+    }
+    while (end != nullptr && std::isspace(static_cast<unsigned char>(*end)) != 0) {
+        ++end;
+    }
+    if (end == nullptr || *end != '\0') {
         return false;
     }
     output = parsed;
@@ -750,8 +759,8 @@ void paint_outline(const LayoutBox& box, DisplayList& display_list) {
     const Rect outline_rect{
         safe_edge(box.rect.x, -extent),
         safe_edge(box.rect.y, -extent),
-        safe_edge(box.rect.width, extent * 2),
-        safe_edge(box.rect.height, extent * 2),
+        safe_edge(box.rect.width, safe_add(extent, extent)),
+        safe_edge(box.rect.height, safe_add(extent, extent)),
     };
     const int border_radius = resolved_border_radius(box);
     push_stroke_rect(display_list,
@@ -805,8 +814,10 @@ void paint_meter_bar(const LayoutBox& box, DisplayList& display_list) {
 
 int range_state_value(const FormControlState& state) {
     char* end = nullptr;
+    errno = 0;
     const long parsed = std::strtol(state.value.c_str(), &end, 10);
-    if (end == state.value.c_str()) {
+    if (end == state.value.c_str() || errno == ERANGE || end == nullptr || *end != '\0' ||
+        parsed < std::numeric_limits<int>::min() || parsed > std::numeric_limits<int>::max()) {
         return state.min;
     }
     return static_cast<int>(parsed);
@@ -933,13 +944,17 @@ bool resolve_image_handle(const LayoutBox& box,
 }
 
 Rect content_rect_for(const LayoutBox& box) {
+    const int horizontal_insets = safe_add(
+        safe_add(box.style.border_width.left, box.style.border_width.right),
+        safe_add(box.style.padding.left, box.style.padding.right));
+    const int vertical_insets = safe_add(
+        safe_add(box.style.border_width.top, box.style.border_width.bottom),
+        safe_add(box.style.padding.top, box.style.padding.bottom));
     return Rect{
-        box.rect.x + box.style.border_width.left + box.style.padding.left,
-        box.rect.y + box.style.border_width.top + box.style.padding.top,
-        std::max(0, box.rect.width - box.style.border_width.left - box.style.border_width.right -
-                    box.style.padding.left - box.style.padding.right),
-        std::max(0, box.rect.height - box.style.border_width.top - box.style.border_width.bottom -
-                    box.style.padding.top - box.style.padding.bottom),
+        safe_add(box.rect.x, safe_add(box.style.border_width.left, box.style.padding.left)),
+        safe_add(box.rect.y, safe_add(box.style.border_width.top, box.style.padding.top)),
+        std::max(0, safe_add(box.rect.width, safe_negate(horizontal_insets))),
+        std::max(0, safe_add(box.rect.height, safe_negate(vertical_insets))),
     };
 }
 
@@ -947,9 +962,10 @@ int scrollable_content_height(const LayoutBox& box) {
     const Rect content = content_rect_for(box);
     int bottom = content.y;
     for (const auto& child : box.children) {
-        bottom = std::max(bottom, child->rect.y + child->rect.height + child->style.margin.bottom);
+        bottom = std::max(bottom, safe_add(safe_edge(child->rect.y, child->rect.height),
+                                           child->style.margin.bottom));
     }
-    return std::max(0, bottom - content.y);
+    return safe_span(content.y, bottom);
 }
 
 int max_scroll_y_for(const LayoutBox& box) {
@@ -957,7 +973,7 @@ int max_scroll_y_for(const LayoutBox& box) {
         return 0;
     }
     const Rect content = content_rect_for(box);
-    return std::max(0, scrollable_content_height(box) - std::max(0, content.height));
+    return std::max(0, safe_add(scrollable_content_height(box), safe_negate(std::max(0, content.height))));
 }
 
 int resolved_scroll_y_for(const LayoutBox& box, const LayerTreeBuilderOptions& options) {
@@ -987,15 +1003,20 @@ bool paint_scroll_indicator(const LayoutBox& box, int scroll_y, int max_scroll_y
     if (track_height < kMinThumbHeight) {
         return false;
     }
-    const int scrollable_height = content.height + max_scroll_y;
-    int thumb_height = std::max(kMinThumbHeight, (track_height * content.height) / std::max(1, scrollable_height));
+    const std::int64_t scrollable_height = std::max<std::int64_t>(
+        1, static_cast<std::int64_t>(content.height) + max_scroll_y);
+    const std::int64_t thumb_numerator = static_cast<std::int64_t>(track_height) * content.height;
+    int thumb_height = std::max(kMinThumbHeight, clamp_int64_to_int(
+        thumb_numerator / scrollable_height));
     thumb_height = std::min(track_height, thumb_height);
     const int travel = std::max(0, track_height - thumb_height);
     const int clamped_scroll = std::max(0, std::min(scroll_y, max_scroll_y));
-    const int thumb_y = content.y + kTrackInset +
-        (max_scroll_y > 0 ? (travel * clamped_scroll) / max_scroll_y : 0);
-    const int track_x = content.x + content.width - kTrackWidth - kTrackInset;
-    const Rect track{track_x, content.y + kTrackInset, kTrackWidth, track_height};
+    const int thumb_offset = max_scroll_y > 0
+        ? clamp_int64_to_int(static_cast<std::int64_t>(travel) * clamped_scroll / max_scroll_y)
+        : 0;
+    const int thumb_y = safe_add(safe_add(content.y, kTrackInset), thumb_offset);
+    const int track_x = safe_add(safe_edge(content.x, content.width), -(kTrackWidth + kTrackInset));
+    const Rect track{track_x, safe_add(content.y, kTrackInset), kTrackWidth, track_height};
     const Rect thumb{track_x, thumb_y, kTrackWidth, thumb_height};
     push_fill_rect(display_list, track, Color{255, 255, 255, 48}, 2);
     push_fill_rect(display_list, thumb, Color{255, 255, 255, 176}, 2);
@@ -1007,8 +1028,8 @@ void translate_display_commands(DisplayList& display_list, std::size_t begin, in
         return;
     }
     for (std::size_t index = begin; index < display_list.size(); ++index) {
-        display_list[index].rect.x += dx;
-        display_list[index].rect.y += dy;
+        display_list[index].rect.x = safe_add(display_list[index].rect.x, dx);
+        display_list[index].rect.y = safe_add(display_list[index].rect.y, dy);
     }
 }
 
@@ -1046,15 +1067,17 @@ bool paint_select_popup(const LayoutBox& box,
     }
 
     popup_bounds = geometry.rect;
-    popup_bounds.y -= scroll_y;
+    popup_bounds.y = safe_add(popup_bounds.y, safe_negate(scroll_y));
     push_fill_rect(display_list, popup_bounds, Color{248, 250, 252, 255}, 2);
     const EdgeSizes border{1, 1, 1, 1};
     push_border_rects(display_list, popup_bounds, border, box.style.border_color, 2);
     const FormControlState& state = ensure_form_control_state(*box.node);
     for (int visible_index = 0; visible_index < geometry.visible_option_count; ++visible_index) {
-        const int option_index = geometry.first_option_index + visible_index;
+        const int option_index = safe_add(geometry.first_option_index, visible_index);
+        const int row_offset = clamp_int64_to_int(
+            static_cast<std::int64_t>(visible_index) * geometry.row_height);
         const Rect row{popup_bounds.x,
-                       popup_bounds.y + visible_index * geometry.row_height,
+                       safe_add(popup_bounds.y, row_offset),
                        popup_bounds.width,
                        geometry.row_height};
         if (option_index == state.selected_index) {
@@ -1064,7 +1087,7 @@ bool paint_select_popup(const LayoutBox& box,
             ? Color{148, 163, 184, 255}
             : box.style.color;
         push_text_with_layout(display_list,
-                              Rect{row.x + 5, row.y, std::max(0, row.width - 10), row.height},
+                              Rect{safe_add(row.x, 5), row.y, std::max(0, safe_add(row.width, -10)), row.height},
                               text_color,
                               form_control_option_text(*box.node, option_index),
                               box.style,
@@ -1135,8 +1158,8 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list, const Layer
         if (has_text_shadow(box.style)) {
             const TextShadowStyle& shadow = box.style.text_shadow;
             Rect shadow_rect = box.rect;
-            shadow_rect.x += shadow.offset_x;
-            shadow_rect.y += shadow.offset_y;
+            shadow_rect.x = safe_add(shadow_rect.x, shadow.offset_x);
+            shadow_rect.y = safe_add(shadow_rect.y, shadow.offset_y);
             push_text_with_layout(display_list,
                                   shadow_rect,
                                   shadow.uses_current_color ? box.style.color : shadow.color,
@@ -1226,13 +1249,71 @@ Color with_opacity(Color color, float opacity) {
     return color;
 }
 
+struct FlattenAffineTransform {
+    float xx = 1.0F;
+    float xy = 0.0F;
+    float yx = 0.0F;
+    float yy = 1.0F;
+    float tx = 0.0F;
+    float ty = 0.0F;
+};
+
+FlattenAffineTransform multiply_transform(const FlattenAffineTransform& outer,
+                                          const FlattenAffineTransform& inner) {
+    return {
+        outer.xx * inner.xx + outer.xy * inner.yx,
+        outer.xx * inner.xy + outer.xy * inner.yy,
+        outer.yx * inner.xx + outer.yy * inner.yx,
+        outer.yx * inner.xy + outer.yy * inner.yy,
+        outer.xx * inner.tx + outer.xy * inner.ty + outer.tx,
+        outer.yx * inner.tx + outer.yy * inner.ty + outer.ty,
+    };
+}
+
+FlattenAffineTransform layer_affine_transform(const LayerNode& layer,
+                                              int translated_x,
+                                              int translated_y) {
+    constexpr float kPi = 3.14159265358979323846F;
+    const float radians = layer.transform.rotate_degrees * kPi / 180.0F;
+    const float cosine = std::cos(radians);
+    const float sine = std::sin(radians);
+    const float origin_x = static_cast<float>(safe_add(layer.bounds.x, translated_x)) +
+        static_cast<float>(layer.bounds.width) * static_cast<float>(layer.transform_origin_x_percent) / 100.0F;
+    const float origin_y = static_cast<float>(safe_add(layer.bounds.y, translated_y)) +
+        static_cast<float>(layer.bounds.height) * static_cast<float>(layer.transform_origin_y_percent) / 100.0F;
+    const float xx = cosine * layer.transform.scale_x;
+    const float xy = -sine * layer.transform.scale_y;
+    const float yx = sine * layer.transform.scale_x;
+    const float yy = cosine * layer.transform.scale_y;
+    return {xx, xy, yx, yy, origin_x - xx * origin_x - xy * origin_y,
+            origin_y - yx * origin_x - yy * origin_y};
+}
+
+bool identity_transform(const FlattenAffineTransform& transform) {
+    return std::abs(transform.xx - 1.0F) < 0.0001F && std::abs(transform.xy) < 0.0001F &&
+        std::abs(transform.yx) < 0.0001F && std::abs(transform.yy - 1.0F) < 0.0001F &&
+        std::abs(transform.tx) < 0.0001F && std::abs(transform.ty) < 0.0001F;
+}
+
+std::int32_t fixed_transform_value(float value) {
+    constexpr float kScale = 1024.0F;
+    constexpr float kMaximumFixed = 64.0F * 1024.0F * 1024.0F;
+    if (!std::isfinite(value)) {
+        return 0;
+    }
+    const float scaled = std::max(-kMaximumFixed, std::min(kMaximumFixed, std::round(value * kScale)));
+    return static_cast<std::int32_t>(scaled);
+}
+
 void append_flattened_command(DisplayList& output,
                               const DisplayCommand& command,
                               Rect clip,
                               bool has_clip,
+                              std::uint32_t transform_source_clip_index,
                               float opacity,
                               int translate_x,
                               int translate_y,
+                              const FlattenAffineTransform& transform,
                               std::size_t max_display_commands,
                               std::vector<std::uint32_t>* display_clip_indices = nullptr,
                               std::uint32_t clip_index = kNoFlattenedClip) {
@@ -1240,9 +1321,14 @@ void append_flattened_command(DisplayList& output,
         return;
     }
     DisplayCommand flattened = command;
-    flattened.rect.x += translate_x;
-    flattened.rect.y += translate_y;
-    if (has_clip) {
+    flattened.rect.x = safe_add(flattened.rect.x, translate_x);
+    flattened.rect.y = safe_add(flattened.rect.y, translate_y);
+    const bool has_affine_transform = !identity_transform(transform);
+    // A frame clip is applied in destination space by the value-frame
+    // Frame clips are consumed in destination space. A v4 source-clip index
+    // separately preserves the current transformed layer's pre-transform
+    // overflow clip without cropping away its transparent sampling fringe.
+    if (has_clip && !has_affine_transform) {
         flattened.rect = intersect_rect(flattened.rect, clip);
         if (empty_rect(flattened.rect)) {
             return;
@@ -1250,6 +1336,17 @@ void append_flattened_command(DisplayList& output,
     }
     flattened.color = with_opacity(flattened.color, opacity);
     flattened.color2 = with_opacity(flattened.color2, opacity);
+    if (has_affine_transform) {
+        flattened.transform.enabled = true;
+        flattened.transform.xx_1024 = fixed_transform_value(transform.xx);
+        flattened.transform.xy_1024 = fixed_transform_value(transform.xy);
+        flattened.transform.yx_1024 = fixed_transform_value(transform.yx);
+        flattened.transform.yy_1024 = fixed_transform_value(transform.yy);
+        flattened.transform.tx_1024 = fixed_transform_value(transform.tx);
+        flattened.transform.ty_1024 = fixed_transform_value(transform.ty);
+        flattened.transform.source_clip_index = transform_source_clip_index > std::numeric_limits<std::uint16_t>::max()
+            ? 0xffffU : static_cast<std::uint16_t>(transform_source_clip_index);
+    }
     if (flattened.color.a == 0 &&
         ((flattened.type != DisplayCommandType::LinearGradient &&
           flattened.type != DisplayCommandType::ConicGradient &&
@@ -1269,6 +1366,7 @@ void flatten_layer(const LayerNode& layer,
                    float opacity,
                    int translate_x,
                    int translate_y,
+                   FlattenAffineTransform transform,
                    std::size_t max_display_commands,
                    DiagnosticSink* diagnostics,
                    bool& display_budget_reported,
@@ -1280,11 +1378,14 @@ void flatten_layer(const LayerNode& layer,
         float opacity = 1.0F;
         int translate_x = 0;
         int translate_y = 0;
+        FlattenAffineTransform transform;
+        std::uint32_t transform_source_clip_index = kNoFlattenedClip;
         std::uint32_t clip_index = kNoFlattenedClip;
     };
 
     std::vector<PendingLayer> pending;
-    pending.push_back(PendingLayer{&layer, clip, has_clip, opacity, translate_x, translate_y, kNoFlattenedClip});
+    pending.push_back(PendingLayer{&layer, clip, has_clip, opacity, translate_x, translate_y, transform,
+                                   kNoFlattenedClip, kNoFlattenedClip});
     while (!pending.empty()) {
         const PendingLayer current = pending.back();
         pending.pop_back();
@@ -1302,30 +1403,48 @@ void flatten_layer(const LayerNode& layer,
         }
         const LayerNode& current_layer = *current.layer;
         const float layer_opacity = current.opacity * current_layer.opacity;
-        const int layer_translate_x = current.translate_x + static_cast<int>(current_layer.transform.translate_x >= 0.0F
-            ? current_layer.transform.translate_x + 0.5F
-            : current_layer.transform.translate_x - 0.5F);
-        const int layer_translate_y = current.translate_y + static_cast<int>(current_layer.transform.translate_y >= 0.0F
-            ? current_layer.transform.translate_y + 0.5F
-            : current_layer.transform.translate_y - 0.5F);
+        const int layer_translate_x = safe_add(current.translate_x,
+                                               round_float_to_int(current_layer.transform.translate_x));
+        const int layer_translate_y = safe_add(current.translate_y,
+                                               round_float_to_int(current_layer.transform.translate_y));
+        const FlattenAffineTransform layer_transform = multiply_transform(
+            current.transform, layer_affine_transform(current_layer, layer_translate_x, layer_translate_y));
         Rect current_clip = current.clip;
         bool current_has_clip = current.has_clip;
+        std::uint32_t transform_source_clip_index = current.transform_source_clip_index;
         std::uint32_t current_clip_index = current.clip_index;
         if (current_layer.has_clip) {
-            current_clip = current_has_clip ? intersect_rect(current_clip, current_layer.clip_rect) : current_layer.clip_rect;
+            const Rect translated_layer_clip{
+                safe_add(current_layer.clip_rect.x, layer_translate_x),
+                safe_add(current_layer.clip_rect.y, layer_translate_y),
+                current_layer.clip_rect.width,
+                current_layer.clip_rect.height,
+            };
+            current_clip = current_has_clip ? intersect_rect(current_clip, translated_layer_clip) : translated_layer_clip;
             current_has_clip = true;
             if (empty_rect(current_clip)) {
                 continue;
             }
             if (metadata != nullptr) {
-                current_clip_index = static_cast<std::uint32_t>(metadata->clips.size());
-                metadata->clips.push_back(FlattenedClip{
-                    Rect{safe_add(current_layer.clip_rect.x, layer_translate_x),
-                         safe_add(current_layer.clip_rect.y, layer_translate_y),
-                         current_layer.clip_rect.width,
-                         current_layer.clip_rect.height},
-                    current_layer.clip_border_radius,
-                    current.clip_index});
+                // The layer that introduces a transform is clipped again in
+                // destination space by SoftwareCompositor. Clips introduced
+                // below that transform have already been rasterized into its
+                // source surface and must not be reapplied after the affine
+                // mapping.
+                if (identity_transform(current.transform)) {
+                    current_clip_index = static_cast<std::uint32_t>(metadata->clips.size());
+                    metadata->clips.push_back(FlattenedClip{
+                        translated_layer_clip,
+                        current_layer.clip_border_radius,
+                        current.clip_index});
+                }
+                if (!identity_transform(layer_transform)) {
+                    transform_source_clip_index = static_cast<std::uint32_t>(metadata->clips.size());
+                    metadata->clips.push_back(FlattenedClip{
+                        translated_layer_clip,
+                        current_layer.clip_border_radius,
+                        current.transform_source_clip_index});
+                }
             }
         }
         for (const DisplayCommand& command : current_layer.display_list) {
@@ -1333,9 +1452,11 @@ void flatten_layer(const LayerNode& layer,
                                      command,
                                      current_clip,
                                      current_has_clip,
+                                     transform_source_clip_index,
                                      layer_opacity,
                                      layer_translate_x,
                                      layer_translate_y,
+                                     layer_transform,
                                      max_display_commands,
                                      metadata != nullptr ? &metadata->display_clip_indices : nullptr,
                                      current_clip_index);
@@ -1348,9 +1469,11 @@ void flatten_layer(const LayerNode& layer,
                                            current_clip,
                                            current_has_clip,
                                            layer_opacity,
-                                           layer_translate_x,
-                                           layer_translate_y,
-                                           current_clip_index});
+                                            layer_translate_x,
+                                            layer_translate_y,
+                                            layer_transform,
+                                            transform_source_clip_index,
+                                            current_clip_index});
         }
     }
 }
@@ -1442,7 +1565,7 @@ void LayerTreeBuilder::flatten_into(const LayerNode& root, DisplayList& output) 
         output.reserve(required_capacity);
     }
     bool display_budget_reported = false;
-    flatten_layer(root, output, Rect{}, false, 1.0F, 0, 0, max_display_commands,
+    flatten_layer(root, output, Rect{}, false, 1.0F, 0, 0, {}, max_display_commands,
                   options_.diagnostics, display_budget_reported);
 }
 
@@ -1461,6 +1584,7 @@ FlattenedLayerTree LayerTreeBuilder::flatten_with_clip_metadata(const LayerNode&
                   1.0F,
                   0,
                   0,
+                  {},
                   max_display_commands,
                   options_.diagnostics,
                   display_budget_reported,
@@ -1656,7 +1780,9 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
                               remaining_commands,
                               display_budget_reported);
         }
-        const int child_scroll_y = target_layer == &current_layer ? current.scroll_y + own_scroll_y : own_scroll_y;
+        const int child_scroll_y = target_layer == &current_layer
+            ? safe_add(current.scroll_y, own_scroll_y)
+            : own_scroll_y;
         pending.push_back(PendingBox{current_box, target_layer, child_scroll_y, true});
         enqueue_children(*current_box, target_layer, child_scroll_y);
     }

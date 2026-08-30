@@ -31,6 +31,10 @@ struct FrameBuffer {
 // Optional caller-owned storage for clipped text and image commands.
 struct SoftwareRasterizerScratch {
     FrameBuffer temporary_surface;
+    // Used by value-frame consumers when a flattened command carries an
+    // affine transform. It is separate from temporary_surface because text
+    // and rounded-clip raster paths may use that surface recursively.
+    FrameBuffer transformed_surface;
 
     void release();
 };
@@ -228,6 +232,9 @@ private:
 class SoftwareCompositor {
 public:
     struct Options {
+        // Zero means unlimited. A layer that needs an offscreen surface for a
+        // transform or rounded clip is skipped when this aggregate live-pixel
+        // budget cannot be met; opacity-only layers may use direct fallback.
         std::size_t max_framebuffer_pixels = 0;
         std::size_t max_offscreen_pixels = 0;
         DiagnosticSink* diagnostics = nullptr;

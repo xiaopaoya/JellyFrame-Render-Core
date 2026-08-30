@@ -1,6 +1,6 @@
 # Render Core 发布与拆仓政策
 
-> 最后更新：2026-08-16；适用版本：0.6.0-dev
+> 最后更新：2026-08-30；适用版本：0.6.2-dev
 
 本政策规定当前 monorepo 边界迁移到独立 `jellyframe-render-core` 工程的方式。它补充 [engine_architecture_zh.md](engine_architecture_zh.md)，不是面向 App 作者的兼容性承诺。
 
@@ -14,9 +14,9 @@
 
 ## 迁移状态
 
-保留历史的 `xiaopaoya/JellyFrame-Render-Core` 仓库已经建立，现有许可证和贡献者历史均未改变。
-其 `master` 是未签名的预发布迁移分支，而非 `0.6.0` release：这不表示许可证、贡献者政策或开源意向的改变。
-Runtime 在带签名的 Core artifact 发布并通过显式 dependency-lock 更新接纳前，仍使用 in-tree provider。
+保留历史的 `xiaopaoya/JellyFrame-Render-Core` 仓库保留了现有许可证和贡献者历史。
+当前 `master` 是未签名的 `0.6.2-dev` 同步候选，而不是 signed release：这不表示许可证、贡献者政策或开源意向的改变。
+Runtime 仍锁定并使用 `v0.6.1`，直到新的 signed Core artifact 经评审并通过显式 dependency-lock 更新接纳。
 
 ## 发布单元
 
