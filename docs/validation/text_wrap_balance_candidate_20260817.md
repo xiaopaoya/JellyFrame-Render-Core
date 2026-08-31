@@ -1,6 +1,10 @@
-# Bounded Text Balance Candidate Evidence
+# Historical Text Balance Candidate Evidence
 
-> Recorded: 2026-08-17; Core source revision: `2df7ad7`; scope: desktop-only candidate evidence
+> Recorded: 2026-08-17; Core source revision: `2df7ad7`; status: superseded historical evidence
+
+This record describes an earlier candidate line. It is retained for provenance,
+but the current `0.6.2-dev` branch does not contain the implementation and this
+document is not a support or release claim.
 
 ## Intent
 
@@ -32,9 +36,8 @@ invoke its `jellyframe_pseudo_browser` on the paired sample files at the three
 viewport sizes above with `--diagnostics-json`. The capture fixture intentionally
 stays within the documented 2-4 line, short natural-wrap range.
 
-## Exit
+## Historical Exit
 
-Candidate evidence is complete. Remaining release work is independent: publish
-a reviewed signed Core `0.6.0` tag, update the Runtime package lock, run the
-installed-package/local-override consumer regressions, then update Runtime
-author-facing capability documentation.
+The historical candidate evidence was complete for its then-current source
+line. It was not carried into the current `0.6.2-dev` implementation. Any
+future re-admission must repeat the current candidate gate.

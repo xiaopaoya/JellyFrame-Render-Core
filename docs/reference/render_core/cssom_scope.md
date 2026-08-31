@@ -1,6 +1,6 @@
 # CSSOM And Cascade Scope
 
-> Last updated: 2026-08-17; Applies to: 0.6.0-dev
+> Last updated: 2026-08-30; Applies to: 0.6.2-dev
 
 Last checked against CSSOM and CSS Cascade references on 2026-06-13:
 
@@ -88,7 +88,7 @@ exist as fallbacks.
 - `color`/`background-color` including `rgb()`/`rgba()` and `hsl()`/`hsla()`, bounded gradient/background-image layers and
   package-local image backgrounds.
 - `font-size`, `line-height`, `letter-spacing`, `white-space`, `text-wrap`
-  (`wrap`, `nowrap`, bounded `balance`),
+  (`wrap`, `nowrap`),
   `overflow-wrap`, `text-overflow`, `text-align`, `text-indent` and
   ASCII-subset `text-transform`.
 - `box-sizing`, `visibility`, `overflow`, `opacity`, `position`, `z-index`,
