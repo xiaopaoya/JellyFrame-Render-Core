@@ -1,38 +1,36 @@
 # Render Core 活动路线图
 
-> 最后更新：2026-08-19；适用版本：0.6.1
+> 最后更新：2026-08-30；适用版本：0.6.2-dev
 
 本文只安排 Render Core 工作，不安排 JellyFrame App Runtime、设备 port、launcher
 策略、JerryScript 或 developer image。何时采用已发布的 Core 版本由其消费者决定。
 
 ## 当前发布候选
 
-带签名的 `v0.6.0` 已建立 Core ABI `1`。`master` 现在准备兼容的 `0.6.1`
-patch release，保留独立 build/install CI、确定性源码归档，并完成以下作者能力子集：
+带签名的 `v0.6.0` 已建立 Core ABI `1`。当前 `master` 是从 JellyFrame 主线
+同步而来的未签名 `0.6.2-dev` 开发头（独立仓库合并提交 `769ec5d`），保留独立
+build/install CI、确定性源码归档，并完成以下作者能力子集：
 
 - LTR horizontal writing mode 的逻辑尺寸、间距与 inset 映射。
 - 常用 flex/grid placement（`order`、`align-self`、`place-*`、有界 row）。
 - 有界 sRGB `hsl()` / `hsla()` 与常用图片背景定位。
-- 文字 `letter-spacing`、scalar-safe `overflow-wrap: anywhere`、ellipsis，及短文本
-  自然换行的有界 `text-wrap: balance`。
+- 文字 `letter-spacing`、scalar-safe `overflow-wrap: anywhere` 与 ellipsis。
 
-`text-wrap: balance` 已在 `0fa5c41` 实现。其 unit、standalone、benchmark 和三 target
-desktop candidate evidence 见
-[`validation/text_wrap_balance_candidate_20260817_zh.md`](validation/text_wrap_balance_candidate_20260817_zh.md)。
-只有带签名的 Core release 被 Runtime dependency lock 消费后，它才成为正式能力；旧 Runtime
-默认构建不得提前宣称支持。
+`text-wrap: balance` 曾在历史提交 `0fa5c41` 中探索，但当前 `0.6.2-dev` 实现和能力表
+不包含它。旧 candidate evidence 仅作为历史上下文保留，不能作为当前分支的支持证据。
+重新纳入前必须有新的提案、正/负行为测试、三个 target capture 以及明确的 Runtime 决策。
 
 本 patch 还关闭了 HTML parser 的 depth budget 缺口：`max_depth` 计入合成 `document`
 根节点，任何会超限的 child 会在进入 DOM 前被丢弃；固定 malformed-input corpus 保护该行为。
 
-## 0.6.1 发布门槛
+## 0.6.2-dev 开发门槛
 
-下一项 Core 工作是发布收束，而不是继续加入未经验证的 CSS 特性：
+下一项 Core 工作是候选能力评估，而不是隐式升级 Runtime：
 
 1. 复核候选源码、公开头文件与生成 profile 的改动。
-2. 创建带签名的 annotated `0.6.1` tag，发布确定性源码归档及 SHA-256 sidecar。
-3. 由 JellyFrame Runtime 更新精确 package/version/ABI/source lock，并运行
-   installed-package 与 local-source-override 回归。
+2. 对接受的能力发布经审查的 signed Core release、确定性源码归档及 SHA-256 sidecar。
+3. 只有 installed-package 与 local-source-override 回归通过后，才由 JellyFrame Runtime
+   更新精确 package/version/ABI/source lock。
 4. Device OS 在命名板卡 profile 中记录准确的 Runtime/Core provenance，之后才可以
    作出设备能力声明。
 

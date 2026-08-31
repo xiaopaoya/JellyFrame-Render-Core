@@ -1,6 +1,6 @@
 # Render Core Active Roadmap
 
-> Last updated: 2026-08-19; Applies to: 0.6.1
+> Last updated: 2026-08-30; Applies to: 0.6.2-dev
 
 This is the Core-only planning document. It does not schedule JellyFrame App
 Runtime, device ports, launcher policy, JerryScript or developer-image work.
@@ -8,36 +8,35 @@ Those consumers decide when a released Core version is adopted.
 
 ## Current Release Candidate
 
-Signed `v0.6.0` established Core ABI `1`. `master` now prepares the compatible
-`0.6.1` patch release. It retains standalone build/install CI and deterministic source
+Signed `v0.6.0` established Core ABI `1`. The current `master` is the unsigned
+`0.6.2-dev` development head, synchronized from JellyFrame mainline at merge
+`769ec5d`. It retains standalone build/install CI and deterministic source
 archives, and includes the following completed authoring subset:
 
 - LTR horizontal logical size, spacing and inset mapping.
 - Common flex/grid placement (`order`, `align-self`, `place-*`, bounded rows).
 - Bounded sRGB `hsl()` / `hsla()` and common image-background placement.
-- Text letter spacing, scalar-safe `overflow-wrap: anywhere`, ellipsis and
-  bounded `text-wrap: balance` for short natural text.
+- Text letter spacing, scalar-safe `overflow-wrap: anywhere` and ellipsis.
 
-`text-wrap: balance` is implemented in `0fa5c41`. Its unit, standalone,
-benchmark and three-target desktop candidate evidence is recorded in
-[`validation/text_wrap_balance_candidate_20260817.md`](validation/text_wrap_balance_candidate_20260817.md).
-It remains a candidate capability until the signed Core release is consumed by
-a locked Runtime dependency; it must not be advertised by an older Runtime
-default build.
+`text-wrap: balance` was explored in historical commit `0fa5c41`, but is not
+present in the current `0.6.2-dev` implementation or capability surface. The
+old candidate evidence is retained as historical context only and must not be
+used as support evidence for this branch. Re-admission requires a new proposal,
+positive/negative tests, three-target captures and an explicit Runtime decision.
 
 This patch also closes an HTML parser depth-budget gap: `max_depth` includes the
 synthetic `document` root, and a child that would exceed the bound is dropped before
 it enters the DOM. A malformed-input corpus now protects the behavior.
 
-## 0.6.1 Release Gate
+## 0.6.2-dev Development Gate
 
-The next Core change is release closure, not another speculative CSS feature:
+The next Core change is candidate evaluation, not an implicit Runtime upgrade:
 
 1. Review the candidate source, public-header and generated-profile changes.
-2. Create an annotated, signed `0.6.1` tag and publish its deterministic source
-   archive plus SHA-256 sidecar.
-3. Have JellyFrame Runtime update its exact package/version/ABI/source lock and
-   run its installed-package and local-source-override regressions.
+2. For an accepted capability, publish a reviewed signed Core release and its
+   deterministic source archive plus SHA-256 sidecar.
+3. Have JellyFrame Runtime update its exact package/version/ABI/source lock only
+   after installed-package and local-source-override regressions pass.
 4. Have Device OS record the exact consumed Runtime/Core provenance in a named
    board profile before making any device capability claim.
 

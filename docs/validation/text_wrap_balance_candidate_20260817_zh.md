@@ -1,6 +1,9 @@
-# 有界 Text Balance 候选证据
+# 历史 Text Balance 候选证据
 
-> 记录日期：2026-08-17；Core 源码 revision：`2df7ad7`；范围：仅 desktop candidate evidence
+> 记录日期：2026-08-17；Core 源码 revision：`2df7ad7`；状态：已被当前分支取代
+
+本文记录较早的候选线，仅用于保留来源信息。当前 `0.6.2-dev` 分支不包含该实现，本文不是
+当前能力或 release 支持声明。
 
 ## 目的
 
@@ -27,8 +30,7 @@
 文件调用其 `jellyframe_pseudo_browser`，在三个 viewport 下添加 `--diagnostics-json`。该夹具
 故意保持在文档定义的短文本、自然换行、二至四行范围内。
 
-## 出口
+## 历史出口
 
-candidate evidence 已完成。剩余 release 工作独立进行：发布已审阅的带签名 Core `0.6.0` tag，
-更新 Runtime package lock，运行 installed-package/local-override consumer regression，之后才更新
-Runtime 面向作者的能力文档。
+当时源代码线的 candidate evidence 已完成，但没有进入当前 `0.6.2-dev` 实现。未来重新纳入时必须重新
+执行当前候选门槛。
