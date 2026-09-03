@@ -56,7 +56,10 @@ if(JELLYFRAME_INSTALL_RENDER_CORE)
         INSTALL_DESTINATION "${JELLYFRAME_RENDER_CORE_INSTALL_CMAKE_DIR}")
     write_basic_package_version_file(
         "${CMAKE_CURRENT_BINARY_DIR}/JellyFrameRenderCoreConfigVersion.cmake"
-        VERSION "${JELLYFRAME_RENDER_CORE_PACKAGE_VERSION}"
+        # CMake package discovery accepts numeric semantic versions only.
+        # Keep the -dev suffix in Core metadata while exposing the numeric
+        # project version to find_package(... EXACT).
+        VERSION "${JELLYFRAME_RENDER_CORE_CMAKE_VERSION}"
         COMPATIBILITY SameMajorVersion)
     install(TARGETS jellyframe_render_core
         EXPORT JellyFrameRenderCoreTargets

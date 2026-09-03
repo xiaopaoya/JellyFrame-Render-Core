@@ -7,12 +7,13 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import tarfile
 import tempfile
 import unittest
-from shutil import copy2
+from shutil import copy2, copytree
 from pathlib import Path
 
 
@@ -262,17 +263,20 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
             )
             self.assertEqual(installed_manifest, source_manifest)
 
-            # The Core repository intentionally does not contain App Runtime.
-            # Its independent CI proves the archive's standalone lifecycle;
-            # JellyFrame's monorepo CI additionally proves this package is a
-            # compatible Runtime dependency.
-            if not (self.source_root / "src" / "app_runtime").is_dir():
-                return
-
             # A downstream Core host must consume only the installed CMake
             # package and installed render_core headers. This keeps the
             # package boundary independently verifiable instead of proving it
             # only through the Runtime's source-tree integration.
+            version_file = (archive_source / "cmake" / "render_core_version.cmake").read_text(
+                encoding="utf-8"
+            )
+            version_match = re.search(
+                r'set\(JELLYFRAME_RENDER_CORE_CMAKE_VERSION\s+"([^"]+)"',
+                version_file,
+            )
+            self.assertIsNotNone(version_match)
+            assert version_match is not None
+            cmake_package_version = version_match.group(1)
             consumer_source = root / "render-core-package-consumer-source"
             consumer_source.mkdir()
             consumer_source.joinpath("CMakeLists.txt").write_text(
@@ -280,7 +284,7 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
                     [
                         "cmake_minimum_required(VERSION 3.16)",
                         "project(RenderCorePackageConsumer LANGUAGES CXX)",
-                        "find_package(JellyFrameRenderCore 0.6.0 EXACT CONFIG REQUIRED",
+                        f"find_package(JellyFrameRenderCore {cmake_package_version} EXACT CONFIG REQUIRED",
                         f"  PATHS \"{install_dir.as_posix()}\" NO_DEFAULT_PATH)",
                         "add_executable(render_core_package_consumer main.cpp)",
                         "target_link_libraries(render_core_package_consumer",
@@ -320,6 +324,13 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
                 else "render_core_package_consumer"
             )
             run([str(consumer_executable)], cwd=self.source_root)
+
+            # The Core repository intentionally does not contain App Runtime.
+            # Its independent CI proves the archive's standalone lifecycle;
+            # JellyFrame's monorepo CI additionally proves this package is a
+            # compatible Runtime dependency.
+            if not (self.source_root / "src" / "app_runtime").is_dir():
+                return
 
             runtime_build = root / "runtime-package-consumer"
             self.cmake_configure(
