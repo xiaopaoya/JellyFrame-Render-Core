@@ -1,6 +1,6 @@
 # CSSOM And Cascade Scope
 
-> Last updated: 2026-08-30; Applies to: 0.6.2-dev
+> Last updated: 2026-09-04; Applies to: 0.6.2 release candidate
 
 Last checked against CSSOM and CSS Cascade references on 2026-06-13:
 
