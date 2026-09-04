@@ -1,8 +1,8 @@
 # Render Core 0.6.2 Upgrade Readiness
 
-Date: 2026-09-03  
-Candidate commit: `5721ba04b24146720e8ec0e9d8f8ae7633d2b42a`  
-Candidate line: `0.6.2-dev`  
+Date: 2026-09-04
+Candidate branch: `codex/core-0.6.2-release-prep`
+Candidate line: `0.6.2` release candidate
 Engine ABI: `1`
 
 This report records upgrade evidence. It is not a release approval and does
@@ -10,15 +10,15 @@ not authorize changing the JellyFrame Runtime dependency lock.
 
 ## Identity
 
-- Source hash: `41c05d13a2aebb480f020b272531d8419ecb4d87c6bb1117996e7e7bd237378f`
+- Source hash: `539a894519d3251f02c8b3aee8d0d0fb715bf49a732fc74126ccb2188462e3f0`
 - Source manifest file count: `104`
 - Deterministic development archive:
-  `jellyframe-render-core-0.6.2-dev.tar.gz`
-- Archive SHA-256:
-  `e8bdf0fcee04ca2baf4567fbe7062cd55b9fef7085e0ad4be726a850c260252b`
+  `jellyframe-render-core-0.6.2.tar.gz`
 
-The archive was created twice from the committed checkout. Both byte hashes
-were identical, and the sidecar checksum matched the archive.
+The archive must be created from the final committed candidate checkout. The
+generator writes a matching `.sha256` sidecar; CI creates it twice and checks
+that both archive bytes and sidecars are identical. The exact checksum belongs
+to that immutable artifact, not to a file included inside the archive.
 
 ## Completed Evidence
 
@@ -39,9 +39,8 @@ were identical, and the sidecar checksum matched the archive.
 7. The same temporary Runtime checkout consumed the candidate through the
    local source override. Provenance and App Runtime tests passed.
 
-The package version fix in this candidate keeps `0.6.2-dev` in Core metadata
-but emits numeric CMake package version `0.6.2`, so exact downstream package
-discovery works for a future stable release.
+The package version fix emits the numeric CMake package version `0.6.2`, so
+exact downstream package discovery works for the stable release candidate.
 
 ## Remaining Release Gates
 
