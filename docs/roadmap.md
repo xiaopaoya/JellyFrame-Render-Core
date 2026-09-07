@@ -1,17 +1,20 @@
 # Render Core Active Roadmap
 
-> Last updated: 2026-09-04; Applies to: 0.6.2 release candidate
+> Last updated: 2026-09-08; Applies to: 0.6.2 development line
 
 This is the Core-only planning document. It does not schedule JellyFrame App
 Runtime, device ports, launcher policy, JerryScript or developer-image work.
 Those consumers decide when a released Core version is adopted.
 
-## Current Release Candidate
+## Current Development Line
 
-Signed `v0.6.0` established Core ABI `1`. The current `master` is the unsigned
-`0.6.2` release candidate, synchronized from JellyFrame mainline at merge
-`769ec5d`. It retains standalone build/install CI and deterministic source
-archives, and includes the following completed authoring subset:
+Signed `v0.6.0` established Core ABI `1`; signed `v0.6.2` is the Runtime's
+current locked dependency. The current `master` is the post-release `0.6.2`
+development line. Merge `0d04dfca` synchronized the reviewed Core updates from
+JellyFrame mainline through `8630bf6c`, including the follow-up runtime/resource
+and dirty-region audit fixes. It retains standalone build/install CI and
+deterministic source archives, and includes the following completed authoring
+subset:
 
 - LTR horizontal logical size, spacing and inset mapping.
 - Common flex/grid placement (`order`, `align-self`, `place-*`, bounded rows).
@@ -19,7 +22,7 @@ archives, and includes the following completed authoring subset:
 - Text letter spacing, scalar-safe `overflow-wrap: anywhere` and ellipsis.
 
 `text-wrap: balance` was explored in historical commit `0fa5c41`, but is not
-present in the current `0.6.2` implementation or capability surface. The
+present in the current development implementation or capability surface. The
 old candidate evidence is retained as historical context only and must not be
 used as support evidence for this branch. Re-admission requires a new proposal,
 positive/negative tests, three-target captures and an explicit Runtime decision.
@@ -28,7 +31,7 @@ This patch also closes an HTML parser depth-budget gap: `max_depth` includes the
 synthetic `document` root, and a child that would exceed the bound is dropped before
 it enters the DOM. A malformed-input corpus now protects the behavior.
 
-## 0.6.2 Release Gate
+## Next Release Gate
 
 The next Core change is candidate evaluation, not an implicit Runtime upgrade:
 

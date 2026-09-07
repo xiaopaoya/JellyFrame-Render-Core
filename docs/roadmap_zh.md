@@ -1,29 +1,31 @@
 # Render Core 活动路线图
 
-> 最后更新：2026-09-04；适用版本：0.6.2 release candidate
+> 最后更新：2026-09-08；适用版本：0.6.2 开发线
 
 本文只安排 Render Core 工作，不安排 JellyFrame App Runtime、设备 port、launcher
 策略、JerryScript 或 developer image。何时采用已发布的 Core 版本由其消费者决定。
 
-## 当前发布候选
+## 当前开发线
 
-带签名的 `v0.6.0` 已建立 Core ABI `1`。当前 `master` 是从 JellyFrame 主线
-同步而来的未签名 `0.6.2` release candidate，保留独立
-build/install CI、确定性源码归档，并完成以下作者能力子集：
+带签名的 `v0.6.0` 已建立 Core ABI `1`；带签名的 `v0.6.2` 是 Runtime 当前
+锁定依赖。当前 `master` 是 `0.6.2` release 之后的开发线。合并提交
+`0d04dfca` 已从 JellyFrame 主线 `8630bf6c` 同步经审阅的 Core 更新，包括后续
+runtime/resource 与 dirty-region 审查修复。该线保留独立 build/install CI 与
+确定性源码归档，并完成以下作者能力子集：
 
 - LTR horizontal writing mode 的逻辑尺寸、间距与 inset 映射。
 - 常用 flex/grid placement（`order`、`align-self`、`place-*`、有界 row）。
 - 有界 sRGB `hsl()` / `hsla()` 与常用图片背景定位。
 - 文字 `letter-spacing`、scalar-safe `overflow-wrap: anywhere` 与 ellipsis。
 
-`text-wrap: balance` 曾在历史提交 `0fa5c41` 中探索，但当前 `0.6.2` 实现和能力表
+`text-wrap: balance` 曾在历史提交 `0fa5c41` 中探索，但当前开发实现和能力表
 不包含它。旧 candidate evidence 仅作为历史上下文保留，不能作为当前分支的支持证据。
 重新纳入前必须有新的提案、正/负行为测试、三个 target capture 以及明确的 Runtime 决策。
 
 本 patch 还关闭了 HTML parser 的 depth budget 缺口：`max_depth` 计入合成 `document`
 根节点，任何会超限的 child 会在进入 DOM 前被丢弃；固定 malformed-input corpus 保护该行为。
 
-## 0.6.2 发布门槛
+## 下一次发布门槛
 
 下一项 Core 工作是候选能力评估，而不是隐式升级 Runtime：
 
