@@ -80,7 +80,7 @@ if(JELLYFRAME_ENABLE_CANVAS2D)
         "\"${_jellyframe_render_core_canvas2d_sources_json}\"")
 else()
     set(JELLYFRAME_RENDER_CORE_CANVAS2D_SOURCES_JSON
-        "\"src/render_core/canvas2d_disabled.cpp\"")
+        "\"src/canvas2d_disabled.cpp\"")
 endif()
 string(REPLACE ";" "\",\n      \"" _jellyframe_render_core_advanced_forms_sources_json
     "${JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_SOURCES}")
@@ -89,7 +89,7 @@ if(JELLYFRAME_ENABLE_ADVANCED_FORMS)
         "\"${_jellyframe_render_core_advanced_forms_sources_json}\"")
 else()
     set(JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_SOURCES_JSON
-        "\"src/render_core/form_submission_disabled.cpp\"")
+        "\"src/form_submission_disabled.cpp\"")
 endif()
 
 set(JELLYFRAME_RENDER_CORE_PROFILE_OUTPUT_DIR

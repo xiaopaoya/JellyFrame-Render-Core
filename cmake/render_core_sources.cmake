@@ -11,45 +11,45 @@ if(NOT DEFINED JELLYFRAME_RENDER_CORE_SOURCE_ROOT)
 endif()
 
 set(JELLYFRAME_RENDER_CORE_CORE_DOCUMENT_SOURCES
-    src/render_core/arena.cpp
-    src/render_core/css_parser.cpp
-    src/render_core/document_script.cpp
-    src/render_core/document_style.cpp
-    src/render_core/dom.cpp
-    src/render_core/dom_owner.cpp
-    src/render_core/event.cpp
-    src/render_core/form_control.cpp
-    src/render_core/html_parser.cpp
-    src/render_core/html_tokenizer.cpp
-    src/render_core/html_tree_builder.cpp
-    src/render_core/input.cpp
-    src/render_core/text_normalization.cpp
-    src/render_core/text_scan.cpp
+    src/arena.cpp
+    src/css_parser.cpp
+    src/document_script.cpp
+    src/document_style.cpp
+    src/dom.cpp
+    src/dom_owner.cpp
+    src/event.cpp
+    src/form_control.cpp
+    src/html_parser.cpp
+    src/html_tokenizer.cpp
+    src/html_tree_builder.cpp
+    src/input.cpp
+    src/text_normalization.cpp
+    src/text_scan.cpp
 )
 
 set(JELLYFRAME_RENDER_CORE_CORE_PAINT_SOURCES
-    src/render_core/animation_invalidation.cpp
-    src/render_core/animation_timeline.cpp
-    src/render_core/bitmap_font.cpp
-    src/render_core/bitmap_font_resource.cpp
-    src/render_core/display_invalidation.cpp
-    src/render_core/dirty_region.cpp
-    src/render_core/embedded_framebuffer.cpp
-    src/render_core/frame_loop.cpp
-    src/render_core/frame_update.cpp
-    src/render_core/hit_test.cpp
-    src/render_core/layer_tree.cpp
-    src/render_core/layout.cpp
-    src/render_core/pipeline_statistics.cpp
-    src/render_core/render_tree.cpp
-    src/render_core/scroll_blit.cpp
-    src/render_core/software_renderer.cpp
-    src/render_core/style.cpp
-    src/render_core/style_repaint.cpp
-    src/render_core/text_adapter.cpp
-    src/render_core/text_backend.cpp
-    src/render_core/text_layout_reuse.cpp
-    src/render_core/text_repaint.cpp
+    src/animation_invalidation.cpp
+    src/animation_timeline.cpp
+    src/bitmap_font.cpp
+    src/bitmap_font_resource.cpp
+    src/display_invalidation.cpp
+    src/dirty_region.cpp
+    src/embedded_framebuffer.cpp
+    src/frame_loop.cpp
+    src/frame_update.cpp
+    src/hit_test.cpp
+    src/layer_tree.cpp
+    src/layout.cpp
+    src/pipeline_statistics.cpp
+    src/render_tree.cpp
+    src/scroll_blit.cpp
+    src/software_renderer.cpp
+    src/style.cpp
+    src/style_repaint.cpp
+    src/text_adapter.cpp
+    src/text_backend.cpp
+    src/text_layout_reuse.cpp
+    src/text_repaint.cpp
 )
 
 # These two families are mandatory, but keeping their source ownership explicit
@@ -62,19 +62,19 @@ set(JELLYFRAME_RENDER_CORE_BASE_SOURCES
 )
 
 set(JELLYFRAME_RENDER_CORE_GRAPHICS_CANVAS2D_SOURCES
-    src/render_core/canvas2d.cpp
+    src/canvas2d.cpp
 )
 
 set(JELLYFRAME_RENDER_CORE_MODERN_PAINT_SOURCES
-    src/render_core/modern_paint.cpp
+    src/modern_paint.cpp
 )
 
 set(JELLYFRAME_RENDER_CORE_FLEX_GRID_SOURCES
-    src/render_core/flex_grid_paint.cpp
+    src/flex_grid_paint.cpp
 )
 
 set(JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_SOURCES
-    src/render_core/form_submission.cpp
+    src/form_submission.cpp
 )
 
 if(NOT DEFINED JELLYFRAME_ENABLE_CANVAS2D)
@@ -101,7 +101,7 @@ if(JELLYFRAME_ENABLE_ADVANCED_FORMS)
 else()
     set(JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED 0)
     set(JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_IMPLEMENTATION
-        src/render_core/form_submission_disabled.cpp)
+        src/form_submission_disabled.cpp)
 endif()
 if(JELLYFRAME_ENABLE_FLEX_GRID)
     set(JELLYFRAME_RENDER_CORE_FLEX_GRID_IMPLEMENTATION
@@ -127,7 +127,7 @@ if(JELLYFRAME_ENABLE_CANVAS2D)
 else()
     set(JELLYFRAME_RENDER_CORE_CANVAS2D_ENABLED 0)
     set(JELLYFRAME_RENDER_CORE_CANVAS2D_IMPLEMENTATION
-        src/render_core/canvas2d_disabled.cpp)
+        src/canvas2d_disabled.cpp)
 endif()
 
 set(JELLYFRAME_RENDER_CORE_SOURCES

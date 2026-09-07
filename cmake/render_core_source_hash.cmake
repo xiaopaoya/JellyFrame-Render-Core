@@ -7,17 +7,18 @@
 
 function(jellyframe_compute_render_core_source_hash source_root)
     get_filename_component(_jellyframe_render_core_hash_root "${source_root}" ABSOLUTE)
-    if(NOT IS_DIRECTORY "${_jellyframe_render_core_hash_root}/src/render_core" OR
+    if(NOT IS_DIRECTORY "${_jellyframe_render_core_hash_root}/src" OR
+       NOT IS_DIRECTORY "${_jellyframe_render_core_hash_root}/include/render_core" OR
        NOT IS_DIRECTORY "${_jellyframe_render_core_hash_root}/cmake")
         message(FATAL_ERROR
-            "Render Core source hash requires src/render_core and cmake under: ${_jellyframe_render_core_hash_root}")
+            "Render Core source hash requires src, include/render_core and cmake under: ${_jellyframe_render_core_hash_root}")
     endif()
 
     file(GLOB_RECURSE _jellyframe_render_core_hash_sources CONFIGURE_DEPENDS
         RELATIVE "${_jellyframe_render_core_hash_root}"
-        "${_jellyframe_render_core_hash_root}/src/render_core/*.cpp"
-        "${_jellyframe_render_core_hash_root}/src/render_core/*.h"
-        "${_jellyframe_render_core_hash_root}/src/render_core/*.hpp")
+        "${_jellyframe_render_core_hash_root}/src/*.cpp"
+        "${_jellyframe_render_core_hash_root}/include/render_core/*.h"
+        "${_jellyframe_render_core_hash_root}/include/render_core/*.hpp")
     file(GLOB _jellyframe_render_core_hash_cmake CONFIGURE_DEPENDS
         RELATIVE "${_jellyframe_render_core_hash_root}"
         "${_jellyframe_render_core_hash_root}/cmake/render_core_*.cmake"

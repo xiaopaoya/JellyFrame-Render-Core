@@ -199,9 +199,11 @@ Rect expand_for_dirty_paint_effects(Rect bounds, const Style& style) {
     const auto bounded_extent = [](int value) {
         return std::clamp(value, 0, kMaxDirtyPaintEffectExtent);
     };
+#if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
     const auto bounded_offset = [](int value) {
         return std::clamp(value, -kMaxDirtyPaintEffectExtent, kMaxDirtyPaintEffectExtent);
     };
+#endif
     int left = 0;
     int top = 0;
     int right = 0;

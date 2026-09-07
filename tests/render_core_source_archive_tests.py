@@ -80,30 +80,10 @@ def rewrite_text_as_crlf(path: Path) -> None:
 
 
 def packager_path(source_root: Path) -> Path:
-    for relative in (
-        Path("project_tools") / "package_render_core_source.py",
-        Path("tools") / "package_render_core_source.py",
-    ):
-        candidate = source_root / relative
-        if candidate.is_file():
-            return candidate
+    candidate = source_root / "tools" / "package_render_core_source.py"
+    if candidate.is_file():
+        return candidate
     raise RuntimeError(f"Render Core source packager is missing under: {source_root}")
-
-
-def built_executable(build_dir: Path, target: str, configuration: str) -> Path:
-    """Return the executable location for single- and multi-config generators."""
-    suffix = ".exe" if sys.platform.startswith("win") else ""
-    candidates = (
-        build_dir / f"{target}{suffix}",
-        build_dir / configuration / f"{target}{suffix}",
-    )
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    raise FileNotFoundError(
-        f"built executable for {target!r} was not found under {build_dir}: "
-        + ", ".join(str(candidate) for candidate in candidates)
-    )
 
 
 class RenderCoreSourceArchiveTests(unittest.TestCase):
@@ -126,35 +106,6 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
         command.extend(definitions)
         run(command, cwd=self.source_root)
 
-    def runtime_consumer_checkout(
-        self, root: Path, source_hash: str, package_version: str
-    ) -> Path:
-        """Stage a consumer fixture whose lock accepts this test archive only."""
-        checkout = root / "runtime-consumer-source"
-        run(["git", "clone", "--no-local", "--no-hardlinks", str(self.source_root), str(checkout)],
-            cwd=self.source_root)
-        lock_path = checkout / "cmake" / "jellyframe_dependency_lock.cmake"
-        lock = lock_path.read_text(encoding="utf-8")
-        updated_lock, substitutions = re.subn(
-            r'(set\(JELLYFRAME_RENDER_CORE_LOCKED_SOURCE_HASH\s+)'
-            r'("[0-9a-f]{64}")',
-            rf'\1"{source_hash}"',
-            lock,
-            count=1,
-            flags=re.VERBOSE,
-        )
-        self.assertEqual(substitutions, 1, "runtime dependency lock has one source hash")
-        updated_lock, substitutions = re.subn(
-            r'(set\(JELLYFRAME_RENDER_CORE_LOCKED_VERSION\s+)("[^"]+")',
-            rf'\1"{package_version}"',
-            updated_lock,
-            count=1,
-            flags=re.VERBOSE,
-        )
-        self.assertEqual(substitutions, 1, "runtime dependency lock has one package version")
-        lock_path.write_text(updated_lock, encoding="utf-8")
-        return checkout
-
     def test_archive_is_stable_across_text_line_endings(self) -> None:
         source_packager = packager_path(self.source_root)
         packager = load_packager(source_packager)
@@ -165,28 +116,8 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
             crlf_output = root / "crlf"
 
             crlf_source.mkdir()
-            copy2(self.source_root / "LICENSE", crlf_source / "LICENSE")
-            copytree(self.source_root / "cmake", crlf_source / "cmake")
-            copytree(self.source_root / "src" / "render_core", crlf_source / "src" / "render_core")
-            entry_paths = [
-                packager.standalone_entry_file(
-                    self.source_root,
-                    self.source_root / "cmake" / "render_core_standalone_root.cmake",
-                    self.source_root / "CMakeLists.txt",
-                ),
-                packager.standalone_entry_file(
-                    self.source_root,
-                    self.source_root / "cmake" / "render_core_standalone_presets.json.in",
-                    self.source_root / "CMakePresets.json",
-                ),
-                packager.standalone_entry_file(
-                    self.source_root,
-                    self.source_root / "src" / "render_core" / "STANDALONE_README.md",
-                    self.source_root / "README.md",
-                ),
-            ]
             staged_entry_paths = []
-            for source_path in entry_paths:
+            for source_path in packager.source_files(self.source_root):
                 staged_path = crlf_source / source_path.relative_to(self.source_root)
                 staged_path.parent.mkdir(parents=True, exist_ok=True)
                 copy2(source_path, staged_path)
@@ -214,17 +145,14 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="jellyframe-render-core-tracked-inputs-") as directory:
             root = Path(directory)
             canonical_output = root / "canonical"
-            canonical_checkout = root / "canonical-checkout"
             checkout = root / "checkout"
             checkout_output = root / "checkout-output"
-            run(["git", "clone", "--no-local", "--no-hardlinks", str(self.source_root),
-                 str(canonical_checkout)], cwd=self.source_root)
             run(["git", "clone", "--no-local", "--no-hardlinks", str(self.source_root), str(checkout)],
                 cwd=self.source_root)
-            sentinel = checkout / "src" / "render_core" / "untracked_archive_sentinel.txt"
+            sentinel = checkout / "src" / "untracked_archive_sentinel.txt"
             sentinel.write_text("must not enter an archive\n", encoding="utf-8")
 
-            run([sys.executable, str(packager), "--source-root", str(canonical_checkout),
+            run([sys.executable, str(packager), "--source-root", str(self.source_root),
                  "--output-dir", str(canonical_output)], cwd=self.source_root)
             run([sys.executable, str(packager), "--source-root", str(checkout),
                  "--output-dir", str(checkout_output)], cwd=self.source_root)
@@ -233,7 +161,7 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
             self.assertEqual(canonical_archive.read_bytes(), checkout_archive.read_bytes())
             with tarfile.open(checkout_archive, "r:gz") as archive:
                 self.assertNotIn(
-                    f"{checkout_archive.name.removesuffix('.tar.gz')}/src/render_core/"
+                    f"{checkout_archive.name.removesuffix('.tar.gz')}/src/"
                     "untracked_archive_sentinel.txt",
                     archive.getnames(),
                 )
@@ -270,7 +198,11 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
                 self.assertIn(f"{root_name}/README.md", members)
                 self.assertIn(f"{root_name}/cmake/render_core_build.cmake", members)
                 self.assertIn(f"{root_name}/cmake/render_core_feature_registry.csv", members)
-                self.assertIn(f"{root_name}/src/render_core/tests/render_core_tests.cpp", members)
+                self.assertIn(f"{root_name}/tools/initialize_release_signing.ps1", members)
+                self.assertIn(f"{root_name}/tools/prepare_signed_release.ps1", members)
+                self.assertIn(f"{root_name}/include/render_core/html_parser.h", members)
+                self.assertIn(f"{root_name}/src/html_parser.cpp", members)
+                self.assertIn(f"{root_name}/tests/unit/render_core_tests.cpp", members)
                 # Python 3.14 changes the default extraction filter. The
                 # archive was produced by this test, but selecting the data
                 # filter now keeps the test warning-free and preserves the
@@ -281,14 +213,6 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
                 bundle.extractall(root / "extract", **extraction_options)
 
             archive_source = root / "extract" / root_name
-            version_text = (archive_source / "cmake" / "render_core_version.cmake").read_text(
-                encoding="utf-8"
-            )
-            version_match = re.search(
-                r'set\(JELLYFRAME_RENDER_CORE_PACKAGE_VERSION\s+"([^"]+)"', version_text
-            )
-            self.assertIsNotNone(version_match, "archive declares a package version")
-            package_version = version_match.group(1)
             install_dir = root / "install"
             run([str(self.cmake), "--preset", "default"], cwd=archive_source)
             core_build = archive_source / "build" / "default"
@@ -320,6 +244,16 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
                 cwd=archive_source)
             run(["ctest", "--test-dir", str(core_build), "-C", "Release", "--output-on-failure"],
                 cwd=self.source_root)
+
+            run([str(self.cmake), "--preset", "benchmarks"], cwd=archive_source)
+            run([str(self.cmake), "--build", "--preset", "benchmarks", "--parallel"],
+                cwd=archive_source)
+            benchmark_executable = archive_source / "build" / "benchmarks" / (
+                "jellyframe_render_core_microbench.exe" if sys.platform.startswith("win")
+                else "jellyframe_render_core_microbench"
+            )
+            run([str(benchmark_executable), "1"], cwd=archive_source)
+
             run([str(self.cmake), "--install", str(core_build), "--config", "Release",
                  "--prefix", str(install_dir)],
                 cwd=self.source_root)
@@ -329,21 +263,20 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
             )
             self.assertEqual(installed_manifest, source_manifest)
 
-            # The Core repository intentionally does not contain App Runtime.
-            # Its independent CI proves the archive's standalone lifecycle;
-            # JellyFrame's monorepo CI additionally proves this package is a
-            # compatible Runtime dependency.
-            if not (self.source_root / "src" / "app_runtime").is_dir():
-                return
-
-            runtime_consumer_source = self.runtime_consumer_checkout(
-                root, source_manifest["sourceHash"], package_version
-            )
-
             # A downstream Core host must consume only the installed CMake
             # package and installed render_core headers. This keeps the
             # package boundary independently verifiable instead of proving it
             # only through the Runtime's source-tree integration.
+            version_file = (archive_source / "cmake" / "render_core_version.cmake").read_text(
+                encoding="utf-8"
+            )
+            version_match = re.search(
+                r'set\(JELLYFRAME_RENDER_CORE_CMAKE_VERSION\s+"([^"]+)"',
+                version_file,
+            )
+            self.assertIsNotNone(version_match)
+            assert version_match is not None
+            cmake_package_version = version_match.group(1)
             consumer_source = root / "render-core-package-consumer-source"
             consumer_source.mkdir()
             consumer_source.joinpath("CMakeLists.txt").write_text(
@@ -351,7 +284,7 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
                     [
                         "cmake_minimum_required(VERSION 3.16)",
                         "project(RenderCorePackageConsumer LANGUAGES CXX)",
-                        f"find_package(JellyFrameRenderCore {package_version} EXACT CONFIG REQUIRED",
+                        f"find_package(JellyFrameRenderCore {cmake_package_version} EXACT CONFIG REQUIRED",
                         f"  PATHS \"{install_dir.as_posix()}\" NO_DEFAULT_PATH)",
                         "add_executable(render_core_package_consumer main.cpp)",
                         "target_link_libraries(render_core_package_consumer",
@@ -386,14 +319,22 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
                 [str(self.cmake), "--build", str(consumer_build), "--config", "Release", "--parallel"],
                 cwd=self.source_root,
             )
-            consumer_executable = built_executable(
-                consumer_build, "render_core_package_consumer", "Release"
+            consumer_executable = consumer_build / (
+                "render_core_package_consumer.exe" if sys.platform.startswith("win")
+                else "render_core_package_consumer"
             )
             run([str(consumer_executable)], cwd=self.source_root)
 
+            # The Core repository intentionally does not contain App Runtime.
+            # Its independent CI proves the archive's standalone lifecycle;
+            # JellyFrame's monorepo CI additionally proves this package is a
+            # compatible Runtime dependency.
+            if not (self.source_root / "src" / "app_runtime").is_dir():
+                return
+
             runtime_build = root / "runtime-package-consumer"
             self.cmake_configure(
-                runtime_consumer_source,
+                self.source_root,
                 runtime_build,
                 [
                     "-DCMAKE_BUILD_TYPE=Release",
@@ -420,17 +361,17 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
             run(
                 [str(self.cmake), "--build", str(runtime_build), "--config", "Release",
                  "--target", "jellyframe_app_runtime_tests", "--parallel"],
-                cwd=runtime_consumer_source,
+                cwd=self.source_root,
             )
             run(
                 ["ctest", "--test-dir", str(runtime_build), "-C", "Release",
                  "-R", "^jellyframe_app_runtime_tests$", "--output-on-failure"],
-                cwd=runtime_consumer_source,
+                cwd=self.source_root,
             )
 
             source_override_build = root / "runtime-source-override"
             self.cmake_configure(
-                runtime_consumer_source,
+                self.source_root,
                 source_override_build,
                 [
                     "-DCMAKE_BUILD_TYPE=Release",
@@ -452,12 +393,12 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
             run(
                 [str(self.cmake), "--build", str(source_override_build), "--config", "Release",
                  "--target", "jellyframe_app_runtime_tests", "--parallel"],
-                cwd=runtime_consumer_source,
+                cwd=self.source_root,
             )
             run(
                 ["ctest", "--test-dir", str(source_override_build), "-C", "Release",
                  "-R", "^jellyframe_app_runtime_tests$", "--output-on-failure"],
-                cwd=runtime_consumer_source,
+                cwd=self.source_root,
             )
 
             # A package with the same version and ABI but another declared source
@@ -477,7 +418,7 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
                                      encoding="utf-8")
             mismatch_build = root / "runtime-package-mismatched-source"
             mismatch_command = [
-                str(self.cmake), "-S", str(runtime_consumer_source), "-B", str(mismatch_build),
+                str(self.cmake), "-S", str(self.source_root), "-B", str(mismatch_build),
             ]
             if self.generator:
                 mismatch_command.extend(["-G", self.generator])
@@ -496,7 +437,7 @@ class RenderCoreSourceArchiveTests(unittest.TestCase):
             )
             result = run_failure(
                 mismatch_command,
-                cwd=runtime_consumer_source,
+                cwd=self.source_root,
             )
             self.assertRegex(
                 result.stdout + result.stderr,

@@ -1,6 +1,6 @@
 # JellyFrame Render Core
 
-> Last updated: 2026-08-14; Applies to: 0.6.0-dev
+> Last updated: 2026-09-04; Applies to: 0.6.2 release candidate
 
 JellyFrame Render Core is a platform-neutral, modular HTML/CSS subset,
 document/layout pipeline and CPU software renderer for bounded embedded and
@@ -30,11 +30,23 @@ ctest --test-dir build --output-on-failure
 cmake --install build --prefix install
 ```
 
+Performance work can use the opt-in benchmark preset:
+
+```sh
+cmake --preset benchmarks
+cmake --build --preset benchmarks
+```
+
 The install exports `JellyFrame::jellyframe_render_core`, public headers, a
 feature profile and a deterministic source manifest. Optional build families
 are selected with `JELLYFRAME_ENABLE_CANVAS2D`,
 `JELLYFRAME_ENABLE_MODERN_PAINT`, `JELLYFRAME_ENABLE_FLEX_GRID` and
 `JELLYFRAME_ENABLE_ADVANCED_FORMS`.
+
+The repository intentionally contains no App Runtime, JerryScript integration,
+device ports or launcher implementation. Those belong to the Runtime and
+Device OS layers. The `benchmarks/`, `tests/unit/`, `docs/` and `samples/`
+directories contain platform-neutral Core maintenance material.
 
 ## C++ Integration Surface
 

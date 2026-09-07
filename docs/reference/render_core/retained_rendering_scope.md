@@ -28,7 +28,7 @@ pointers as persistent identity, and disabled profiles must allocate no cache.
 Only a later, opt-in subtree replay slice may reuse commands. It must require unique stable keys,
 unchanged bounds/clip/transform/opacity/scroll state, safe occlusion rules, resource generations,
 and independent byte/command budgets. Any uncertainty must use the existing rebuild and dirty/full
-repaint path. For value-only frames, `project_docs/value_only_frame_retained_diff_replay_rfc.md`
+repaint path. For value-only frames, the Runtime repository retained/diff replay RFC
 adds the stricter clear-and-replay contract: clear the conservative union of old/new visual bounds,
 then redraw every current command intersecting it in paint order. Equal commands are not permission
 to skip paint.

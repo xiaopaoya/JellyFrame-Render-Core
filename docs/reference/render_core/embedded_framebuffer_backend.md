@@ -3,7 +3,7 @@
 > Last updated: 2026-08-02; Applies to: 0.5.0
 
 
-`src/render_core/embedded_framebuffer.h` provides the first deployable presentation
+`include/render_core/embedded_framebuffer.h` provides the first deployable presentation
 adapter for embedded hosts. It is still platform-neutral: it does not open a
 device, allocate display memory, start DMA, talk to LVGL or call an RTOS API.
 It converts JellyFrame's internal RGBA `FrameBuffer` view into a caller-owned

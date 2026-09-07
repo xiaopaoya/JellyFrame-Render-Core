@@ -3,6 +3,7 @@
 # archive root CMakeLists.txt remains deliberately small.
 
 option(JELLYFRAME_BUILD_TESTS "Build Render Core regression tests" ON)
+option(JELLYFRAME_BUILD_BENCHMARKS "Build Render Core microbenchmarks" OFF)
 option(JELLYFRAME_INSTALL_RENDER_CORE "Install the Render Core CMake package" ON)
 option(JELLYFRAME_ENABLE_IMAGE_FILE_IO "Expose desktop image file writers from Render Core" ON)
 option(JELLYFRAME_ENABLE_CANVAS2D "Compile the graphics.canvas2d Render Core family" ON)
@@ -20,4 +21,10 @@ include("${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/cmake/render_core_build.cmake")
 if(JELLYFRAME_BUILD_TESTS)
     enable_testing()
     include("${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/cmake/render_core_tests.cmake")
+endif()
+
+if(JELLYFRAME_BUILD_BENCHMARKS)
+    add_executable(jellyframe_render_core_microbench
+        "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/benchmarks/microbench.cpp")
+    target_link_libraries(jellyframe_render_core_microbench PRIVATE jellyframe_render_core)
 endif()

@@ -4,11 +4,12 @@
 
 namespace jellyframe {
 
-SubmitEvent::SubmitEvent(const Node*)
-    : Event("submit", true, true) {}
+SubmitEvent::SubmitEvent(const Node* submitter)
+    : Event("submit", true, true),
+      submitter_(submitter) {}
 
 const Node* SubmitEvent::submitter() const {
-    return nullptr;
+    return submitter_;
 }
 
 Node* form_owner(Node&) { return nullptr; }

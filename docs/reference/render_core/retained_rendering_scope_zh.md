@@ -47,7 +47,7 @@ diff。只有候选匹配稳定且可证明不改变像素，才进入第二阶�
 
 缓存命中失败必须与未启用缓存完全相同地走现有 pipeline。默认 profile 先保持关闭；开启后
 必须有像素 capture、随机 mutation 和长帧回归，且证明默认 app 的内存与 clean frame 成本
-没有回退。对 value-only frame，`project_docs/value_only_frame_retained_diff_replay_rfc_zh.md`
+没有回退。对 value-only frame，Runtime 仓库中的 retained/diff replay RFC
 规定更严格的 clear-and-replay：清空 old/new visual bounds 的保守 union，再以原 paint order
 重绘每一条与其相交的 current command。command value 相等不构成跳过绘制的许可。
 

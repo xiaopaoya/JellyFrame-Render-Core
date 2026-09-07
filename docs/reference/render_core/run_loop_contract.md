@@ -62,7 +62,7 @@ panel DMA transfer is still reading memory that render would overwrite.
 
 ## `plan_frame_loop`
 
-Header: `src/render_core/frame_loop.h`
+Header: `include/render_core/frame_loop.h`
 
 `plan_frame_loop_work(...)` is a tiny helper for host UI tasks. It does not own
 an input queue, timer queue or animation queue. The host reports pending input
@@ -111,7 +111,7 @@ layout or present pixels.
 
 ## Scroll Blit Planning
 
-Header: `src/render_core/scroll_blit.h`
+Header: `include/render_core/scroll_blit.h`
 
 `plan_vertical_scroll_blit(...)` is an allocation-free helper for small-screen
 scrolling. It does not move pixels or access a display. Given viewport height,
@@ -159,7 +159,7 @@ installable third-party apps coexist without giving up a single UI owner.
 
 ## `plan_frame_update`
 
-Header: `src/render_core/frame_update.h`
+Header: `include/render_core/frame_update.h`
 
 `plan_frame_update` does not own the DOM and does not run layout. It only turns
 the current cache state and dirty flags into an update strategy.
@@ -229,7 +229,7 @@ mutation.
 
 ## Dirty Region Diagnostics
 
-Header: `src/render_core/dirty_region.h`
+Header: `include/render_core/dirty_region.h`
 
 `compute_dirty_rects(...)` remains the simple compatibility API for hosts that
 only need rectangles. `compute_dirty_region(...)` returns the same rectangles
@@ -279,7 +279,7 @@ full-frame path.
 
 ## Display Invalidation Diagnostics
 
-Header: `src/render_core/display_invalidation.h`
+Header: `include/render_core/display_invalidation.h`
 
 `analyze_display_invalidation(...)` reports how a dirty-rectangle set maps onto
 the current layer tree and display commands. It counts visited/intersecting
@@ -298,7 +298,7 @@ retained layer/display-command structures.
 
 ## Animation Invalidation
 
-Header: `src/render_core/animation_invalidation.h`
+Header: `include/render_core/animation_invalidation.h`
 
 `compute_animation_dirty_region(...)` /
 `compute_animation_dirty_region_into(...)` are for animation frames. They use

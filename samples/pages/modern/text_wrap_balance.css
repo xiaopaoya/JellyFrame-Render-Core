@@ -1,0 +1,41 @@
+body {
+  margin: 0;
+  background: hsl(210 35% 96%);
+  color: #102030;
+}
+
+.screen {
+  display: block;
+  padding: 12px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: hsl(203 72% 37%);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.card {
+  display: block;
+  margin: 0;
+  padding: 12px;
+  background: #ffffff;
+  border-radius: 12px;
+}
+
+.balanced {
+  margin: 0 0 6px;
+  font-size: 15px;
+  line-height: 18px;
+  font-weight: 700;
+  text-wrap: balance;
+}
+
+.copy {
+  margin: 0;
+  color: hsl(213 18% 34%);
+  font-size: 10px;
+  line-height: 13px;
+}

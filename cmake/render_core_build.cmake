@@ -19,7 +19,7 @@ add_library(JellyFrame::jellyframe_render_core ALIAS jellyframe_render_core)
 
 target_include_directories(jellyframe_render_core
     PUBLIC
-        $<BUILD_INTERFACE:${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/src>
+        $<BUILD_INTERFACE:${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_compile_features(jellyframe_render_core PUBLIC cxx_std_17)
@@ -56,20 +56,20 @@ if(JELLYFRAME_INSTALL_RENDER_CORE)
         INSTALL_DESTINATION "${JELLYFRAME_RENDER_CORE_INSTALL_CMAKE_DIR}")
     write_basic_package_version_file(
         "${CMAKE_CURRENT_BINARY_DIR}/JellyFrameRenderCoreConfigVersion.cmake"
-        VERSION "${JELLYFRAME_RENDER_CORE_PACKAGE_VERSION}"
+        # CMake package discovery accepts numeric semantic versions only.
+        # Keep the -dev suffix in Core metadata while exposing the numeric
+        # project version to find_package(... EXACT).
+        VERSION "${JELLYFRAME_RENDER_CORE_CMAKE_VERSION}"
         COMPATIBILITY SameMajorVersion)
     install(TARGETS jellyframe_render_core
         EXPORT JellyFrameRenderCoreTargets
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-    install(DIRECTORY "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/src/render_core/"
+    install(DIRECTORY "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/include/render_core/"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/render_core"
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
-        PATTERN "benchmarks" EXCLUDE
-        PATTERN "docs" EXCLUDE
-        PATTERN "samples" EXCLUDE
-        PATTERN "tests" EXCLUDE)
+)
     install(EXPORT JellyFrameRenderCoreTargets
         FILE JellyFrameRenderCoreTargets.cmake
         NAMESPACE JellyFrame::

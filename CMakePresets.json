@@ -32,6 +32,19 @@
         "JELLYFRAME_ENABLE_FLEX_GRID": "OFF",
         "JELLYFRAME_ENABLE_ADVANCED_FORMS": "OFF"
       }
+    },
+    {
+      "name": "benchmarks",
+      "displayName": "Render Core Benchmarks",
+      "description": "Release build with the platform-neutral microbenchmark executable.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/benchmarks",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "JELLYFRAME_BUILD_TESTS": "ON",
+        "JELLYFRAME_BUILD_BENCHMARKS": "ON",
+        "JELLYFRAME_INSTALL_RENDER_CORE": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -43,6 +56,11 @@
     {
       "name": "minimal",
       "configurePreset": "minimal",
+      "configuration": "Release"
+    },
+    {
+      "name": "benchmarks",
+      "configurePreset": "benchmarks",
       "configuration": "Release"
     }
   ]
