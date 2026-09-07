@@ -1,6 +1,6 @@
 # Render Core 发布与拆仓政策
 
-> 最后更新：2026-09-04；适用版本：0.6.2 release candidate
+> 最后更新：2026-09-04；适用版本：0.6.0-dev
 
 本政策规定当前 monorepo 边界迁移到独立 `jellyframe-render-core` 工程的方式。它补充 [engine_architecture_zh.md](engine_architecture_zh.md)，不是面向 App 作者的兼容性承诺。
 
@@ -14,9 +14,11 @@
 
 ## 迁移状态
 
-保留历史的 `xiaopaoya/JellyFrame-Render-Core` 仓库保留了现有许可证和贡献者历史。
-当前分支是未签名的 `0.6.2` release candidate，而不是 signed release：这不表示许可证、贡献者政策或开源意向的改变。
-Runtime 仍锁定并使用 `v0.6.1`，直到新的 signed Core artifact 经评审并通过显式 dependency-lock 更新接纳。
+保留历史的 `xiaopaoya/JellyFrame-Render-Core` 仓库保留现有许可证和贡献者历史。
+首个带签名的 `v0.6.0` release 建立了确定性 source archive 和 SHA-256 sidecar；Runtime 当前接纳带签名的 `v0.6.2`。独立仓库 `master` 已在 2026-08-30 合入来自 JellyFrame `7735b9a1` 的 `0.6.2-dev` 同步提交 `769ec5d`，但该开发头不是 Runtime dependency。这不表示许可证、贡献者政策或开源意向的改变。
+Runtime 只能通过显式 dependency-lock 更新接纳 release；in-tree provider 仅继续作为同步开发的默认路径。
+Runtime CI 会下载已发布 archive、校验经审阅的 SHA-256、安装并运行锁定 package-consumer regression；
+这可避免误把 monorepo export 当成已发布 dependency。
 
 ## 发布单元
 
@@ -28,10 +30,6 @@ Runtime 仍锁定并使用 `v0.6.1`，直到新的 signed Core artifact 经评�
 4. 带签名的 annotated release tag 和公开 release artifact。
 
 tag 签名建立发布权威；source manifest/checksum 建立 artifact identity，两者不可互相替代。现有确定性 archive 是该发布单元的前身。归档会先将声明为文本的成员规范为 LF，再打包；不透明二进制成员保持原始字节，因此等价的 CRLF/LF checkout 会生成相同的 archive 字节和 checksum。在 Git checkout 中运行时，打包器只接纳已跟踪的 Core 输入，未跟踪的编辑器或构建产物不会进入候选 archive；带签名 release 仍必须从已评审 tag 生成。
-
-仓库内的操作流程见 [`tools/README.md`](../tools/README.md)。脚本通过 GnuPG 生成本地、受
-passphrase 保护的 signing key，只配置当前 checkout，验证 signed tag 并创建确定性 archive。
-它们不会把 passphrase、private key 或 revocation certificate 写进 checkout，默认也不会 push。
 
 ## 版本与兼容性
 
@@ -48,6 +46,7 @@ JellyFrame Runtime 在 dependency lock 中记录精确的 Render Core version、
 1. installed Core package 上的 Runtime tests。
 2. 同一 Core revision 的 local source override Runtime tests。
 3. published source artifact 的 Core standalone build/install/test。
+4. 在 installed-package consumer build 前校验 published archive SHA-256。
 
 Device OS pin 一个 JellyFrame Runtime release 与命名的 board feature profile；不得从 branch 名推断支持能力，并必须在每份 image 验收报告中记录 Core provenance。
 
@@ -63,20 +62,21 @@ Core release 是源码/package 基础设施，不是一份通用 native firmware
 
 ## 保留历史的拆分
 
-首个 Core 仓库使用可复现的 `git filter-repo` export，保留历史上的 `src/render_core`、Core CMake boundary、standalone tests 与 Core 专属文档的历史；当前独立仓库以自己的根目录布局呈现这些保留内容。Runtime 仓库保留完整产品历史，并以一笔明确的 package-consumer 提交替代 in-tree Core。禁止用无历史目录拷贝替代。
+首个 Core 仓库已使用可复现的 `git filter-repo` export，保留 Core 源、CMake boundary、standalone tests 与 Core 专属文档的历史。Runtime 仓库保留完整产品历史，并以一笔明确的 package-consumer 提交替代 in-tree Core。禁止用无历史目录拷贝替代。
 
-发布新仓库前必须验证：
+已关闭的 Core/Runtime 拆仓和发布路径为：
 
 1. 干净 clone 不依赖 Runtime、JerryScript、ports 或 sample app 即可 build/test/install Core。
 2. 干净 Runtime clone 通过 lock 消费已发布 Core package。
 3. 本地 Runtime checkout 可使用文档化 source override。
-4. Device OS profile build 记录精确 Runtime/Core provenance。
+
+Device OS 迁移还有一项未关闭门槛：Device OS profile build 必须记录精确 Runtime/Core provenance；当前桌面 dispatcher 不满足这一项。
 
 日常开发不使用 Git submodule；lock 加已发布 package 才是发布依赖机制。
 
 ## 演练
 
-只接受 committed HEAD 的 export rehearsal 仍由 JellyFrame Runtime 仓库维护，因为它操作的是 Runtime monorepo 边界。请在该仓库的可丢弃目录中运行：
+需要审计或重复保留历史的导出时，在可丢弃目录中对 committed HEAD 运行演练：
 
 ```powershell
 python project_tools\rehearse_render_core_history_export.py `
@@ -89,4 +89,4 @@ python project_tools\rehearse_render_core_history_export.py `
 
 ## 拆仓门槛
 
-四条验证路径在一个 release candidate 上全部绿色，且不存在 Runtime/port 私有 include 反向进入 Core 后，才可物理拆分。第一个高价值 Core 能力包必须在受治理边界上开发，紧随拆仓或与其同一发布窗口完成；大量新 CSS 工作不得继续堆积在过渡 monorepo。
+Core 已完成物理拆分：首个带签名的 `v0.6.0` release、当前锁定的 `v0.6.2` package 与 Runtime package-consumer CI 已关闭该边界。Device OS 迁移前，剩余的 profile-consumer/provenance 检查必须绿色，且不得存在 Runtime/port 私有 include 反向进入 Core。下一个高价值 Core 能力包必须在该受治理边界上开发；大量新 CSS 工作不得回流到过渡 monorepo。
