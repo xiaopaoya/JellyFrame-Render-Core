@@ -231,7 +231,9 @@ struct DisplayCommandTransform {
     std::int32_t tx_1024 = 0;
     std::int32_t ty_1024 = 0;
     // A transformed layer may clip its own source surface before affine
-    // compositing. This is separate from destination-space frame clips.
+    // compositing. This is separate from destination-space frame clips. The
+    // uint16_t wire representation is intentional: value-frame producers must
+    // reject a frame whose clip table cannot be represented before publishing.
     std::uint16_t source_clip_index = 0xffffU;
 };
 
@@ -255,6 +257,10 @@ struct DisplayCommand {
     ObjectPosition object_position;
     ImageRendering image_rendering = ImageRendering::Auto;
     DisplayCommandTransform transform;
+    // Optional, frame-local profiling attribution. Zero means no reliable
+    // owner. It is a pure value so command copies stay task-safe; frame codecs
+    // intentionally do not serialize it and normal rendering never reads it.
+    std::uint32_t trace_owner_token = 0;
 };
 
 using DisplayList = std::vector<DisplayCommand>;

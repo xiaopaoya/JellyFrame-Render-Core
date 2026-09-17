@@ -1,6 +1,6 @@
 # Render Core Active Roadmap
 
-> Last updated: 2026-09-08; Applies to: 0.6.2 development line
+> Last updated: 2026-09-17; Applies to: 0.6.2 development line
 
 This is the Core-only planning document. It does not schedule JellyFrame App
 Runtime, device ports, launcher policy, JerryScript or developer-image work.
@@ -10,16 +10,21 @@ Those consumers decide when a released Core version is adopted.
 
 Signed `v0.6.0` established Core ABI `1`; signed `v0.6.2` is the Runtime's
 current locked dependency. The current `master` is the post-release `0.6.2`
-development line. Merge `0d04dfca` synchronized the reviewed Core updates from
-JellyFrame mainline through `8630bf6c`, including the follow-up runtime/resource
-and dirty-region audit fixes. It retains standalone build/install CI and
-deterministic source archives, and includes the following completed authoring
-subset:
+development line. The latest synchronization imports reviewed Core changes from
+JellyFrame mainline through `b1196f67`, superseding the earlier `0d04dfca` /
+`8630bf6c` synchronization point. This source revision passed the monorepo's
+desktop, scripting, sanitizer and standalone-Core CI and was integrated into the
+accepted WS147 `0.6.2-ws147.2` developer image. The standalone line retains its
+own build/install CI and deterministic source archives, and now also includes:
 
 - LTR horizontal logical size, spacing and inset mapping.
 - Common flex/grid placement (`order`, `align-self`, `place-*`, bounded rows).
 - Bounded sRGB `hsl()` / `hsla()` and common image-background placement.
 - Text letter spacing, scalar-safe `overflow-wrap: anywhere` and ellipsis.
+- Bounded dirty-region and rounded-raster hot paths, cached text layout and
+  viewport-aware units.
+- Command owner/span trace instrumentation and Windows CPU2D comparison
+  workloads.
 
 `text-wrap: balance` was explored in historical commit `0fa5c41`, but is not
 present in the current development implementation or capability surface. The

@@ -186,11 +186,49 @@ struct TextPaintCounter {
     int calls = 0;
 };
 
+struct OpacityTextProbe {
+    std::string text;
+    Color color;
+    int calls = 0;
+};
+
+bool opacity_text_probe_painter(FrameBuffer& target,
+                               Rect rect,
+                               Color color,
+                               const std::string& text,
+                               int,
+                               int,
+                               TextCommandAlign,
+                               bool,
+                               void* raw_context) {
+    auto* probe = static_cast<OpacityTextProbe*>(raw_context);
+    if (probe != nullptr) {
+        probe->text = text;
+        probe->color = color;
+        ++probe->calls;
+    }
+    if (target.contains(rect.x, rect.y)) {
+        target.pixel(rect.x, rect.y) = color;
+    }
+    return true;
+}
+
 struct ReplayTimingClock {
     const std::uint64_t* samples = nullptr;
     std::size_t sample_count = 0;
     std::size_t calls = 0;
 };
+
+struct CommandSampleCollector {
+    std::vector<SoftwareRasterizerCommandSample> samples;
+};
+
+void collect_command_sample(const SoftwareRasterizerCommandSample& sample, void* raw_context) {
+    auto* collector = static_cast<CommandSampleCollector*>(raw_context);
+    if (collector != nullptr) {
+        collector->samples.push_back(sample);
+    }
+}
 
 std::uint64_t replay_timing_clock(void* raw_context) {
     auto* clock = static_cast<ReplayTimingClock*>(raw_context);
@@ -400,6 +438,21 @@ void opaque_linear_gradient_fast_path_preserves_all_axis_interpolation() {
     check(horizontal_target.pixel(4, 4).r == 162 && horizontal_target.pixel(4, 4).g == 109 &&
               horizontal_target.pixel(4, 4).b == 19,
           "opaque horizontal gradient keeps later interpolation in a dirty clip");
+    for (int y = 0; y < horizontal_target.height; ++y) {
+        for (int x = 0; x < horizontal_target.width; ++x) {
+            const Color pixel = horizontal_target.pixel(x, y);
+            const bool inside_dirty_clip = x >= 2 && x < 5 && y >= 2 && y < 5;
+            if (!inside_dirty_clip) {
+                check(pixel.r == 255 && pixel.g == 255 && pixel.b == 255 && pixel.a == 255,
+                      "opaque horizontal gradient preserves every pixel outside its dirty clip");
+                continue;
+            }
+            const Color first_dirty_row_pixel = horizontal_target.pixel(x, 2);
+            check(pixel.r == first_dirty_row_pixel.r && pixel.g == first_dirty_row_pixel.g &&
+                      pixel.b == first_dirty_row_pixel.b && pixel.a == first_dirty_row_pixel.a,
+                  "opaque horizontal gradient produces identical rows inside its dirty clip");
+        }
+    }
 
     DisplayCommand diagonal = horizontal;
     diagonal.gradient_axis = GradientAxis::DiagonalDownRight;
@@ -867,13 +920,67 @@ void compositor_clips_children_to_rounded_overflow() {
     clip->children.push_back(std::move(child));
     root.children.push_back(std::move(clip));
 
+    const Rect rounded_clip_rect{8, 8, 24, 24};
+    const int rounded_clip_radius = 8;
     const FrameBuffer frame = SoftwareCompositor().render(root, 40, 40, Color{255, 255, 255, 255});
+    FrameBuffer expected(40, 40, Color{255, 255, 255, 255});
+    const RasterRoundedRect rounded = prepare_rounded_rect(rounded_clip_rect, rounded_clip_radius);
+    for (int y = rounded_clip_rect.y; y < safe_edge(rounded_clip_rect.y, rounded_clip_rect.height); ++y) {
+        for (int x = rounded_clip_rect.x; x < safe_edge(rounded_clip_rect.x, rounded_clip_rect.width); ++x) {
+            blend_pixel(expected, x, y, with_coverage(fill.color, rounded_rect_coverage(rounded, x, y)));
+        }
+    }
+    check(frame.pixels.size() == expected.pixels.size(), "rounded overflow clip output dimensions are stable");
+    for (std::size_t index = 0; index < frame.pixels.size(); ++index) {
+        const Color actual = frame.pixels[index];
+        const Color reference = expected.pixels[index];
+        check(actual.r == reference.r && actual.g == reference.g && actual.b == reference.b &&
+                  actual.a == reference.a,
+              "rounded overflow clip preserves every pixel of the antialiased reference");
+    }
     check(frame.pixel(8, 8).r == 255 && frame.pixel(8, 8).g == 255,
           "rounded overflow clip excludes the top-left corner");
     check(frame.pixel(20, 8).b > 200,
           "rounded overflow clip keeps the top edge away from the corner");
     check(frame.pixel(20, 20).b > 200,
           "rounded overflow clip keeps child content in the center");
+}
+
+void built_in_text_fallback_preserves_clipped_pixel_output() {
+    VectorDiagnosticSink diagnostics;
+    SoftwareRasterizer rasterizer(TextPainter{rejecting_text_painter, nullptr}, &diagnostics);
+    DisplayCommand command;
+    command.type = DisplayCommandType::Text;
+    command.rect = Rect{2, 2, 5, 7};
+    command.color = Color{20, 30, 40, 255};
+    command.text = "A";
+    command.font_size = 8;
+    command.text_single_line = true;
+
+    const Color background{231, 236, 244, 255};
+    FrameBuffer frame(8, 8, background);
+    rasterizer.rasterize(command, frame, Rect{0, 0, 8, 8});
+
+    const std::array<std::uint8_t, 7> rows = {
+        0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11,
+    };
+    for (int y = 0; y < frame.height; ++y) {
+        for (int x = 0; x < frame.width; ++x) {
+            Color expected = background;
+            const int row = y - command.rect.y;
+            const int col = x - command.rect.x;
+            if (row >= 0 && row < 7 && col >= 0 && col < 5 &&
+                (rows[static_cast<std::size_t>(row)] & (1U << (4 - col))) != 0U) {
+                expected = command.color;
+            }
+            const Color actual = frame.pixel(x, y);
+            check(actual.r == expected.r && actual.g == expected.g && actual.b == expected.b &&
+                      actual.a == expected.a,
+                  "built-in text fallback preserves clipped glyph pixels exactly");
+        }
+    }
+    check(has_diagnostic_code(diagnostics, "paint-text-backend-failed"),
+          "pixel-output fallback regression uses the built-in path");
 }
 
 void rasterizer_applies_value_rounded_clip_chain() {
@@ -1129,6 +1236,58 @@ void rasterizer_records_opt_in_rounded_clip_replay_timing() {
           "non-monotonic replay timing samples are rejected without underflow");
 }
 
+void rasterizer_command_observer_is_opt_in_and_reports_clipped_work() {
+    DisplayCommand fill = black_fill(Rect{2, 3, 12, 10});
+    fill.trace_owner_token = 41;
+    FrameBuffer without_observer(20, 20, Color{255, 255, 255, 255});
+    SoftwareRasterizer().rasterize(fill, without_observer, Rect{4, 5, 5, 4});
+
+    const std::uint64_t samples[] = {100, 113};
+    ReplayTimingClock clock{samples, 2, 0};
+    CommandSampleCollector collector;
+    SoftwareRasterizer rasterizer({},
+                                  nullptr,
+                                  {0,
+                                   nullptr,
+                                   {replay_timing_clock, &clock},
+                                   {collect_command_sample, &collector}});
+    FrameBuffer with_observer(20, 20, Color{255, 255, 255, 255});
+    rasterizer.rasterize(fill, with_observer, Rect{4, 5, 5, 4});
+
+    check(with_observer.width == without_observer.width && with_observer.height == without_observer.height &&
+              with_observer.pixels.size() == without_observer.pixels.size(),
+          "command profiling preserves framebuffer shape");
+    for (std::size_t index = 0; index < with_observer.pixels.size(); ++index) {
+        const Color observed = with_observer.pixels[index];
+        const Color baseline = without_observer.pixels[index];
+        check(observed.r == baseline.r && observed.g == baseline.g && observed.b == baseline.b &&
+                  observed.a == baseline.a,
+              "command profiling must not alter rasterized pixels");
+    }
+    check(clock.calls == 2 && collector.samples.size() == 1,
+          "command observer reads the opt-in clock only around one executed command");
+    const SoftwareRasterizerCommandSample& sample = collector.samples.front();
+    check(sample.type == DisplayCommandType::FillRect && sample.trace_owner_token == 41 &&
+              sample.clip.x == 4 && sample.clip.y == 5 && sample.clip.width == 5 && sample.clip.height == 4 &&
+              sample.candidate_pixels == 20 && sample.begin_microseconds == 100 &&
+              sample.elapsed_microseconds == 13 && sample.timing_valid,
+          "command observer reports owner, final clip, candidate pixels and elapsed raster time");
+
+    const std::uint64_t invalid_samples[] = {50, 49};
+    ReplayTimingClock invalid_clock{invalid_samples, 2, 0};
+    CommandSampleCollector invalid_collector;
+    SoftwareRasterizer invalid_rasterizer({},
+                                          nullptr,
+                                          {0,
+                                           nullptr,
+                                           {replay_timing_clock, &invalid_clock},
+                                           {collect_command_sample, &invalid_collector}});
+    invalid_rasterizer.rasterize(fill, with_observer, Rect{4, 5, 5, 4});
+    check(invalid_collector.samples.size() == 1 && !invalid_collector.samples.front().timing_valid &&
+              invalid_collector.samples.front().elapsed_microseconds == 0,
+          "command observer rejects non-monotonic timing without underflow");
+}
+
 void rasterizer_skips_rounded_clip_surface_when_dirty_rect_misses_corners() {
     DisplayCommand fill = black_fill(Rect{0, 0, 40, 40});
     fill.color = Color{20, 120, 240, 255};
@@ -1327,6 +1486,64 @@ void compositor_smooths_scaled_layers() {
     check(smooth.pixel(1, 1).r > 0 && smooth.pixel(1, 1).r < 255,
           "scaled layer has bilinear intermediate pixel");
     check(nearest.pixel(1, 1).r == 0, "nearest scaled layer keeps hard edge");
+}
+
+void compositor_applies_opacity_to_radial_gradient_pixels() {
+#if !JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
+    return;
+#endif
+    LayerNode root;
+    root.type = LayerType::Root;
+    root.bounds = Rect{0, 0, 9, 9};
+
+    auto child = LayerNodePtr(new LayerNode, LayerNodeDeleter{false});
+    child->type = LayerType::Composited;
+    child->opacity = 0.5F;
+    child->bounds = Rect{0, 0, 9, 9};
+    DisplayCommand radial;
+    radial.type = DisplayCommandType::RadialGradient;
+    radial.rect = child->bounds;
+    radial.color = Color{0, 0, 0, 255};
+    radial.color2 = Color{255, 0, 0, 255};
+    child->display_list.push_back(radial);
+    root.children.push_back(std::move(child));
+
+    const FrameBuffer output =
+        SoftwareCompositor().render(root, 9, 9, Color{255, 255, 255, 255});
+    check(output.pixel(4, 4).r > 120 && output.pixel(4, 4).r < 140,
+          "radial gradient center receives layer opacity");
+    check(output.pixel(4, 4).g > 120 && output.pixel(4, 4).g < 140,
+          "radial gradient center preserves opacity on the second channel");
+}
+
+void opacity_fallback_preserves_text_without_copying_command() {
+    OpacityTextProbe probe;
+    SoftwareCompositor::Options options;
+    options.max_offscreen_pixels = 1;
+    LayerNode root;
+    root.type = LayerType::Root;
+    root.bounds = Rect{0, 0, 2, 1};
+
+    auto child = LayerNodePtr(new LayerNode, LayerNodeDeleter{false});
+    child->type = LayerType::Paint;
+    child->opacity = 0.5F;
+    child->bounds = Rect{0, 0, 2, 1};
+    DisplayCommand text;
+    text.type = DisplayCommandType::Text;
+    text.rect = child->bounds;
+    text.color = Color{20, 30, 40, 255};
+    text.text = "text with preserved fields";
+    child->display_list.push_back(text);
+    root.children.push_back(std::move(child));
+
+    const FrameBuffer output = SoftwareCompositor(
+        TextPainter{opacity_text_probe_painter, &probe}, options).render(
+            root, 2, 1, Color{255, 255, 255, 255});
+    check(probe.calls == 1 && probe.text == text.text,
+          "opacity fallback passes the original text without changing command fields");
+    check(probe.color.a == 127, "opacity fallback passes effective text alpha");
+    check(output.pixel(0, 0).r == 20 && output.pixel(0, 0).a == 127,
+          "opacity fallback paints the effective text color");
 }
 
 void compositor_degrades_oversized_offscreen_layers_without_crashing() {
@@ -2078,6 +2295,7 @@ int main() {
         rasterizer_tracks_nested_rounded_clip_coverage_work();
         rasterizer_rounded_composite_span_matches_pixel_reference();
         rasterizer_records_opt_in_rounded_clip_replay_timing();
+        rasterizer_command_observer_is_opt_in_and_reports_clipped_work();
         rasterizer_skips_rounded_clip_surface_when_dirty_rect_misses_corners();
         compositor_offsets_rounded_overflow_clip_with_layer_transform();
         compositor_bounds_extreme_manual_transform_coordinates();
@@ -2086,12 +2304,15 @@ int main() {
         compositor_keeps_non_fill_prefix_side_effects();
         compositor_keeps_rounded_fill_underpaint();
         rasterizer_reports_text_fallback();
+        built_in_text_fallback_preserves_clipped_pixel_output();
         dirty_text_clip_preserves_original_text_geometry();
         rasterizer_scratch_reuses_clipped_command_storage();
         rasterizer_bounds_clipped_temporary_surfaces();
         compositor_scratch_reuses_clipped_command_storage();
         rasterizer_scratch_reuses_clipped_image_storage();
         compositor_smooths_scaled_layers();
+        compositor_applies_opacity_to_radial_gradient_pixels();
+        opacity_fallback_preserves_text_without_copying_command();
         compositor_degrades_oversized_offscreen_layers_without_crashing();
         compositor_does_not_bypass_rounded_clip_when_offscreen_budget_is_exceeded();
         compositor_keeps_composited_paint_outside_layout_bounds();

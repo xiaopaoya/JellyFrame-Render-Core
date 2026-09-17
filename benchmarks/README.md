@@ -1,12 +1,36 @@
 # Render Core Benchmarks
 
-> Last updated: 2026-08-13; Applies to: 0.6.0-dev
+> Last updated: 2026-09-15; Applies to: 0.6.0-dev
 
 Microbenchmarks in this directory measure the platform-neutral render pipeline:
 HTML parsing, CSS parsing, style resolution, render tree, layout, layer tree,
 display-list flattening and software rendering.
 
 Executable: `jellyframe_render_core_microbench`.
+
+On Windows, `jellyframe_cpu2d_compare` runs fixed-condition CPU 2D comparison
+workloads through JellyFrame and a memory-DIB GDI operation in the same process.
+Both use a 172x320 RGB surface, 30 warm-up calls and equal sample counts. The
+default `opaque-fill` workload requires exact normalized RGB output. The
+`horizontal-gradient` and `vertical-gradient` workloads compare opaque
+gradients against the corresponding GDI `GradientFill` mode and require
+normalized RGB RMSE <= 1.0; the implementations' integer endpoint conventions
+differ by at most one channel value in the current fixture. The runner writes
+`jellyframe.json` and `gdi.json` manifests for
+`tools/benchmark_compare.py`.
+
+```powershell
+jellyframe_cpu2d_compare <output-directory> 100 opaque-fill
+jellyframe_cpu2d_compare <output-directory> 100 horizontal-gradient
+jellyframe_cpu2d_compare <output-directory> 100 vertical-gradient
+```
+
+On the development Windows machine, reusing the first clipped horizontal row
+reduced the 100-sample JellyFrame gradient p95 from 437.7 us to 4.3 us while
+preserving its `177877a38d09ae83` output digest; GDI measured approximately
+4.4 us p95. These values apply only to this opaque 172x320 horizontal-gradient
+primitive. They do not describe complete UI, device FPS, rounded/translucent
+gradients, text, or GPU performance.
 
 Retained repaint probes:
 
@@ -71,6 +95,22 @@ Retained repaint probes:
 - `packed_rgb565_dither_present` measures 172x320 direct packed RGB565 ordered
   dithering. It exists because low-color-depth quality is port-opt-in and must
   be measured separately from RGBA composition and panel/DMA time.
+- `text_anywhere_wrap_32`, `text_anywhere_wrap_128`, `text_anywhere_wrap_512`,
+  and `text_anywhere_wrap_2048` measure the current UTF-8 scalar wrapping path
+  at four text lengths in a narrow column. The corresponding `*_wide_*` probes
+  keep the candidate on one line to expose the worst candidate-string
+  measurement shape. These results are a baseline, not a performance target,
+  and do not authorize a semantic change to font-run measurement.
+- `flex_nonwrap_intrinsic_layout` measures a non-wrapping row whose flexible
+  children contain text and are stretched on the cross axis. It reports the
+  text-measure count for one layout so probe/final/stretch passes remain
+  visible while evaluating any intrinsic-size cache. It is a baseline only;
+  do not skip a pass unless percentage descendants and cross-axis semantics
+  are covered by regression tests.
+- `form_select_set_index` measures repeated selected-index updates on a
+  256-option select. It covers the common interaction path where option count
+  and selected option are needed together; the result is a desktop baseline,
+  not a device throughput target.
 
 These probes quantify the remaining cost after text/style layout reuse. They do
 not imply display-list diffing or subtree replay.

@@ -4,6 +4,7 @@
 #include "render_core/modern_paint.h"
 #include "render_core/feature_config.h"
 #include "render_core/raster_primitives.h"
+#include "render_core/dirty_region.h"
 
 #include <algorithm>
 #include <array>
@@ -113,6 +114,17 @@ void add_saturating(Value& target, Value value) {
         return;
     }
     target += value;
+}
+
+std::size_t clipped_rect_pixels(Rect rect) {
+    if (rect.width <= 0 || rect.height <= 0) {
+        return 0;
+    }
+    const std::size_t width = static_cast<std::size_t>(rect.width);
+    const std::size_t height = static_cast<std::size_t>(rect.height);
+    return width > std::numeric_limits<std::size_t>::max() / height
+        ? std::numeric_limits<std::size_t>::max()
+        : width * height;
 }
 
 void record_rounded_clip_replay_candidate_pixels(SoftwareRasterizerStatistics* statistics,
@@ -317,7 +329,7 @@ void composite_rounded_clip_surface(FrameBuffer& target,
                 }
                 continue;
             }
-            blend_pixel(target, x, y, with_coverage(color, coverage));
+            blend_pixel_unchecked(target, x, y, with_coverage(color, coverage));
             if (statistics != nullptr) {
                 ++statistics->rounded_clip_blended_pixels;
             }
@@ -381,60 +393,39 @@ Rect target_rect(const FrameBuffer& target) {
     return Rect{0, 0, target.width, target.height};
 }
 
-std::vector<Rect> normalize_dirty_rects(const Rect* dirty_rects,
-                                        std::size_t dirty_rect_count,
-                                        Rect target) {
-    std::vector<Rect> normalized;
-    normalized.reserve(dirty_rect_count);
-    for (std::size_t index = 0; index < dirty_rect_count; ++index) {
-        const Rect dirty = intersect_rect(dirty_rects[index], target);
-        if (empty_rect(dirty)) {
-            continue;
-        }
-        bool covered = false;
-        for (const Rect& existing : normalized) {
-            if (contains_rect(existing, dirty)) {
-                covered = true;
-                break;
-            }
-        }
-        if (covered) {
-            continue;
-        }
-        normalized.erase(
-            std::remove_if(normalized.begin(), normalized.end(), [dirty](Rect existing) {
-                return contains_rect(dirty, existing);
-            }),
-            normalized.end());
-        normalized.push_back(dirty);
-    }
-    bool merged = true;
-    while (merged) {
-        merged = false;
-        for (std::size_t left = 0; left + 1 < normalized.size() && !merged; ++left) {
-            for (std::size_t right = left + 1; right < normalized.size(); ++right) {
-                if (empty_rect(intersect_rect(normalized[left], normalized[right]))) {
-                    continue;
-                }
-                normalized[left] = union_rect(normalized[left], normalized[right]);
-                normalized.erase(normalized.begin() + static_cast<std::ptrdiff_t>(right));
-                merged = true;
-                break;
-            }
-        }
-    }
-    return normalized;
-}
-
 std::uint8_t clamp_u8(int value) {
     return raster_clamp_u8(value);
 }
 
-Color with_opacity(Color color, float opacity) {
-    const int alpha = static_cast<int>(static_cast<float>(color.a) * std::max(0.0F, std::min(1.0F, opacity)));
-    color.a = clamp_u8(alpha);
+Color with_clamped_opacity(Color color, float clamped_opacity) {
+    color.a = clamp_u8(static_cast<int>(static_cast<float>(color.a) * clamped_opacity));
     return color;
 }
+
+struct OpacityColorOverride {
+    const DisplayCommand* command = nullptr;
+    Color color;
+    Color color2;
+};
+
+thread_local OpacityColorOverride opacity_color_override;
+
+class ScopedOpacityColorOverride {
+public:
+    ScopedOpacityColorOverride(const DisplayCommand& command, Color color, Color color2)
+        : previous_(opacity_color_override) {
+        opacity_color_override.command = &command;
+        opacity_color_override.color = color;
+        opacity_color_override.color2 = color2;
+    }
+
+    ~ScopedOpacityColorOverride() {
+        opacity_color_override = previous_;
+    }
+
+private:
+    OpacityColorOverride previous_;
+};
 
 Rect clipped_target_rect(const FrameBuffer& target, Rect rect) {
     return intersect_rect(rect, target_rect(target));
@@ -472,7 +463,7 @@ void fill_opaque_rounded_rect(FrameBuffer& target, Rect rect, Rect clip, Color c
                 if (coverage == 255) {
                     target.pixel(x, y) = color;
                 }
-                else if (coverage > 0) blend_pixel(target, x, y, with_coverage(color, coverage));
+                else if (coverage > 0) blend_pixel_unchecked(target, x, y, with_coverage(color, coverage));
             }
         }
         return;
@@ -520,7 +511,7 @@ void fill_opaque_rounded_rect(FrameBuffer& target, Rect rect, Rect clip, Color c
                 if (coverage == 255) {
                     row[x - visible.x] = color;
                 } else if (coverage > 0) {
-                    blend_pixel(target, x, y, with_coverage(color, coverage));
+                    blend_pixel_unchecked(target, x, y, with_coverage(color, coverage));
                 }
             }
         }
@@ -546,7 +537,7 @@ void fill_rect(FrameBuffer& target, Rect rect, Color color, int border_radius = 
             if (coverage <= 0) {
                 continue;
             }
-            blend_pixel(target, x, y, with_coverage(color, coverage));
+            blend_pixel_unchecked(target, x, y, with_coverage(color, coverage));
         }
     }
 }
@@ -569,7 +560,111 @@ void fill_rect_clipped(FrameBuffer& target, Rect rect, Rect clip, Color color, i
             if (coverage <= 0) {
                 continue;
             }
-            blend_pixel(target, x, y, with_coverage(color, coverage));
+            blend_pixel_unchecked(target, x, y, with_coverage(color, coverage));
+        }
+    }
+}
+
+void stroke_rounded_rect(FrameBuffer& target,
+                         Rect rect,
+                         Rect clip,
+                         Color color,
+                         int stroke_width,
+                         int border_radius) {
+    Rect clipped = clipped_target_rect(target, rect, clip);
+    if (empty_rect(clipped) || color.a == 0 || stroke_width <= 0) {
+        return;
+    }
+    stroke_width = std::min(stroke_width, std::max(1, std::min(rect.width, rect.height) / 2));
+
+    const int twice_stroke = safe_add(stroke_width, stroke_width);
+    const Rect inner{
+        safe_add(rect.x, stroke_width),
+        safe_add(rect.y, stroke_width),
+        std::max(0, safe_add(rect.width, safe_negate(twice_stroke))),
+        std::max(0, safe_add(rect.height, safe_negate(twice_stroke))),
+    };
+    const int inner_radius = expand_corner_radii(border_radius, -stroke_width);
+    const RasterRoundedRect outer = prepare_rounded_rect(rect, border_radius);
+    const RasterRoundedRect inner_geometry = prepare_rounded_rect(inner, inner_radius);
+    const int y_end = safe_edge(clipped.y, clipped.height);
+    const int x_end = safe_edge(clipped.x, clipped.width);
+    const int inner_right = safe_edge(inner.x, inner.width);
+    const int inner_bottom = safe_edge(inner.y, inner.height);
+
+    const auto paint_span = [&](int y, int begin_x, int end_x) {
+        const int first = std::max(clipped.x, begin_x);
+        const int last = std::min(x_end, end_x);
+        for (int x = first; x < last; ++x) {
+            const int outer_coverage = rounded_rect_coverage(outer, x, y);
+            if (outer_coverage <= 0) {
+                continue;
+            }
+            const int inner_coverage = empty_rect(inner)
+                ? 0
+                : rounded_rect_coverage(inner_geometry, x, y);
+            const int stroke_coverage = std::max(0, outer_coverage - inner_coverage);
+            if (stroke_coverage > 0) {
+                blend_pixel_unchecked(target, x, y, with_coverage(color, stroke_coverage));
+            }
+        }
+    };
+
+    for (int y = clipped.y; y < y_end; ++y) {
+        // The horizontal bands need the full width for their rounded corners
+        // and inner-edge antialiasing. Away from those bands, only the two
+        // vertical border bands can contribute to the stroke.
+        const bool horizontal_band = empty_rect(inner) ||
+            y <= inner.y || y >= inner_bottom - 1;
+        if (horizontal_band) {
+            paint_span(y, clipped.x, x_end);
+        } else {
+            std::array<Rect, 6> spans{};
+            std::size_t span_count = 0;
+            const auto add_span = [&](int begin_x, int end_x) {
+                if (end_x > begin_x && span_count < spans.size()) {
+                    spans[span_count++] = Rect{begin_x, y, safe_span(begin_x, end_x), 1};
+                }
+            };
+            add_span(clipped.x, safe_add(inner.x, 1));
+            add_span(safe_add(inner_right, -1), x_end);
+            if (outer.radii.top_left > 0 && y < safe_add(outer.top, outer.radii.top_left)) {
+                add_span(outer.left, safe_add(outer.left, outer.radii.top_left));
+            }
+            if (outer.radii.top_right > 0 && y < safe_add(outer.top, outer.radii.top_right)) {
+                add_span(safe_add(outer.right, safe_negate(outer.radii.top_right)), outer.right);
+            }
+            if (outer.radii.bottom_left > 0 &&
+                y >= safe_add(outer.bottom, safe_negate(outer.radii.bottom_left))) {
+                add_span(outer.left, safe_add(outer.left, outer.radii.bottom_left));
+            }
+            if (outer.radii.bottom_right > 0 &&
+                y >= safe_add(outer.bottom, safe_negate(outer.radii.bottom_right))) {
+                add_span(safe_add(outer.right, safe_negate(outer.radii.bottom_right)), outer.right);
+            }
+            // Keep this bounded, allocation-free sort local to the six possible
+            // spans. Some embedded GCC versions diagnose std::sort's fixed
+            // insertion-sort threshold as an out-of-bounds access on the
+            // small backing array even when the iterator range is bounded.
+            for (std::size_t index = 1; index < span_count; ++index) {
+                const Rect value = spans[index];
+                std::size_t position = index;
+                while (position > 0 && spans[position - 1].x > value.x) {
+                    spans[position] = spans[position - 1];
+                    --position;
+                }
+                spans[position] = value;
+            }
+            for (std::size_t index = 0; index < span_count;) {
+                int begin_x = spans[index].x;
+                int end_x = safe_edge(spans[index].x, spans[index].width);
+                ++index;
+                while (index < span_count && spans[index].x <= end_x) {
+                    end_x = std::max(end_x, safe_edge(spans[index].x, spans[index].width));
+                    ++index;
+                }
+                paint_span(y, begin_x, end_x);
+            }
         }
     }
 }
@@ -588,32 +683,7 @@ void stroke_rect(FrameBuffer& target, Rect rect, Color color, int stroke_width, 
         return;
     }
 
-    const int twice_stroke = safe_add(stroke_width, stroke_width);
-    const Rect inner{
-        safe_add(rect.x, stroke_width),
-        safe_add(rect.y, stroke_width),
-        std::max(0, safe_add(rect.width, safe_negate(twice_stroke))),
-        std::max(0, safe_add(rect.height, safe_negate(twice_stroke))),
-    };
-    const int inner_radius = expand_corner_radii(border_radius, -stroke_width);
-    const RasterRoundedRect outer = prepare_rounded_rect(rect, border_radius);
-    const RasterRoundedRect inner_geometry = prepare_rounded_rect(inner, inner_radius);
-    const int y_end = safe_edge(clipped.y, clipped.height);
-    const int x_end = safe_edge(clipped.x, clipped.width);
-    for (int y = clipped.y; y < y_end; ++y) {
-        for (int x = clipped.x; x < x_end; ++x) {
-            const int outer_coverage = rounded_rect_coverage(outer, x, y);
-            if (outer_coverage <= 0) {
-                continue;
-            }
-            const int inner_coverage = empty_rect(inner) ? 0 : rounded_rect_coverage(inner_geometry, x, y);
-            const int stroke_coverage = std::max(0, outer_coverage - inner_coverage);
-            if (stroke_coverage <= 0) {
-                continue;
-            }
-            blend_pixel(target, x, y, with_coverage(color, stroke_coverage));
-        }
-    }
+    stroke_rounded_rect(target, rect, target_rect(target), color, stroke_width, border_radius);
 }
 
 void stroke_rect_clipped(FrameBuffer& target, Rect rect, Rect clip, Color color, int stroke_width, int border_radius = 0) {
@@ -630,32 +700,7 @@ void stroke_rect_clipped(FrameBuffer& target, Rect rect, Rect clip, Color color,
         return;
     }
 
-    const int twice_stroke = safe_add(stroke_width, stroke_width);
-    const Rect inner{
-        safe_add(rect.x, stroke_width),
-        safe_add(rect.y, stroke_width),
-        std::max(0, safe_add(rect.width, safe_negate(twice_stroke))),
-        std::max(0, safe_add(rect.height, safe_negate(twice_stroke))),
-    };
-    const int inner_radius = expand_corner_radii(border_radius, -stroke_width);
-    const RasterRoundedRect outer = prepare_rounded_rect(rect, border_radius);
-    const RasterRoundedRect inner_geometry = prepare_rounded_rect(inner, inner_radius);
-    const int y_end = safe_edge(clipped.y, clipped.height);
-    const int x_end = safe_edge(clipped.x, clipped.width);
-    for (int y = clipped.y; y < y_end; ++y) {
-        for (int x = clipped.x; x < x_end; ++x) {
-            const int outer_coverage = rounded_rect_coverage(outer, x, y);
-            if (outer_coverage <= 0) {
-                continue;
-            }
-            const int inner_coverage = empty_rect(inner) ? 0 : rounded_rect_coverage(inner_geometry, x, y);
-            const int stroke_coverage = std::max(0, outer_coverage - inner_coverage);
-            if (stroke_coverage <= 0) {
-                continue;
-            }
-            blend_pixel(target, x, y, with_coverage(color, stroke_coverage));
-        }
-    }
+    stroke_rounded_rect(target, rect, clip, color, stroke_width, border_radius);
 }
 
 #if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
@@ -834,6 +879,30 @@ char fallback_glyph_for_codepoint(const std::string& text, std::size_t& index) {
     return codepoint < 0x80U ? static_cast<char>(codepoint) : '?';
 }
 
+void paint_fallback_cell(FrameBuffer& target, int x, int y, int size, Color color) {
+    const Rect visible = intersect_rect(Rect{x, y, size, size}, target_rect(target));
+    if (empty_rect(visible)) {
+        return;
+    }
+    const int x_end = safe_edge(visible.x, visible.width);
+    const int y_end = safe_edge(visible.y, visible.height);
+    if (color.a == 255) {
+        for (int row_index = visible.y; row_index < y_end; ++row_index) {
+            Color* row = target.pixels.data() + static_cast<std::size_t>(row_index) *
+                static_cast<std::size_t>(target.width) + static_cast<std::size_t>(visible.x);
+            std::fill(row, row + visible.width, color);
+        }
+        return;
+    }
+    for (int row_index = visible.y; row_index < y_end; ++row_index) {
+        Color* row = target.pixels.data() + static_cast<std::size_t>(row_index) *
+            static_cast<std::size_t>(target.width) + static_cast<std::size_t>(visible.x);
+        for (int column = visible.x; column < x_end; ++column) {
+            blend_color(row[column - visible.x], color);
+        }
+    }
+}
+
 void draw_text(FrameBuffer& target,
                Rect rect,
                Color color,
@@ -918,14 +987,49 @@ void draw_text(FrameBuffer& target,
                     continue;
                 }
                 for (int pass = 0; pass < stroke_passes; ++pass) {
-                    fill_rect(target,
-                              Rect{safe_add(safe_add(cursor_x, col * scale), pass),
-                                   safe_add(baseline_y, row * scale), scale, scale},
-                              color);
+                    paint_fallback_cell(target,
+                                        safe_add(safe_add(cursor_x, col * scale), pass),
+                                        safe_add(baseline_y, row * scale),
+                                        scale,
+                                        color);
                 }
             }
         }
         cursor_x = safe_add(cursor_x, advance);
+    }
+}
+
+void composite_source_row(Color* destination,
+                          const Color* source,
+                          std::size_t count,
+                          float opacity) {
+    if (destination == nullptr || source == nullptr || count == 0 || opacity <= 0.0F) {
+        return;
+    }
+    if (opacity != 1.0F) {
+        const float clamped_opacity = std::max(0.0F, std::min(1.0F, opacity));
+        for (std::size_t index = 0; index < count; ++index) {
+            blend_color(destination[index], with_clamped_opacity(source[index], clamped_opacity));
+        }
+        return;
+    }
+
+    std::size_t index = 0;
+    while (index < count) {
+        if (source[index].a == 0) {
+            ++index;
+            continue;
+        }
+        if (source[index].a != 255) {
+            blend_color(destination[index], source[index]);
+            ++index;
+            continue;
+        }
+        const std::size_t begin = index;
+        do {
+            ++index;
+        } while (index < count && source[index].a == 255);
+        std::copy_n(source + begin, index - begin, destination + begin);
     }
 }
 
@@ -939,12 +1043,13 @@ void composite_buffer_clipped(FrameBuffer& target, const FrameBuffer& source, in
     const int src_x = copy_rect.x - dst_x;
     const int src_y = copy_rect.y - dst_y;
     for (int y = 0; y < copy_rect.height; ++y) {
-        for (int x = 0; x < copy_rect.width; ++x) {
-            blend_pixel(target,
-                        copy_rect.x + x,
-                        copy_rect.y + y,
-                        with_opacity(source.pixel(src_x + x, src_y + y), opacity));
-        }
+        Color* destination = target.pixels.data() +
+            static_cast<std::size_t>(copy_rect.y + y) * static_cast<std::size_t>(target.width) +
+            static_cast<std::size_t>(copy_rect.x);
+        const Color* source_row = source.pixels.data() +
+            static_cast<std::size_t>(src_y + y) * static_cast<std::size_t>(source.width) +
+            static_cast<std::size_t>(src_x);
+        composite_source_row(destination, source_row, static_cast<std::size_t>(copy_rect.width), opacity);
     }
 }
 
@@ -957,9 +1062,28 @@ void apply_rounded_clip(FrameBuffer& surface, Rect clip, int border_radius) {
         return;
     }
     const RasterRoundedRect rounded = prepare_rounded_rect(clip, border_radius);
-    for (int y = visible.y; y < safe_edge(visible.y, visible.height); ++y) {
-        for (int x = visible.x; x < safe_edge(visible.x, visible.width); ++x) {
-            surface.pixel(x, y) = with_coverage(surface.pixel(x, y), rounded_rect_coverage(rounded, x, y));
+    const int y_end = safe_edge(visible.y, visible.height);
+    const int x_end = safe_edge(visible.x, visible.width);
+    for (int y = visible.y; y < y_end; ++y) {
+        if (!rounded_clip_affects_row(rounded, y)) {
+            continue;
+        }
+        const Rect known_full = rounded_clip_known_full_row_span(rounded, y);
+        const int full_left = std::max(visible.x, known_full.x);
+        const int full_right = std::min(x_end, safe_edge(known_full.x, known_full.width));
+        Color* surface_row = surface.pixels.data() + static_cast<std::size_t>(y) *
+            static_cast<std::size_t>(surface.width);
+        for (int x = visible.x; x < full_left; ++x) {
+            const int coverage = rounded_rect_coverage(rounded, x, y);
+            if (coverage != 255) {
+                surface_row[x] = with_coverage(surface_row[x], coverage);
+            }
+        }
+        for (int x = full_right; x < x_end; ++x) {
+            const int coverage = rounded_rect_coverage(rounded, x, y);
+            if (coverage != 255) {
+                surface_row[x] = with_coverage(surface_row[x], coverage);
+            }
         }
     }
 }
@@ -1045,21 +1169,26 @@ void composite_transformed_buffer(FrameBuffer& target,
     const float radians = transform.rotate_degrees * kPi / 180.0F;
     const float c = std::cos(radians);
     const float s = std::sin(radians);
+    const float inverse_scale_x = 1.0F / std::max(0.01F, transform.scale_x);
+    const float inverse_scale_y = 1.0F / std::max(0.01F, transform.scale_y);
+    const float clamped_opacity = std::max(0.0F, std::min(1.0F, opacity));
 
     for (int y = 0; y < copy_rect.height; ++y) {
         const float target_y = static_cast<float>(copy_rect.y + y) + 0.5F;
+        const float dy = target_y - origin_y;
+        const float row_unrotated_x_offset = dy * s;
+        const float row_unrotated_y_offset = dy * c;
+        const float source_y_base = origin_y + row_unrotated_y_offset * inverse_scale_y -
+            static_cast<float>(source_rect.y);
+        if (!std::isfinite(source_y_base)) {
+            continue;
+        }
         for (int x = 0; x < copy_rect.width; ++x) {
             const float target_x = static_cast<float>(copy_rect.x + x) + 0.5F;
             const float dx = target_x - origin_x;
-            const float dy = target_y - origin_y;
-            const float unrotated_x = origin_x + dx * c + dy * s;
-            const float unrotated_y = origin_y - dx * s + dy * c;
-            const float source_world_x = origin_x +
-                (unrotated_x - origin_x) / std::max(0.01F, transform.scale_x);
-            const float source_world_y = origin_y +
-                (unrotated_y - origin_y) / std::max(0.01F, transform.scale_y);
+            const float source_world_x = origin_x + (dx * c + row_unrotated_x_offset) * inverse_scale_x;
             const float source_x = source_world_x - static_cast<float>(source_rect.x);
-            const float source_y = source_world_y - static_cast<float>(source_rect.y);
+            const float source_y = source_y_base - dx * s * inverse_scale_y;
             if (!std::isfinite(source_x) || !std::isfinite(source_y) ||
                 source_x < 0.0F || source_y < 0.0F ||
                 source_x >= static_cast<float>(source.width) ||
@@ -1068,8 +1197,8 @@ void composite_transformed_buffer(FrameBuffer& target,
             }
             Color source_pixel;
             if (smooth) {
-                const int sx = std::max(0, std::min(source.width - 1, static_cast<int>(source_x)));
-                const int sy = std::max(0, std::min(source.height - 1, static_cast<int>(source_y)));
+                const int sx = static_cast<int>(source_x);
+                const int sy = static_cast<int>(source_y);
                 const int nx = std::min(source.width - 1, sx + 1);
                 const int ny = std::min(source.height - 1, sy + 1);
                 const int tx = std::max(0, std::min(255, static_cast<int>((source_x - static_cast<float>(sx)) * 256.0F)));
@@ -1078,14 +1207,14 @@ void composite_transformed_buffer(FrameBuffer& target,
                 const Color bottom = lerp_color_fixed(source.pixel(sx, ny), source.pixel(nx, ny), tx);
                 source_pixel = lerp_color_fixed(top, bottom, ty);
             } else {
-                const int sx = std::max(0, std::min(source.width - 1, static_cast<int>(source_x)));
-                const int sy = std::max(0, std::min(source.height - 1, static_cast<int>(source_y)));
+                const int sx = static_cast<int>(source_x);
+                const int sy = static_cast<int>(source_y);
                 source_pixel = source.pixel(sx, sy);
             }
-            blend_pixel(target,
-                        copy_rect.x + x,
-                        copy_rect.y + y,
-                        with_opacity(source_pixel, opacity));
+            blend_pixel_unchecked(target,
+                                  copy_rect.x + x,
+                                  copy_rect.y + y,
+                                  with_clamped_opacity(source_pixel, clamped_opacity));
         }
     }
 }
@@ -1245,12 +1374,13 @@ void rasterize_with_opacity(const SoftwareRasterizer& rasterizer,
         }
         return;
     }
+    const float clamped_opacity = std::max(0.0F, std::min(1.0F, opacity));
     for (std::size_t index = first_command; index < display_list.size(); ++index) {
         const DisplayCommand& source = display_list[index];
-        DisplayCommand command = source;
-        command.color = with_opacity(command.color, opacity);
-        command.color2 = with_opacity(command.color2, opacity);
-        rasterizer.rasterize(command, target, clip, offset_x, offset_y, scratch);
+        ScopedOpacityColorOverride colors(source,
+                                          with_clamped_opacity(source.color, clamped_opacity),
+                                          with_clamped_opacity(source.color2, clamped_opacity));
+        rasterizer.rasterize(source, target, clip, offset_x, offset_y, scratch);
     }
 }
 
@@ -1380,13 +1510,24 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
     if (empty_rect(clipped)) {
         return;
     }
+    const bool observe_command = options_.command_observer.observe != nullptr;
+    const bool time_command = observe_command && options_.timing.now_microseconds != nullptr;
+    const std::uint64_t command_begin_microseconds = time_command
+        ? options_.timing.now_microseconds(options_.timing.context)
+        : 0;
+    const Color& effective_color = opacity_color_override.command == &command
+        ? opacity_color_override.color
+        : command.color;
+    const Color& effective_color2 = opacity_color_override.command == &command
+        ? opacity_color_override.color2
+        : command.color2;
 
     switch (command.type) {
     case DisplayCommandType::FillRect:
         if (contains_rect(clip, rect)) {
-            fill_rect(target, rect, command.color, command.border_radius);
+            fill_rect(target, rect, effective_color, command.border_radius);
         } else {
-            fill_rect_clipped(target, rect, clip, command.color, command.border_radius);
+            fill_rect_clipped(target, rect, clip, effective_color, command.border_radius);
         }
         break;
     case DisplayCommandType::LinearGradient:
@@ -1394,22 +1535,22 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         if (contains_rect(clip, rect)) {
             fill_linear_gradient(target,
                                  rect,
-                                 command.color,
-                                 command.color2,
+                                 effective_color,
+                                 effective_color2,
                                  command.gradient_axis,
                                  command.border_radius);
         } else {
             fill_linear_gradient_clipped(target,
                                          rect,
                                          clip,
-                                         command.color,
-                                         command.color2,
+                                         effective_color,
+                                         effective_color2,
                                          command.gradient_axis,
                                          command.border_radius);
         }
         break;
 #else
-        fill_rect_clipped(target, rect, clip, command.color, command.border_radius);
+        fill_rect_clipped(target, rect, clip, effective_color, command.border_radius);
         break;
 #endif
     case DisplayCommandType::ConicGradient:
@@ -1417,22 +1558,22 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         if (contains_rect(clip, rect)) {
             fill_conic_gradient(target,
                                 rect,
-                                command.color,
-                                command.color2,
+                                effective_color,
+                                effective_color2,
                                 command.gradient_stop_percent,
                                 command.border_radius);
         } else {
             fill_conic_gradient_clipped(target,
                                         rect,
                                         clip,
-                                        command.color,
-                                        command.color2,
+                                        effective_color,
+                                        effective_color2,
                                         command.gradient_stop_percent,
                                         command.border_radius);
         }
         break;
 #else
-        fill_rect_clipped(target, rect, clip, command.color, command.border_radius);
+        fill_rect_clipped(target, rect, clip, effective_color, command.border_radius);
         break;
 #endif
     case DisplayCommandType::RadialGradient:
@@ -1440,8 +1581,8 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         if (contains_rect(clip, rect)) {
             fill_radial_gradient(target,
                                  rect,
-                                 command.color,
-                                 command.color2,
+                                 effective_color,
+                                 effective_color2,
                                  command.gradient_axis,
                                  command.gradient_stop_percent,
                                  command.border_radius);
@@ -1449,15 +1590,15 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
             fill_radial_gradient_clipped(target,
                                          rect,
                                          clip,
-                                         command.color,
-                                         command.color2,
+                                         effective_color,
+                                         effective_color2,
                                          command.gradient_axis,
                                          command.gradient_stop_percent,
                                          command.border_radius);
         }
         break;
 #else
-        fill_rect_clipped(target, rect, clip, command.color, command.border_radius);
+        fill_rect_clipped(target, rect, clip, effective_color, command.border_radius);
         break;
 #endif
     case DisplayCommandType::BoxShadow:
@@ -1465,7 +1606,7 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         fill_soft_box_shadow(target,
                              rect,
                              clip,
-                             command.color,
+                             effective_color,
                              command.border_radius,
                              command.stroke_width,
                              command.gradient_stop_percent);
@@ -1475,9 +1616,9 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
 #endif
     case DisplayCommandType::StrokeRect:
         if (contains_rect(clip, rect)) {
-            stroke_rect(target, rect, command.color, command.stroke_width, command.border_radius);
+            stroke_rect(target, rect, effective_color, command.stroke_width, command.border_radius);
         } else {
-            stroke_rect_clipped(target, rect, clip, command.color, command.stroke_width, command.border_radius);
+            stroke_rect_clipped(target, rect, clip, effective_color, command.stroke_width, command.border_radius);
         }
         break;
     case DisplayCommandType::Text: {
@@ -1487,7 +1628,7 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         if (contains_rect(clip, rect)) {
             draw_text(target,
                       rect,
-                      command.color,
+                      effective_color,
                       command.text,
                       command.font_size,
                       command.font_weight,
@@ -1509,7 +1650,7 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         }
         draw_text(text_buffer,
                   Rect{rect.x - visible.x, rect.y - visible.y, rect.width, rect.height},
-                  command.color,
+                  effective_color,
                   command.text,
                   command.font_size,
                   command.font_weight,
@@ -1567,11 +1708,11 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
             const int x_end = safe_edge(visible.x, visible.width);
             for (int y = visible.y; y < y_end; ++y) {
                 for (int x = visible.x; x < x_end; ++x) {
-                    blend_pixel(target,
-                                x,
-                                y,
-                                with_coverage(image_buffer.pixel(x - visible.x, y - visible.y),
-                                              rounded_rect_coverage(rounded, x, y)));
+                    blend_pixel_unchecked(target,
+                                          x,
+                                          y,
+                                          with_coverage(image_buffer.pixel(x - visible.x, y - visible.y),
+                                                        rounded_rect_coverage(rounded, x, y)));
                 }
             }
             break;
@@ -1624,6 +1765,22 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         composite_buffer_clipped(target, image_buffer, visible.x, visible.y, clip, 1.0F);
         break;
     }
+    }
+    if (observe_command) {
+        SoftwareRasterizerCommandSample sample;
+        sample.type = command.type;
+        sample.trace_owner_token = command.trace_owner_token;
+        sample.clip = clipped;
+        sample.candidate_pixels = clipped_rect_pixels(clipped);
+        sample.begin_microseconds = command_begin_microseconds;
+        if (time_command) {
+            const std::uint64_t command_end_microseconds = options_.timing.now_microseconds(options_.timing.context);
+            if (command_end_microseconds >= command_begin_microseconds) {
+                sample.elapsed_microseconds = command_end_microseconds - command_begin_microseconds;
+                sample.timing_valid = true;
+            }
+        }
+        options_.command_observer.observe(sample, options_.command_observer.context);
     }
 }
 
@@ -1902,7 +2059,10 @@ SoftwareCompositor::SoftwareCompositor(TextPainter text_painter, ImagePainter im
     : rasterizer_(text_painter,
                   image_painter,
                   options.diagnostics,
-                  SoftwareRasterizerOptions{options.max_offscreen_pixels, nullptr, {}}),
+                  SoftwareRasterizerOptions{options.max_offscreen_pixels,
+                                            nullptr,
+                                            options.rasterizer_timing,
+                                            options.command_observer}),
       options_(options) {}
 
 FrameBuffer SoftwareCompositor::render(const LayerNode& root,

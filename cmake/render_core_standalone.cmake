@@ -27,4 +27,28 @@ if(JELLYFRAME_BUILD_BENCHMARKS)
     add_executable(jellyframe_render_core_microbench
         "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/benchmarks/microbench.cpp")
     target_link_libraries(jellyframe_render_core_microbench PRIVATE jellyframe_render_core)
+    if(WIN32)
+        add_executable(jellyframe_cpu2d_compare
+            "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/benchmarks/cpu2d_compare_win32.cpp")
+        target_link_libraries(jellyframe_cpu2d_compare
+            PRIVATE jellyframe_render_core gdi32 msimg32)
+        target_compile_definitions(jellyframe_cpu2d_compare PRIVATE
+            JELLYFRAME_CPU2D_CORE_VERSION="${JELLYFRAME_RENDER_CORE_PACKAGE_VERSION}")
+        if(JELLYFRAME_BUILD_TESTS)
+            add_test(NAME jellyframe_cpu2d_compare_output_smoke
+                COMMAND jellyframe_cpu2d_compare
+                    "${CMAKE_CURRENT_BINARY_DIR}/cpu2d_compare_smoke"
+                    3)
+            add_test(NAME jellyframe_cpu2d_compare_gradient_output_smoke
+                COMMAND jellyframe_cpu2d_compare
+                    "${CMAKE_CURRENT_BINARY_DIR}/cpu2d_compare_gradient_smoke"
+                    3
+                    horizontal-gradient)
+            add_test(NAME jellyframe_cpu2d_compare_vertical_gradient_output_smoke
+                COMMAND jellyframe_cpu2d_compare
+                    "${CMAKE_CURRENT_BINARY_DIR}/cpu2d_compare_vertical_gradient_smoke"
+                    3
+                    vertical-gradient)
+        endif()
+    endif()
 endif()
