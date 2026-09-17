@@ -347,6 +347,39 @@ void multiple_dirty_nodes_are_coalesced_without_full_frame() {
           "multiple dirty nodes do not immediately force full frame");
 }
 
+void nested_dirty_nodes_use_one_conservative_subtree_bound() {
+    auto fixture = build_layout(
+        HtmlParser().parse("<body><main><section><p>Content</p></section></main></body>"),
+        "main { width: 180px; height: 120px; margin: 0; }"
+        "section { width: 150px; height: 90px; margin: 10px; }"
+        "p { width: 100px; height: 20px; margin: 10px; }",
+        240);
+    clear_dirty_flags(*fixture.document);
+
+    Node* main = first_element(*fixture.document, "main");
+    Node* section = first_element(*fixture.document, "section");
+    Node* paragraph = first_element(*fixture.document, "p");
+    check(main != nullptr && section != nullptr && paragraph != nullptr,
+          "nested dirty fixture nodes exist");
+    mark_dirty(*main, DomDirtyPaint);
+    mark_dirty(*section, DomDirtyPaint);
+    mark_dirty(*paragraph, DomDirtyPaint);
+
+    const DirtyRegionResult region = compute_dirty_region(
+        *fixture.document,
+        fixture.layout_tree.get(),
+        fixture.layout_tree.get(),
+        DirtyRegionOptions{Rect{0, 0, 240, 200}, 8, 0});
+
+    check(region.mode == DirtyRegionMode::DirtyRects,
+          "nested dirty nodes remain incremental");
+    check(region.rects.size() == 3,
+          "nested local dirty nodes preserve one subtree bound plus local paint bounds");
+    check(region.rects.front().x == 0 && region.rects.front().y == 0 &&
+              region.rects.front().width == 180 && region.rects.front().height == 120,
+          "nested dirty region uses the complete ancestor subtree bound first");
+}
+
 void clean_document_reports_clean_region() {
     HtmlParser html_parser;
     auto fixture = build_layout(html_parser.parse("<body><p>Clean</p></body>"), "", 240);
@@ -596,6 +629,7 @@ void dirty_rect_coalescing_respects_extra_area_budget() {
 void dirty_rect_coalescing_forces_deterministic_low_extra_merge() {
     const Rect input[] = {Rect{0, 0, 10, 10}, Rect{12, 0, 10, 10}, Rect{80, 0, 10, 10}};
     std::vector<Rect> output;
+    std::vector<Rect> repeated;
     DirtyRectCoalescingResult result;
     coalesce_dirty_rects_into(input,
                               3,
@@ -603,9 +637,18 @@ void dirty_rect_coalescing_forces_deterministic_low_extra_merge() {
                               DirtyRectCoalescingOptions{2, 0, 0},
                               output,
                               &result);
+    coalesce_dirty_rects_into(input,
+                              3,
+                              Rect{0, 0, 100, 100},
+                              DirtyRectCoalescingOptions{2, 0, 0},
+                              repeated);
     check(output.size() == 2, "max rect count forces a merge");
     check(output.front().x == 0 && output.front().width == 22,
           "forced merge selects least extra-area pair deterministically");
+    check(repeated.size() == output.size() && repeated.front().x == output.front().x &&
+              repeated.front().width == output.front().width && repeated.back().x == output.back().x &&
+              repeated.back().width == output.back().width,
+          "repeated coalescing produces deterministic output");
     check(result.forced_merges == 1, "forced merge is observable to the host");
 }
 
@@ -648,6 +691,52 @@ void dirty_rect_coalescing_bounds_large_pairwise_inputs() {
     check(output.size() == 1 && output.front().x == 0 && output.front().width == 300,
           "large coalescing input conservatively falls back to viewport");
     check(result.forced_merges == 128, "large coalescing fallback reports forced merges");
+}
+
+void dirty_rect_coalescing_keeps_bounded_pairwise_inputs() {
+    std::vector<Rect> input;
+    input.reserve(128);
+    for (int index = 0; index < 128; ++index) {
+        input.push_back(Rect{index * 2, 0, 1, 1});
+    }
+    std::vector<Rect> output;
+    DirtyRectCoalescingResult result;
+    coalesce_dirty_rects_into(input.data(), 100, Rect{0, 0, 300, 20},
+                              DirtyRectCoalescingOptions{128, 0, 0}, output, &result);
+    check(output.size() == 100 && result.forced_merges == 0,
+          "100 rectangles stay on the bounded pairwise path");
+
+    coalesce_dirty_rects_into(input.data(), input.size(), Rect{0, 0, 300, 20},
+                              DirtyRectCoalescingOptions{128, 0, 0}, output, &result);
+    check(output.size() == 128 && result.output_rect_count == 128 && result.forced_merges == 0,
+          "128 rectangles stay incremental without the conservative fallback");
+}
+
+void dirty_rect_normalization_merges_transitive_overlap_chains() {
+    const Rect input[] = {Rect{0, 0, 10, 10}, Rect{8, 0, 10, 10}, Rect{16, 0, 10, 10}};
+    const std::vector<Rect> output = normalize_dirty_rects(input, 3, Rect{0, 0, 100, 100});
+    check(output.size() == 1 && output.front().x == 0 && output.front().width == 26,
+          "normalization merges transitive overlap chains");
+}
+
+void dirty_rect_normalization_bounds_renderer_inputs() {
+    std::vector<Rect> input;
+    input.reserve(129);
+    for (int index = 0; index < 129; ++index) {
+        input.push_back(Rect{index * 2, 0, 1, 1});
+    }
+    const std::vector<Rect> boundary_output = normalize_dirty_rects(input.data(), 128, Rect{0, 0, 300, 20});
+    check(boundary_output.size() == 128,
+          "renderer dirty normalization keeps the 128-rectangle boundary pairwise");
+    const std::vector<Rect> output = normalize_dirty_rects(input.data(), input.size(), Rect{0, 0, 300, 20});
+    check(output.size() == 1 && output.front().x == 0 && output.front().width == 300,
+          "renderer dirty normalization falls back to viewport for large input");
+
+    const Rect clipped[] = {Rect{-10, -10, 20, 20}, Rect{5, 5, 2, 2}, Rect{40, 40, 2, 2}};
+    const std::vector<Rect> bounded = normalize_dirty_rects(clipped, 3, Rect{0, 0, 20, 20});
+    check(bounded.size() == 1 && bounded.front().x == 0 && bounded.front().y == 0 &&
+              bounded.front().width == 10 && bounded.front().height == 10,
+          "renderer dirty normalization clips and drops contained rectangles");
 }
 
 void dirty_region_area_handles_extreme_rects_safely() {
@@ -717,6 +806,7 @@ int main() {
 #endif
         repeated_paint_dirty_updates_remain_bounded();
         multiple_dirty_nodes_are_coalesced_without_full_frame();
+        nested_dirty_nodes_use_one_conservative_subtree_bound();
         clean_document_reports_clean_region();
         missing_layout_reports_full_frame_reason();
         tree_dirty_reason_wins_over_missing_layout();
@@ -731,6 +821,9 @@ int main() {
         dirty_rect_coalescing_forces_deterministic_low_extra_merge();
         dirty_rect_coalescing_clips_and_handles_large_areas();
         dirty_rect_coalescing_bounds_large_pairwise_inputs();
+        dirty_rect_coalescing_keeps_bounded_pairwise_inputs();
+        dirty_rect_normalization_merges_transitive_overlap_chains();
+        dirty_rect_normalization_bounds_renderer_inputs();
         dirty_region_area_handles_extreme_rects_safely();
         dirty_region_expansion_saturates_before_viewport_clipping();
         merged_dirty_regions_remove_overlap_and_preserve_full_fallback();

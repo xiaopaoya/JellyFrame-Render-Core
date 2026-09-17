@@ -34,6 +34,23 @@ bool is_visible_background(Color color) {
     return color.a != 0;
 }
 
+std::uint32_t trace_owner_token_for(const LayoutBox& box, const LayerTreeBuilderOptions& options) {
+    if (box.node == nullptr || options.trace_owner_resolver.resolve == nullptr) {
+        return 0;
+    }
+    return options.trace_owner_resolver.resolve(*box.node, options.trace_owner_resolver.context);
+}
+
+void stamp_trace_owner(DisplayList& display_list, std::size_t begin, std::uint32_t token) {
+    if (token == 0) {
+        return;
+    }
+    begin = std::min(begin, display_list.size());
+    for (std::size_t index = begin; index < display_list.size(); ++index) {
+        display_list[index].trace_owner_token = token;
+    }
+}
+
 Rect union_rect(Rect left, Rect right) {
     if (left.width <= 0 || left.height <= 0) {
         return right;
@@ -69,7 +86,7 @@ bool has_scrollable_overflow(const Style& style) {
 }
 
 bool is_positioned(const Style& style) {
-    return !style.position.empty();
+    return style.position_type != PositionType::Static;
 }
 
 bool has_transform(const Style& style) {
@@ -373,17 +390,73 @@ std::string ellipsize_single_line_text(const std::string& text,
     return prefix;
 }
 
+bool same_text_measure_provider(const TextMeasureProvider& left,
+                                const TextMeasureProvider& right) {
+    return left.measure == right.measure &&
+        left.context == right.context &&
+        left.measure_family == right.measure_family &&
+        left.additive_measurement_supported == right.additive_measurement_supported &&
+        left.measure_range == right.measure_range &&
+        left.measure_range_family == right.measure_range_family;
+}
+
+const TextLayoutCache* valid_text_layout_cache(const LayoutBox& box,
+                                               const LayerTreeBuilderOptions& options) {
+    const TextLayoutCache& cache = box.text_layout_cache;
+    bool ancestor_dirty = false;
+    for (const Node* current = box.node == nullptr ? nullptr : box.node->parent;
+         current != nullptr;
+         current = current->parent) {
+        if ((current->local_dirty_flags & (DomDirtyText | DomDirtyStyle | DomDirtyLayout |
+                                           DomDirtyAttributes | DomDirtyTree)) != 0U) {
+            ancestor_dirty = true;
+            break;
+        }
+    }
+    if (!cache.valid || box.node == nullptr || box.node->type != NodeType::Text ||
+        ancestor_dirty ||
+        (box.node->local_dirty_flags & (DomDirtyText | DomDirtyStyle | DomDirtyLayout |
+                                        DomDirtyAttributes | DomDirtyTree)) != 0U ||
+        cache.source_text != box.node->text ||
+        cache.viewport_width != box.viewport_width ||
+        cache.viewport_height != box.viewport_height ||
+        cache.rect_width != box.rect.width ||
+        cache.rect_height != box.rect.height ||
+        cache.font_size != box.style.font_size ||
+        cache.font_weight != box.style.font_weight ||
+        cache.font_family_hash != box.style.font_family_hash ||
+        cache.line_height != (box.style.line_height > 0
+            ? box.style.line_height
+            : cache.line_height) ||
+        cache.text_indent != box.style.text_indent ||
+        cache.letter_spacing != box.style.letter_spacing ||
+        cache.text_transform != box.style.text_transform ||
+        cache.overflow_wrap_anywhere != box.style.overflow_wrap_anywhere ||
+        cache.white_space_nowrap != box.style.white_space_nowrap ||
+        cache.text_overflow_ellipsis != box.style.text_overflow_ellipsis ||
+        cache.text_align != box.style.text_align ||
+        !same_text_measure_provider(cache.text_measure, options.text_measure)) {
+        return nullptr;
+    }
+    return &cache;
+}
+
 void push_text_with_layout(DisplayList& display_list,
                            Rect rect,
                            Color color,
                            const std::string& text,
                            const Style& style,
                            TextCommandAlign align,
-                           const TextMeasureProvider& text_measure) {
+                           const TextMeasureProvider& text_measure,
+                           const TextLayoutCache* cached_layout = nullptr) {
     if (rect.width <= 0 || rect.height <= 0 || text.empty() || color.a == 0) {
         return;
     }
-    const std::string rendered_text = ellipsize_single_line_text(text, style, rect.width, text_measure);
+    const std::string rendered_text = ellipsize_single_line_text(
+        cached_layout != nullptr ? cached_layout->rendered_text : text,
+        style,
+        rect.width,
+        text_measure);
     const int line_height = style.line_height > 0
         ? style.line_height
         : style.font_size + std::max(6, style.font_size / 3);
@@ -397,7 +470,10 @@ void push_text_with_layout(DisplayList& display_list,
         return;
     }
 
-    const std::vector<std::string> lines = wrap_anywhere
+    const std::vector<std::string> lines = cached_layout != nullptr && !cached_layout->lines.empty() &&
+            !(style.text_overflow_ellipsis && style.white_space_nowrap)
+        ? cached_layout->lines
+        : wrap_anywhere
         ? wrap_text_anywhere(text_measure,
                              rendered_text,
                              style.font_size,
@@ -1051,7 +1127,9 @@ bool paint_select_popup(const LayoutBox& box,
     if (box.node == nullptr || !select_popup_is_open(*box.node)) {
         return false;
     }
-    const int option_count = form_control_option_count(*box.node);
+    std::vector<const Node*> options_list;
+    form_control_collect_options(*box.node, options_list);
+    const int option_count = static_cast<int>(options_list.size());
     const SelectPopupGeometry geometry = select_popup_geometry(
         box.rect, viewport, option_count, select_popup_row_height(box));
     if (geometry.visible_option_count <= 0 || geometry.rect.width <= 0 || geometry.rect.height <= 0) {
@@ -1083,13 +1161,17 @@ bool paint_select_popup(const LayoutBox& box,
         if (option_index == state.selected_index) {
             push_fill_rect(display_list, row, Color{219, 234, 254, 255}, 0);
         }
-        const Color text_color = form_control_option_disabled(*box.node, option_index)
+        const Node* option = option_index >= 0 &&
+                static_cast<std::size_t>(option_index) < options_list.size()
+            ? options_list[static_cast<std::size_t>(option_index)]
+            : nullptr;
+        const Color text_color = option != nullptr && form_control_option_is_disabled_node(*option)
             ? Color{148, 163, 184, 255}
             : box.style.color;
         push_text_with_layout(display_list,
                               Rect{safe_add(row.x, 5), row.y, std::max(0, safe_add(row.width, -10)), row.height},
                               text_color,
-                              form_control_option_text(*box.node, option_index),
+                              option != nullptr ? form_control_option_text_from_node(*option) : std::string{},
                               box.style,
                               TextCommandAlign::Start,
                               options.text_measure);
@@ -1154,7 +1236,10 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list, const Layer
     }
 
     if (box.node != nullptr && box.node->type == NodeType::Text) {
-        const std::string text = transformed_render_text(*box.node, box.style.text_transform);
+        const TextLayoutCache* cached_layout = valid_text_layout_cache(box, options);
+        const std::string text = cached_layout != nullptr
+            ? cached_layout->rendered_text
+            : transformed_render_text(*box.node, box.style.text_transform);
         if (has_text_shadow(box.style)) {
             const TextShadowStyle& shadow = box.style.text_shadow;
             Rect shadow_rect = box.rect;
@@ -1166,7 +1251,8 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list, const Layer
                                   text,
                                   box.style,
                                   text_command_align(box.style.text_align),
-                                  options.text_measure);
+                                  options.text_measure,
+                                  cached_layout);
         }
         push_text_with_layout(display_list,
                               box.rect,
@@ -1174,7 +1260,8 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list, const Layer
                               text,
                               box.style,
                               text_command_align(box.style.text_align),
-                              options.text_measure);
+                              options.text_measure,
+                              cached_layout);
         push_text_decorations(display_list, box, box.rect);
     }
 }
@@ -1538,14 +1625,17 @@ LayerNodePtr LayerTreeBuilder::build_with_arena(const LayoutBox& root, Monotonic
     root_layer->source_order = 0;
 
     if (!root.style.visibility_hidden) {
+        const std::size_t command_begin = root_layer->display_list.size();
         paint_box_self(root, root_layer->display_list, options_);
+        trim_display_list(root_layer->display_list, command_begin, remaining_commands, display_budget_reported);
+        stamp_trace_owner(root_layer->display_list, command_begin, trace_owner_token_for(root, options_));
     }
-    trim_display_list(root_layer->display_list, 0, remaining_commands, display_budget_reported);
     build_children(root, *root_layer, arena, root.rect, remaining_commands, display_budget_reported);
     if (!root.style.visibility_hidden) {
         const std::size_t command_begin = root_layer->display_list.size();
         paint_generated_inline_content(root, root_layer->display_list, CssPseudoElement::After);
         trim_display_list(root_layer->display_list, command_begin, remaining_commands, display_budget_reported);
+        stamp_trace_owner(root_layer->display_list, command_begin, trace_owner_token_for(root, options_));
     }
     sort_layer_children(*root_layer);
     return root_layer;
@@ -1671,6 +1761,9 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
                                   command_begin,
                                   remaining_commands,
                                   display_budget_reported);
+                stamp_trace_owner(current_layer.display_list,
+                                  command_begin,
+                                  trace_owner_token_for(*current_box, options_));
             }
 #if JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED
             if (layer_count < max_layers && current_box->node != nullptr &&
@@ -1699,6 +1792,9 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
                                       0,
                                       remaining_commands,
                                       display_budget_reported);
+                    stamp_trace_owner(popup_layer->display_list,
+                                      0,
+                                      trace_owner_token_for(*current_box, options_));
                     current_layer.children.push_back(std::move(popup_layer));
                     ++layer_count;
                 }
@@ -1779,6 +1875,9 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
                               command_begin,
                               remaining_commands,
                               display_budget_reported);
+            stamp_trace_owner(target_layer->display_list,
+                              command_begin,
+                              trace_owner_token_for(*current_box, options_));
         }
         const int child_scroll_y = target_layer == &current_layer
             ? safe_add(current.scroll_y, own_scroll_y)

@@ -7,6 +7,8 @@
 #include "render_core/layer_tree.h"
 #include "render_core/layout.h"
 #include "render_core/render_tree.h"
+#include "render_core/scroll_blit.h"
+#include "render_core/software_renderer.h"
 #include "render_core/text_scan.h"
 
 #include <iostream>
@@ -24,6 +26,22 @@ void check(bool condition, const char* message) {
     if (!condition) {
         throw std::runtime_error(message);
     }
+}
+
+struct TextCacheMeasureCounter {
+    int calls = 0;
+};
+
+bool count_text_cache_measure(const std::string& text,
+                              int,
+                              int,
+                              TextMetrics* metrics,
+                              void* context) {
+    auto* counter = static_cast<TextCacheMeasureCounter*>(context);
+    ++counter->calls;
+    metrics->width = static_cast<int>(text.size()) * 8;
+    metrics->line_height = 20;
+    return true;
 }
 
 bool has_diagnostic_code(const VectorDiagnosticSink& sink, const std::string& code) {
@@ -135,6 +153,18 @@ const LayoutBox* find_first_text_layout(const LayoutBox& box) {
     return nullptr;
 }
 
+LayoutBox* find_first_text_layout_mutable(LayoutBox& box) {
+    if (box.node != nullptr && box.node->type == NodeType::Text) {
+        return &box;
+    }
+    for (auto& child : box.children) {
+        if (LayoutBox* found = find_first_text_layout_mutable(*child)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
 int fixed_scroll_offset(const Node& node, int max_scroll_y, void*) {
     if (node.attribute("id") == "list") {
         return std::min(24, max_scroll_y);
@@ -144,6 +174,70 @@ int fixed_scroll_offset(const Node& node, int max_scroll_y, void*) {
 
 int maximum_scroll_offset(const Node&, int max_scroll_y, void*) {
     return max_scroll_y;
+}
+
+struct DynamicScrollContext {
+    const Node* node = nullptr;
+    int scroll_y = 0;
+};
+
+int dynamic_scroll_offset(const Node& node, int max_scroll_y, void* raw_context) {
+    auto* context = static_cast<DynamicScrollContext*>(raw_context);
+    if (context == nullptr || context->node != &node) {
+        return 0;
+    }
+    return std::max(0, std::min(context->scroll_y, max_scroll_y));
+}
+
+std::uint32_t trace_owner_token_for_test(const Node& node, void*) {
+    if (node.attribute("id") == "first") {
+        return 11;
+    }
+    if (node.attribute("id") == "second") {
+        return 22;
+    }
+    return 0;
+}
+
+void trace_owner_tokens_are_opt_in_and_preserve_box_ownership() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse("<body><section id='first'></section><section id='second'></section></body>");
+    Stylesheet stylesheet = css_parser.parse(
+        "#first { width: 20px; height: 20px; background: #ff0000; }"
+        "#second { width: 20px; height: 20px; background: #00ff00; }");
+    StyleResolver resolver(stylesheet);
+    RenderTreeBuilder render_tree_builder(resolver);
+    auto render_tree = render_tree_builder.build(*document);
+    LayoutEngine layout_engine(resolver);
+    auto layout_tree = layout_engine.layout(*render_tree, 80);
+
+    LayerTreeBuilder default_builder;
+    const DisplayList default_commands = default_builder.flatten(*default_builder.build(*layout_tree));
+    for (const DisplayCommand& command : default_commands) {
+        check(command.trace_owner_token == 0, "default layer tree must not emit profiling owner tokens");
+    }
+
+    LayerTreeBuilderOptions options;
+    options.trace_owner_resolver = DisplayCommandTraceOwnerResolver{trace_owner_token_for_test, nullptr};
+    LayerTreeBuilder traced_builder(options);
+    const DisplayList traced_commands = traced_builder.flatten(*traced_builder.build(*layout_tree));
+    bool first_found = false;
+    bool second_found = false;
+    for (const DisplayCommand& command : traced_commands) {
+        if (command.type != DisplayCommandType::FillRect) {
+            continue;
+        }
+        if (command.color.r == 255 && command.color.g == 0 && command.color.b == 0) {
+            first_found = true;
+            check(command.trace_owner_token == 11, "first box commands keep first owner token");
+        }
+        if (command.color.r == 0 && command.color.g == 255 && command.color.b == 0) {
+            second_found = true;
+            check(command.trace_owner_token == 22, "second box commands keep second owner token");
+        }
+    }
+    check(first_found && second_found, "traced layer tree emits both owned paint commands");
 }
 
 void overflow_hidden_creates_clip_layer() {
@@ -407,6 +501,115 @@ void normal_text_wrap_matches_layout_line_breaks() {
           "ordinary breakable text paint lines follow the layout line height");
 }
 
+void text_layout_cache_handoffs_wrapped_and_newline_lines() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse(
+        "<body><p id='wrapped'>Alpha beta gamma</p><pre id='newline'>AB\nCD</pre></body>");
+    StyleResolver resolver(css_parser.parse(
+        "body { margin: 0; }"
+        "p, pre { width: 40px; margin: 0; font-size: 10px; line-height: 12px; }"
+        "p { text-transform: uppercase; }"));
+    RenderTreeBuilder render_tree_builder(resolver);
+    auto render_tree = render_tree_builder.build(*document);
+    TextCacheMeasureCounter counter;
+    const TextMeasureProvider measure{count_text_cache_measure, &counter};
+    LayoutEngine layout_engine(resolver, measure);
+    auto layout_tree = layout_engine.layout(*render_tree, 96, 64);
+    const int calls_after_layout = counter.calls;
+
+    LayerTreeBuilderOptions options;
+    options.text_measure = measure;
+    LayerTreeBuilder builder(options);
+    auto layer_tree = builder.build(*layout_tree);
+    check(counter.calls == calls_after_layout,
+          "layer generation reuses layout wrapping and transformed text");
+
+    const DisplayList commands = builder.flatten(*layer_tree);
+    int wrapped_lines = 0;
+    int newline_lines = 0;
+    for (const DisplayCommand& command : commands) {
+        if (command.type != DisplayCommandType::Text || command.text.empty()) {
+            continue;
+        }
+        if (command.text == "ALPHA" || command.text == "BETA" || command.text == "GAMMA") {
+            ++wrapped_lines;
+        }
+        if (command.text == "AB" || command.text == "CD") {
+            ++newline_lines;
+        }
+    }
+    check(wrapped_lines >= 2, "cached wrapped text emits its layout lines");
+    check(newline_lines == 2, "cached explicit newline emits separate lines");
+}
+
+void text_layout_cache_rejects_dirty_text_and_viewport_changes() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse("<body><p id='label'>Original</p></body>");
+    StyleResolver resolver(css_parser.parse(
+        "body { margin: 0; } p { width: 80px; margin: 0; overflow-wrap: anywhere; }"));
+    RenderTreeBuilder render_tree_builder(resolver);
+    auto render_tree = render_tree_builder.build(*document);
+    TextCacheMeasureCounter counter;
+    const TextMeasureProvider measure{count_text_cache_measure, &counter};
+    LayoutEngine layout_engine(resolver, measure);
+    auto layout_tree = layout_engine.layout(*render_tree, 123, 77);
+    const int calls_after_layout = counter.calls;
+
+    LayerTreeBuilderOptions options;
+    options.text_measure = measure;
+    LayerTreeBuilder builder(options);
+    auto first_layer_tree = builder.build(*layout_tree);
+    check(counter.calls == calls_after_layout,
+          "non-default viewport cache is accepted for the matching snapshot");
+    (void) first_layer_tree;
+
+    Node* label = find_node_by_id(*document, "label");
+    check(label != nullptr, "dirty cache fixture finds text parent");
+    label->children.front()->set_text("Changed");
+    auto dirty_layer_tree = builder.build(*layout_tree);
+    check(counter.calls > calls_after_layout,
+          "dirty text invalidates the layout-owned text cache");
+    const DisplayList dirty_commands = builder.flatten(*dirty_layer_tree);
+    bool found_changed = false;
+    for (const DisplayCommand& command : dirty_commands) {
+        found_changed = found_changed || command.type == DisplayCommandType::Text &&
+            command.text == "Changed";
+    }
+    check(found_changed, "dirty text takes the updated display-list path");
+
+    const int calls_after_dirty = counter.calls;
+    LayoutBox* text_box = find_first_text_layout_mutable(*layout_tree);
+    check(text_box != nullptr, "viewport cache fixture finds text box");
+    text_box->viewport_width = 124;
+    auto viewport_layer_tree = builder.build(*layout_tree);
+    check(counter.calls > calls_after_dirty,
+          "viewport change invalidates the layout-owned text cache");
+    (void) viewport_layer_tree;
+}
+
+void text_layout_cache_keeps_unwrapped_letter_spaced_text() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse("<body><p id='label'>AB</p></body>");
+    StyleResolver resolver(css_parser.parse(
+        "body { margin: 0; } p { width: 80px; margin: 0; letter-spacing: 1px; }"));
+    RenderTreeBuilder render_tree_builder(resolver);
+    auto render_tree = render_tree_builder.build(*document);
+    LayoutEngine layout_engine(resolver);
+    auto layout_tree = layout_engine.layout(*render_tree, 80, 40);
+
+    LayerTreeBuilder builder;
+    auto layer_tree = builder.build(*layout_tree);
+    const DisplayList commands = builder.flatten(*layer_tree);
+    bool found_text = false;
+    for (const DisplayCommand& command : commands) {
+        found_text = found_text || command.type == DisplayCommandType::Text;
+    }
+    check(found_text, "cached unwrapped letter-spaced text remains paintable");
+}
+
 void scroll_container_offsets_descendant_paint() {
     HtmlParser html_parser;
     CssParser css_parser;
@@ -440,6 +643,90 @@ void scroll_container_offsets_descendant_paint() {
         }
     }
     check(found_shifted_child, "scroll offset moves second row into viewport");
+}
+
+void scroll_reuse_frame_matches_full_repaint_in_both_directions() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse(
+        "<body><section id='list'><div id='one'></div><div id='two'></div>"
+        "<div id='three'></div><div id='four'></div><div id='five'></div></section></body>");
+    StyleResolver resolver(css_parser.parse(
+        "body { margin: 0; background: #ffffff; }"
+        "#list { width: 80px; height: 24px; overflow: scroll; background: #ffffff; }"
+        "#list div { width: 80px; height: 24px; }"
+        "#one { background: #ff0000; } #two { background: #00ff00; }"
+        "#three { background: #0000ff; } #four { background: #ffff00; }"
+        "#five { background: #00ffff; }"));
+    RenderTreeBuilder render_tree_builder(resolver);
+    auto render_tree = render_tree_builder.build(*document);
+    LayoutEngine layout_engine(resolver);
+    auto layout_tree = layout_engine.layout(*render_tree, 80, 24);
+    check(layout_tree != nullptr, "scroll reuse fixture layout exists");
+
+    Node* list = nullptr;
+    std::vector<Node*> pending{document.get()};
+    while (!pending.empty()) {
+        Node* node = pending.back();
+        pending.pop_back();
+        if (node->attribute("id") == "list") {
+            list = node;
+            break;
+        }
+        for (auto& child : node->children) {
+            pending.push_back(child.get());
+        }
+    }
+    check(list != nullptr, "scroll reuse fixture node exists");
+
+    DynamicScrollContext scroll_context{list, 0};
+    LayerTreeBuilderOptions options;
+    options.scroll_resolver = ScrollOffsetResolver{dynamic_scroll_offset, &scroll_context};
+    LayerTreeBuilder builder(options);
+    auto initial_layers = builder.build(*layout_tree);
+    check(initial_layers != nullptr, "scroll reuse fixture initial layer tree exists");
+
+    constexpr int width = 80;
+    constexpr int height = 24;
+    constexpr int content_height = 120;
+    const Rect viewport{0, 0, width, height};
+    FrameBuffer reused(width, height, Color{255, 255, 255, 255});
+    SoftwareCompositor compositor;
+    compositor.render_into(*initial_layers, reused, Color{255, 255, 255, 255});
+
+    auto assert_step_matches_full = [&](int previous_scroll_y, int next_scroll_y) {
+        const ScrollBlitPlan plan = plan_vertical_scroll_blit(
+            width, height, content_height, previous_scroll_y, next_scroll_y);
+        check(plan.mode == ScrollBlitMode::FastBlit, "scroll reuse fixture uses fast blit");
+        check(apply_vertical_scroll_blit(reused, viewport, plan), "scroll reuse fixture applies fast blit");
+        scroll_context.scroll_y = next_scroll_y;
+        auto current_layers = builder.build(*layout_tree);
+        check(current_layers != nullptr, "scroll reuse fixture current layer tree exists");
+        compositor.render_into(*current_layers,
+                               reused,
+                               Color{255, 255, 255, 255},
+                               &plan.exposed_strip,
+                               1);
+
+        FrameBuffer expected(width, height, Color{255, 255, 255, 255});
+        compositor.render_into(*current_layers, expected, Color{255, 255, 255, 255});
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const Color actual = reused.pixel(x, y);
+                const Color reference = expected.pixel(x, y);
+                check(actual.r == reference.r && actual.g == reference.g &&
+                          actual.b == reference.b && actual.a == reference.a,
+                      "scroll reuse frame differs from full repaint");
+            }
+        }
+    };
+
+    for (int scroll_y = 1; scroll_y <= 16; ++scroll_y) {
+        assert_step_matches_full(scroll_y - 1, scroll_y);
+    }
+    for (int scroll_y = 15; scroll_y >= 0; --scroll_y) {
+        assert_step_matches_full(scroll_y + 1, scroll_y);
+    }
 }
 
 void scroll_container_keeps_absolute_sibling_navigation_fixed() {
@@ -1284,11 +1571,15 @@ void fixed_grid_places_description_list_in_columns() {
 
 void flex_order_changes_same_stack_paint_order() {
     auto pipeline = build_pipeline(
-        "<body><main><div class='late'></div><div class='early'></div></main></body>",
+        "<body><main><div class='late'></div><div class='overlay'></div>"
+        "<div class='early'></div><div class='tie'></div><div class='same'></div></main></body>",
         "body { margin: 0; } main { display: flex; }"
         "div { width: 20px; height: 20px; }"
         ".late { order: 2; background: #ff0000; }"
-        ".early { order: -1; background: #0000ff; }");
+        ".overlay { position: absolute; order: 0; background: #00ff00; }"
+        ".early { order: -1; background: #0000ff; }"
+        ".tie { order: 0; background: #ffff00; }"
+        ".same { order: 0; background: #ff00ff; }");
 
     LayerTreeBuilder builder;
     const DisplayList flattened = builder.flatten(*pipeline.layer_tree);
@@ -1298,9 +1589,12 @@ void flex_order_changes_same_stack_paint_order() {
             fills.push_back(command.color);
         }
     }
-    check(fills.size() == 2, "flex order paint fixture emits both child fills");
-    check(fills[0].b == 255 && fills[1].r == 255,
-          "flex order changes same-stack paint order with the layout order");
+    check(fills.size() == 5, "flex order paint fixture emits every child fill");
+    check(fills[0].b == 255, "flex order paint puts the negative-order child first");
+    check(fills[1].r == 255 && fills[1].g == 255, "flex order paint keeps equal-order children stable");
+    check(fills[2].r == 255 && fills[2].b == 255, "flex order paint preserves the second equal-order child");
+    check(fills[3].r == 255 && fills[3].g == 0, "flex order paint puts the highest-order child after in-flow items");
+    check(fills[4].g == 255, "flex order paint includes the absolute child");
 }
 
 void unbreakable_symbol_stays_single_line() {
@@ -1609,6 +1903,7 @@ void canvas_element_emits_image_display_command_when_surface_resolves() {
 int main() {
     try {
         overflow_hidden_creates_clip_layer();
+        trace_owner_tokens_are_opt_in_and_preserve_box_ownership();
         overflow_y_auto_creates_vertical_scroll_clip_layer();
         extreme_scroll_geometry_remains_scrollable_and_bounded();
         rounded_overflow_clip_keeps_geometry_on_clip_layer();
@@ -1620,7 +1915,11 @@ int main() {
         visibility_preserves_layout_and_suppresses_hidden_paint_and_hit_testing();
         text_spacing_and_anywhere_wrap_emit_only_declared_extra_commands();
         normal_text_wrap_matches_layout_line_breaks();
+        text_layout_cache_handoffs_wrapped_and_newline_lines();
+        text_layout_cache_rejects_dirty_text_and_viewport_changes();
+        text_layout_cache_keeps_unwrapped_letter_spaced_text();
         scroll_container_offsets_descendant_paint();
+        scroll_reuse_frame_matches_full_repaint_in_both_directions();
         scroll_container_keeps_absolute_sibling_navigation_fixed();
         scroll_indicator_is_opt_in_overlay();
         opacity_layer_flattens_alpha();

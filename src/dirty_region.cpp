@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <queue>
 
 namespace jellyframe {
 namespace {
@@ -43,6 +44,14 @@ Rect union_rect(Rect left, Rect right) {
     return Rect{x1, y1, safe_span(x1, x2), safe_span(y1, y2)};
 }
 
+bool contains_rect(Rect outer, Rect inner) {
+    return !empty_rect(inner) &&
+        inner.x >= outer.x &&
+        inner.y >= outer.y &&
+        safe_edge(inner.x, inner.width) <= safe_edge(outer.x, outer.width) &&
+        safe_edge(inner.y, inner.height) <= safe_edge(outer.y, outer.height);
+}
+
 void merge_overlapping_rects(std::vector<Rect>& rects) {
     if (rects.size() > kMaxPairwiseMergeRects) {
         Rect enclosing = rects.front();
@@ -53,21 +62,70 @@ void merge_overlapping_rects(std::vector<Rect>& rects) {
         rects.push_back(enclosing);
         return;
     }
+    std::vector<unsigned char> active(rects.size(), 1);
+    std::size_t active_count = rects.size();
     bool merged = true;
     while (merged) {
         merged = false;
         for (std::size_t left = 0; left + 1 < rects.size() && !merged; ++left) {
+            if (active[left] == 0) {
+                continue;
+            }
             for (std::size_t right = left + 1; right < rects.size(); ++right) {
+                if (active[right] == 0) {
+                    continue;
+                }
                 if (empty_rect(intersect_rect(rects[left], rects[right]))) {
                     continue;
                 }
                 rects[left] = union_rect(rects[left], rects[right]);
-                rects.erase(rects.begin() + static_cast<std::ptrdiff_t>(right));
+                active[right] = 0;
+                --active_count;
                 merged = true;
                 break;
             }
         }
     }
+    if (active_count != rects.size()) {
+        std::size_t write = 0;
+        for (std::size_t read = 0; read < rects.size(); ++read) {
+            if (active[read] != 0) {
+                rects[write++] = rects[read];
+            }
+        }
+        rects.resize(write);
+    }
+}
+
+std::vector<Rect> normalize_dirty_rects_impl(const Rect* input,
+                                             std::size_t input_count,
+                                             Rect viewport) {
+    std::vector<Rect> normalized;
+    if (input == nullptr || input_count == 0 || empty_rect(viewport)) {
+        return normalized;
+    }
+    if (input_count > kMaxPairwiseMergeRects) {
+        normalized.push_back(viewport);
+        return normalized;
+    }
+
+    normalized.reserve(input_count);
+    for (std::size_t index = 0; index < input_count; ++index) {
+        const Rect dirty = intersect_rect(input[index], viewport);
+        if (empty_rect(dirty)) {
+            continue;
+        }
+        if (std::any_of(normalized.begin(), normalized.end(),
+                        [dirty](Rect existing) { return contains_rect(existing, dirty); })) {
+            continue;
+        }
+        normalized.erase(std::remove_if(normalized.begin(), normalized.end(),
+                                        [dirty](Rect existing) { return contains_rect(dirty, existing); }),
+                         normalized.end());
+        normalized.push_back(dirty);
+    }
+    merge_overlapping_rects(normalized);
+    return normalized;
 }
 
 std::size_t rect_area(Rect rect) {
@@ -175,35 +233,15 @@ Rect expand_and_clip_rect(Rect rect, int amount, Rect viewport) {
                 clamp_int64_to_int(clipped_bottom - clipped_top)};
 }
 
-Rect subtree_bounds(const LayoutBox& box) {
-    Rect bounds = box.rect;
-    std::vector<const LayoutBox*> pending;
-    pending.reserve(box.children.size());
-    for (const auto& child : box.children) {
-        pending.push_back(child.get());
-    }
-    while (!pending.empty()) {
-        const LayoutBox* current = pending.back();
-        pending.pop_back();
-        bounds = union_rect(bounds, current->rect);
-        for (const auto& child : current->children) {
-            pending.push_back(child.get());
-        }
-    }
-    return bounds;
-}
-
 constexpr int kMaxDirtyPaintEffectExtent = 128;
 
 Rect expand_for_dirty_paint_effects(Rect bounds, const Style& style) {
     const auto bounded_extent = [](int value) {
         return std::clamp(value, 0, kMaxDirtyPaintEffectExtent);
     };
-#if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
     const auto bounded_offset = [](int value) {
         return std::clamp(value, -kMaxDirtyPaintEffectExtent, kMaxDirtyPaintEffectExtent);
     };
-#endif
     int left = 0;
     int top = 0;
     int right = 0;
@@ -279,22 +317,54 @@ void merge_dirty_bounds(std::vector<DirtyNodeBounds>& output, const Node* node, 
 }
 
 void append_dirty_bounds_from_layout(const LayoutBox& layout, std::vector<DirtyNodeBounds>& output) {
-    std::vector<const LayoutBox*> pending;
-    pending.push_back(&layout);
+    // Accumulate each subtree while unwinding an iterative post-order walk;
+    // this keeps nested local-dirty nodes from rescanning their descendants.
+    // Children are visited in reverse order to preserve the old DFS output order.
+    struct Pending {
+        const LayoutBox* box;
+        std::size_t next_child;
+        Rect bounds;
+        bool suppress_output;
+        bool expand_all_children;
+    };
+
+    const auto make_pending = [](const LayoutBox* box,
+                                 bool suppress_output,
+                                 bool expand_all_children) {
+        return Pending{box, box->children.size(), box->rect, suppress_output, expand_all_children};
+    };
+
+    if (layout.node != nullptr && layout.node->dirty_flags == DomDirtyNone) {
+        return;
+    }
+
+    std::vector<Pending> pending;
+    pending.reserve(8);
+    pending.push_back(make_pending(&layout, false, false));
     while (!pending.empty()) {
-        const LayoutBox* current = pending.back();
-        pending.pop_back();
-        if (current->node != nullptr) {
-            if (current->node->local_dirty_flags != DomDirtyNone) {
-                merge_dirty_bounds(output, current->node, subtree_bounds(*current));
+        Pending& current = pending.back();
+        const bool local_dirty = current.box->node != nullptr &&
+            current.box->node->local_dirty_flags != DomDirtyNone;
+
+        if (current.next_child > 0) {
+            const LayoutBox* child = current.box->children[--current.next_child].get();
+            if (!current.expand_all_children && child->node != nullptr &&
+                child->node->dirty_flags == DomDirtyNone) {
                 continue;
             }
-            if (current->node->dirty_flags == DomDirtyNone) {
-                continue;
-            }
+            pending.push_back(make_pending(child,
+                                           current.suppress_output || local_dirty,
+                                           current.expand_all_children || local_dirty));
+            continue;
         }
-        for (const auto& child : current->children) {
-            pending.push_back(child.get());
+
+        if (local_dirty && !current.suppress_output) {
+            merge_dirty_bounds(output, current.box->node, current.bounds);
+        }
+        const Rect completed_bounds = current.bounds;
+        pending.pop_back();
+        if (!pending.empty()) {
+            pending.back().bounds = union_rect(pending.back().bounds, completed_bounds);
         }
     }
 }
@@ -390,6 +460,12 @@ void set_full_frame_result(DirtyRegionResult& result, Rect viewport, DirtyRegion
 }
 
 } // namespace
+
+std::vector<Rect> normalize_dirty_rects(const Rect* input,
+                                        std::size_t input_count,
+                                        Rect viewport) {
+    return normalize_dirty_rects_impl(input, input_count, viewport);
+}
 
 const char* dirty_region_mode_name(DirtyRegionMode mode) {
     switch (mode) {
@@ -579,55 +655,139 @@ void coalesce_dirty_rects_into(const Rect* input,
         output.push_back(viewport);
         local_result.forced_merges += previous_count - 1;
     }
-    while (output.size() > 1) {
-        const bool forced = output.size() > max_rects;
-        std::size_t best_left = output.size();
-        std::size_t best_right = output.size();
-        std::size_t best_extra_area = std::numeric_limits<std::size_t>::max();
-        std::size_t best_merged_cost = std::numeric_limits<std::size_t>::max();
-        std::size_t best_savings = 0;
+    struct PairCandidate {
+        std::size_t left;
+        std::size_t right;
+        std::size_t left_generation;
+        std::size_t right_generation;
+        std::size_t extra_area;
+        std::size_t merged_cost;
+        std::size_t savings;
+    };
+    struct PairCandidateCompare {
+        bool forced;
 
-        for (std::size_t left = 0; left + 1 < output.size(); ++left) {
-            for (std::size_t right = left + 1; right < output.size(); ++right) {
-                const Rect merged = union_rect(output[left], output[right]);
-                const std::size_t pair_area = saturating_add(rect_area(output[left]), rect_area(output[right]));
-                const std::size_t merged_area = rect_area(merged);
-                const std::size_t extra_area = merged_area > pair_area ? merged_area - pair_area : 0;
-                const std::size_t pair_cost = saturating_add(
-                    rect_cost(output[left], options.per_rect_overhead_pixels),
-                    rect_cost(output[right], options.per_rect_overhead_pixels));
-                const std::size_t merged_cost = rect_cost(merged, options.per_rect_overhead_pixels);
-                const bool profitable =
-                    extra_area <= percent_of_area(pair_area, max_extra_area_percent) && merged_cost < pair_cost;
-                if (!profitable && !forced) {
-                    continue;
+        bool operator()(const PairCandidate& left, const PairCandidate& right) const {
+            if (forced) {
+                if (left.extra_area != right.extra_area) {
+                    return left.extra_area > right.extra_area;
                 }
-
-                const std::size_t savings = pair_cost > merged_cost ? pair_cost - merged_cost : 0;
-                const bool better = best_left == output.size() ||
-                                    (forced
-                                         ? (extra_area < best_extra_area ||
-                                            (extra_area == best_extra_area && merged_cost < best_merged_cost))
-                                         : (savings > best_savings ||
-                                            (savings == best_savings && extra_area < best_extra_area)));
-                if (better) {
-                    best_left = left;
-                    best_right = right;
-                    best_extra_area = extra_area;
-                    best_merged_cost = merged_cost;
-                    best_savings = savings;
+                if (left.merged_cost != right.merged_cost) {
+                    return left.merged_cost > right.merged_cost;
+                }
+            } else {
+                if (left.savings != right.savings) {
+                    return left.savings < right.savings;
+                }
+                if (left.extra_area != right.extra_area) {
+                    return left.extra_area > right.extra_area;
                 }
             }
+            if (left.left != right.left) {
+                return left.left > right.left;
+            }
+            return left.right > right.right;
         }
-        if (best_left == output.size()) {
+    };
+    using PairQueue = std::priority_queue<PairCandidate,
+                                          std::vector<PairCandidate>,
+                                          PairCandidateCompare>;
+
+    std::vector<unsigned char> active(output.size(), 1);
+    std::vector<std::size_t> generations(output.size(), 0);
+    std::size_t active_count = output.size();
+    const std::size_t candidate_reserve = output.size() * (output.size() - 1) / 2;
+
+    auto make_queue = [&](bool forced) {
+        std::vector<PairCandidate> storage;
+        storage.reserve(candidate_reserve);
+        return PairQueue{PairCandidateCompare{forced}, std::move(storage)};
+    };
+    auto add_candidate = [&](PairQueue& queue, std::size_t left, std::size_t right, bool forced) {
+        if (active[left] == 0 || active[right] == 0) {
+            return;
+        }
+        const Rect merged = union_rect(output[left], output[right]);
+        const std::size_t pair_area = saturating_add(rect_area(output[left]), rect_area(output[right]));
+        const std::size_t merged_area = rect_area(merged);
+        const std::size_t extra_area = merged_area > pair_area ? merged_area - pair_area : 0;
+        const std::size_t pair_cost = saturating_add(
+            rect_cost(output[left], options.per_rect_overhead_pixels),
+            rect_cost(output[right], options.per_rect_overhead_pixels));
+        const std::size_t merged_cost = rect_cost(merged, options.per_rect_overhead_pixels);
+        const bool profitable =
+            extra_area <= percent_of_area(pair_area, max_extra_area_percent) && merged_cost < pair_cost;
+        if (!profitable && !forced) {
+            return;
+        }
+        queue.push(PairCandidate{left,
+                                 right,
+                                 generations[left],
+                                 generations[right],
+                                 extra_area,
+                                 merged_cost,
+                                 pair_cost > merged_cost ? pair_cost - merged_cost : 0});
+    };
+    auto build_queue = [&](bool forced) {
+        PairQueue queue = make_queue(forced);
+        for (std::size_t left = 0; left + 1 < output.size(); ++left) {
+            for (std::size_t right = left + 1; right < output.size(); ++right) {
+                add_candidate(queue, left, right, forced);
+            }
+        }
+        return queue;
+    };
+
+    bool forced = active_count > max_rects;
+    PairQueue queue = build_queue(forced);
+    while (active_count > 1) {
+        PairCandidate candidate{};
+        bool found = false;
+        while (!queue.empty()) {
+            candidate = queue.top();
+            queue.pop();
+            if (active[candidate.left] != 0 && active[candidate.right] != 0 &&
+                generations[candidate.left] == candidate.left_generation &&
+                generations[candidate.right] == candidate.right_generation) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
             break;
         }
 
-        output[best_left] = union_rect(output[best_left], output[best_right]);
-        output.erase(output.begin() + static_cast<std::ptrdiff_t>(best_right));
+        output[candidate.left] = union_rect(output[candidate.left], output[candidate.right]);
+        ++generations[candidate.left];
+        active[candidate.right] = 0;
+        --active_count;
         if (forced) {
             ++local_result.forced_merges;
         }
+
+        for (std::size_t other = 0; other < output.size(); ++other) {
+            if (other == candidate.left || active[other] == 0) {
+                continue;
+            }
+            const std::size_t left = std::min(candidate.left, other);
+            const std::size_t right = std::max(candidate.left, other);
+            add_candidate(queue, left, right, forced);
+        }
+
+        if (forced && active_count <= max_rects) {
+            forced = false;
+            queue = build_queue(false);
+        }
+    }
+
+    if (active_count != output.size()) {
+        std::size_t write = 0;
+        for (std::size_t read = 0; read < output.size(); ++read) {
+            if (active[read] != 0) {
+                output[write++] = output[read];
+            }
+        }
+        output.resize(write);
     }
 
     local_result.output_rect_count = output.size();

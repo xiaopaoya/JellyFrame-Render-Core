@@ -1361,6 +1361,18 @@ void fixed_two_column_grid_template_applies() {
     check(style.column_gap == 13 && style.row_gap == 13, "fractional rem gap parsed for fixed grid");
 }
 
+void auto_grid_track_is_distinct_from_fractional_track() {
+    auto header = make_element("header");
+    StyleResolver resolver(parse("header { display: grid; grid-template-columns: 1fr auto; }"));
+
+    const Style style = resolver.resolve(*header);
+    check(style.grid_template_column_count == 2, "mixed grid column count parsed");
+    check(style.grid_template_column_widths[0] == 0,
+          "fractional grid track remains flexible");
+    check(style.grid_template_column_widths[1] < 0,
+          "auto grid track remains distinguishable for intrinsic sizing");
+}
+
 void repeated_fixed_grid_template_applies() {
     auto keys = make_element("section");
     keys->attributes["class"] = "keys";
@@ -1469,6 +1481,7 @@ void positioned_offsets_apply() {
 
     const Style style = resolver.resolve(*panel);
     check(style.position == "absolute", "position absolute parsed");
+    check(style.position_type == PositionType::Absolute, "position absolute semantic type parsed");
     check(style.inset_top_specified && style.inset_top == 8, "top offset parsed");
     check(style.inset_right_specified && style.inset_right == 12, "right offset parsed");
     check(!style.inset_bottom_specified, "bottom auto clears offset");
@@ -1909,6 +1922,7 @@ int main() {
         overflow_y_uses_the_vertical_scroll_subset();
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
         fixed_two_column_grid_template_applies();
+        auto_grid_track_is_distinct_from_fractional_track();
         repeated_fixed_grid_template_applies();
         modern_length_functions_and_flex_wrap_apply();
         flex_sizing_properties_apply();

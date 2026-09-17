@@ -1,6 +1,6 @@
 # JellyFrame Render Core
 
-> Last updated: 2026-09-08; Applies to: 0.6.2 development line
+> Last updated: 2026-09-17; Applies to: 0.6.2 development line
 
 JellyFrame Render Core is a platform-neutral, modular HTML/CSS subset,
 document/layout pipeline and CPU software renderer for bounded embedded and
@@ -36,6 +36,9 @@ Performance work can use the opt-in benchmark preset:
 cmake --preset benchmarks
 cmake --build --preset benchmarks
 ```
+
+On Windows this also builds `jellyframe_cpu2d_compare`, which emits fixed-size
+Core and GDI+ workload captures plus machine-readable timing summaries.
 
 The install exports `JellyFrame::jellyframe_render_core`, public headers, a
 feature profile and a deterministic source manifest. Optional build families

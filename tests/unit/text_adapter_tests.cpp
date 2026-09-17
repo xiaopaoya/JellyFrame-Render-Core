@@ -40,6 +40,22 @@ bool probe_additive_measurement(int, int, std::uint32_t, void*) {
     return true;
 }
 
+bool probe_measure_range(const char* data,
+                         std::size_t length,
+                         int font_size,
+                         int,
+                         TextMetrics* metrics,
+                         void* context) {
+    auto* probe = static_cast<ProbeTextBackend*>(context);
+    if (probe == nullptr || metrics == nullptr || (data == nullptr && length != 0)) {
+        return false;
+    }
+    ++probe->measure_calls;
+    metrics->width = static_cast<int>(length) * font_size;
+    metrics->line_height = font_size + 2;
+    return true;
+}
+
 bool probe_paint(FrameBuffer& target,
                  Rect rect,
                  Color color,
@@ -117,6 +133,34 @@ void additive_provider_wraps_without_remeasuring_the_current_line() {
           "additive provider measures each token once instead of each growing candidate");
 }
 
+void range_provider_avoids_scalar_string_allocations() {
+    ProbeTextBackend probe;
+    const TextMeasureProvider measure{
+        probe_measure,
+        &probe,
+        nullptr,
+        nullptr,
+        probe_measure_range,
+        nullptr,
+    };
+    const std::vector<std::string> lines = wrap_text_anywhere(
+        measure, "AAAA", 10, 400, 0, 0, 20);
+    check(lines.size() == 2, "range provider preserves anywhere wrapping");
+    check(probe.measure_calls == 1, "range provider caches repeated scalar widths");
+}
+
+void counting_wrap_matches_materialized_wrap() {
+    ProbeTextBackend probe;
+    const TextMeasureProvider measure{probe_measure, &probe, nullptr, probe_additive_measurement};
+    const std::string text = "A-A A-A\nBBBB";
+    check(count_wrapped_lines_anywhere(measure, text, 10, 400, 0, 0, 20) ==
+              wrap_text_anywhere(measure, text, 10, 400, 0, 0, 20).size(),
+          "anywhere counting matches materialized wrapping");
+    check(count_wrapped_lines_at_opportunities(measure, text, 10, 400, 0, 0, 30) ==
+              wrap_text_at_opportunities(measure, text, 10, 400, 0, 0, 30).size(),
+          "opportunity counting matches materialized wrapping");
+}
+
 void extreme_letter_spacing_uses_one_bounded_value() {
     ProbeTextBackend probe;
     const TextMeasureProvider measure{probe_measure, &probe};
@@ -139,6 +183,13 @@ void extreme_fallback_font_sizes_remain_defined() {
           "extreme fallback widths wrap without arithmetic overflow");
 }
 
+void fallback_normal_line_height_tracks_font_size() {
+    check(fallback_text_metrics("A", 9, 400).line_height == 11,
+          "small fallback text uses a proportional normal line height");
+    check(fallback_text_metrics("A", 14, 400).line_height == 17,
+          "fallback normal line height does not add a fixed six-pixel floor");
+}
+
 } // namespace
 
 int main() {
@@ -147,8 +198,11 @@ int main() {
         incomplete_adapter_degrades_to_core_fallbacks();
         letter_spacing_and_utf8_anywhere_wrap_share_scalar_boundaries();
         additive_provider_wraps_without_remeasuring_the_current_line();
+        range_provider_avoids_scalar_string_allocations();
+        counting_wrap_matches_materialized_wrap();
         extreme_letter_spacing_uses_one_bounded_value();
         extreme_fallback_font_sizes_remain_defined();
+        fallback_normal_line_height_tracks_font_size();
     } catch (const std::exception& error) {
         std::cerr << "text adapter test failed: " << error.what() << '\n';
         return 1;

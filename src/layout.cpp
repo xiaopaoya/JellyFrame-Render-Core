@@ -12,6 +12,12 @@
 #include <vector>
 
 namespace jellyframe {
+
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+std::vector<const LayoutBox*> ordered_flex_children_for_order(const LayoutBox& box,
+                                                              bool include_out_of_flow);
+#endif
+
 namespace {
 
 int clamp_layout_value(std::int64_t value) {
@@ -194,7 +200,8 @@ bool has_aspect_ratio(const Style& style) {
 }
 
 bool is_out_of_flow_positioned(const Style& style) {
-    return style.position == "absolute" || style.position == "fixed";
+    return style.position_type == PositionType::Absolute ||
+        style.position_type == PositionType::Fixed;
 }
 
 void shift_box(LayoutBox& box, int dx, int dy);
@@ -224,7 +231,7 @@ int vertical_position_offset(const Style& style, int area_height, int box_height
 }
 
 void apply_relative_position_offset(LayoutBox& box) {
-    if (box.style.position != "relative") {
+    if (box.style.position_type != PositionType::Relative) {
         return;
     }
     int dx = 0;
@@ -407,25 +414,12 @@ int flex_outer_cross_size(const LayoutBox& child, bool row_direction) {
 }
 
 std::vector<LayoutBox*> ordered_flex_children(LayoutBox& box) {
-    if (box.style.display != Display::Flex) {
-        return {};
-    }
-    const bool has_nonzero_order = std::any_of(box.children.begin(), box.children.end(), [](const LayoutBoxPtr& child) {
-        return !is_out_of_flow_positioned(child->style) && child->style.flex_order != 0;
-    });
-    if (!has_nonzero_order) {
-        return {};
-    }
+    const std::vector<const LayoutBox*> ordered_const = ordered_flex_children_for_order(box, false);
     std::vector<LayoutBox*> ordered;
-    ordered.reserve(box.children.size());
-    for (const LayoutBoxPtr& child : box.children) {
-        if (!is_out_of_flow_positioned(child->style)) {
-            ordered.push_back(child.get());
-        }
+    ordered.reserve(ordered_const.size());
+    for (const LayoutBox* child : ordered_const) {
+        ordered.push_back(const_cast<LayoutBox*>(child));
     }
-    std::stable_sort(ordered.begin(), ordered.end(), [](const LayoutBox* left, const LayoutBox* right) {
-        return left->style.flex_order < right->style.flex_order;
-    });
     return ordered;
 }
 
@@ -551,6 +545,8 @@ struct GridColumns {
     int count = 1;
     int gap = 0;
     std::vector<int> widths;
+    std::vector<bool> auto_sized;
+    std::vector<bool> flexible;
 };
 
 GridColumns resolve_grid_columns(const Style& style, int content_width, int in_flow_count) {
@@ -559,26 +555,16 @@ GridColumns resolve_grid_columns(const Style& style, int content_width, int in_f
     if (style.grid_template_column_count > 0) {
         columns.count = std::min(style.grid_template_column_count, kMaxGridColumns);
         columns.widths.assign(static_cast<std::size_t>(columns.count), 0);
-        int fixed_width = 0;
-        int flexible_count = 0;
+        columns.auto_sized.assign(static_cast<std::size_t>(columns.count), false);
+        columns.flexible.assign(static_cast<std::size_t>(columns.count), false);
         for (int column = 0; column < columns.count; ++column) {
             const int width = style.grid_template_column_widths[static_cast<std::size_t>(column)];
             if (width > 0) {
                 columns.widths[static_cast<std::size_t>(column)] = width;
-                fixed_width = bounded_add(fixed_width, width);
+            } else if (width < 0) {
+                columns.auto_sized[static_cast<std::size_t>(column)] = true;
             } else {
-                ++flexible_count;
-            }
-        }
-        const int total_gap_width = bounded_non_negative_multiply(
-            columns.gap, std::max(0, columns.count - 1));
-        const int flexible_width = flexible_count > 0
-            ? std::max(1, bounded_subtract(
-                  bounded_subtract(content_width, fixed_width), total_gap_width) / flexible_count)
-            : 0;
-        for (int& width : columns.widths) {
-            if (width <= 0) {
-                width = flexible_width;
+                columns.flexible[static_cast<std::size_t>(column)] = true;
             }
         }
     } else {
@@ -593,6 +579,8 @@ GridColumns resolve_grid_columns(const Style& style, int content_width, int in_f
         const int column_width = std::max(1,
             bounded_subtract(content_width, total_gap_width) / columns.count);
         columns.widths.assign(static_cast<std::size_t>(columns.count), column_width);
+        columns.auto_sized.assign(static_cast<std::size_t>(columns.count), false);
+        columns.flexible.assign(static_cast<std::size_t>(columns.count), false);
     }
     return columns;
 }
@@ -624,6 +612,85 @@ struct GridPlacement {
     int row_span = 1;
     bool fallback_block = false;
 };
+
+int grid_intrinsic_outer_width(const LayoutBox& box, const TextMeasureProvider& text_measure) {
+    if (box.style.width >= 0) {
+        return box.style.box_sizing_border_box
+            ? std::max(0, box.style.width)
+            : bounded_non_negative_add(
+                  bounded_non_negative_add(box.style.width, horizontal_edges(box.style.padding)),
+                  horizontal_edges(box.style.border_width));
+    }
+    if (box.node != nullptr && box.node->type == NodeType::Text) {
+        const std::string text = transformed_render_text(*box.node, box.style.text_transform);
+        return measure_text_with_letter_spacing(text_measure,
+                                                text,
+                                                box.style.font_size,
+                                                box.style.font_weight,
+                                                box.style.font_family_hash,
+                                                box.style.letter_spacing).width;
+    }
+
+    int child_width = 0;
+    bool all_inline = true;
+    for (const auto& child : box.children) {
+        if (is_out_of_flow_positioned(child->style)) {
+            continue;
+        }
+        const int outer_width = bounded_non_negative_add(
+            bounded_non_negative_add(grid_intrinsic_outer_width(*child, text_measure), child->style.margin.left),
+            child->style.margin.right);
+        const bool inline_child = (child->node != nullptr && child->node->type == NodeType::Text) ||
+            child->style.display == Display::Inline || child->style.display == Display::InlineBlock;
+        if (all_inline && inline_child) {
+            child_width = bounded_add(child_width, outer_width);
+        } else {
+            all_inline = false;
+            child_width = std::max(child_width, outer_width);
+        }
+    }
+    return std::max(
+        std::max(0, box.style.min_width),
+        bounded_non_negative_add(
+            bounded_non_negative_add(child_width, horizontal_edges(box.style.padding)),
+            horizontal_edges(box.style.border_width)));
+}
+
+void finalize_grid_columns(GridColumns& columns,
+                           const std::vector<GridPlacement>& placements,
+                           const TextMeasureProvider& text_measure,
+                           int content_width) {
+    for (const GridPlacement& placement : placements) {
+        if (placement.fallback_block || placement.column_span != 1 ||
+            placement.column < 0 || placement.column >= columns.count ||
+            !columns.auto_sized[static_cast<std::size_t>(placement.column)]) {
+            continue;
+        }
+        const int intrinsic_width = grid_intrinsic_outer_width(*placement.child, text_measure);
+        columns.widths[static_cast<std::size_t>(placement.column)] = std::max(
+            columns.widths[static_cast<std::size_t>(placement.column)], intrinsic_width);
+    }
+
+    int occupied_width = bounded_non_negative_multiply(columns.gap, std::max(0, columns.count - 1));
+    int flexible_count = 0;
+    for (int column = 0; column < columns.count; ++column) {
+        occupied_width = bounded_add(occupied_width, columns.widths[static_cast<std::size_t>(column)]);
+        if (columns.flexible[static_cast<std::size_t>(column)]) {
+            ++flexible_count;
+        }
+    }
+    int remaining_width = bounded_non_negative_subtract(content_width, occupied_width);
+    int remaining_flexible = flexible_count;
+    for (int column = 0; column < columns.count && remaining_flexible > 0; ++column) {
+        if (!columns.flexible[static_cast<std::size_t>(column)]) {
+            continue;
+        }
+        const int share = remaining_width / remaining_flexible;
+        columns.widths[static_cast<std::size_t>(column)] = std::max(1, share);
+        remaining_width = bounded_non_negative_subtract(remaining_width, share);
+        --remaining_flexible;
+    }
+}
 
 struct GridPlacementState {
     std::vector<std::uint64_t> occupied;
@@ -795,7 +862,11 @@ LayoutBoxPtr LayoutEngine::layout(const Node& root, int viewport_width) const {
 }
 
 LayoutBoxPtr LayoutEngine::layout(const Node& root, int viewport_width, int viewport_height) const {
-    RenderTreeBuilder render_tree_builder(style_resolver_);
+    RenderTreeOptions render_options;
+    render_options.diagnostics = options_.diagnostics;
+    render_options.viewport_width = viewport_width;
+    render_options.viewport_height = viewport_height;
+    RenderTreeBuilder render_tree_builder(style_resolver_, render_options);
     auto render_tree = render_tree_builder.build(root);
     return layout(*render_tree, viewport_width, viewport_height);
 }
@@ -805,7 +876,11 @@ LayoutBoxPtr LayoutEngine::layout(const Node& root, int viewport_width, Monotoni
 }
 
 LayoutBoxPtr LayoutEngine::layout(const Node& root, int viewport_width, int viewport_height, MonotonicArena& arena) const {
-    RenderTreeBuilder render_tree_builder(style_resolver_);
+    RenderTreeOptions render_options;
+    render_options.diagnostics = options_.diagnostics;
+    render_options.viewport_width = viewport_width;
+    render_options.viewport_height = viewport_height;
+    RenderTreeBuilder render_tree_builder(style_resolver_, render_options);
     auto render_tree = render_tree_builder.build(root, arena);
     return layout(*render_tree, viewport_width, viewport_height, arena);
 }
@@ -836,6 +911,8 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
     auto root_box = make_layout_box(arena);
     root_box->node = render_tree.node;
     root_box->style = render_tree.style;
+    root_box->viewport_width = viewport_width;
+    root_box->viewport_height = viewport_height;
     build_layout_tree(render_tree, *root_box, arena);
     root_box->rect.height = layout_box(*root_box, 0, 0, viewport_width, viewport_height, 1);
     return root_box;
@@ -877,6 +954,8 @@ void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box,
             ++layout_box_count;
             child_box->node = child->node;
             child_box->style = child->style;
+            child_box->viewport_width = box.viewport_width;
+            child_box->viewport_height = box.viewport_height;
             layout_box.children.push_back(std::move(child_box));
             child_work.push_back(PendingObject{child.get(), child_box_raw});
         }
@@ -1045,6 +1124,7 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
                                   int content_width,
                                   int min_width,
                                   int height) const {
+    box.text_layout_cache = TextLayoutCache{};
     const std::string text = transformed_render_text(*box.node, box.style.text_transform);
     const TextMetrics metrics = measure_text_with_letter_spacing(text_measure_,
                                                                  text,
@@ -1075,9 +1155,10 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
                                                content_width,
                                                text_indent));
     }
+    std::vector<std::string> lines;
     int line_count = 1;
     if (can_wrap && usable_text_width > 0) {
-        const std::vector<std::string> lines = box.style.overflow_wrap_anywhere
+        lines = box.style.overflow_wrap_anywhere
             ? wrap_text_anywhere(text_measure_,
                                  text,
                                  box.style.font_size,
@@ -1095,6 +1176,9 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
         line_count = clamp_layout_value(static_cast<std::int64_t>(std::min<std::size_t>(
             lines.size(), static_cast<std::size_t>(std::numeric_limits<int>::max()))));
         line_count = std::max(1, line_count);
+    }
+    if (lines.empty() && !text.empty()) {
+        lines.push_back(text);
     }
     const int fixed_text_height = specified_content_height(box.style, height);
     int text_height = std::max(specified_content_min_height(box.style, height),
@@ -1114,6 +1198,29 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
                              std::max(0, bounded_subtract(usable_text_width, text_width)));
     }
     box.rect = Rect{text_x, border_box_y, text_width, text_height};
+    TextLayoutCache& cache = box.text_layout_cache;
+    cache.valid = true;
+    cache.source_text = box.node->text;
+    cache.rendered_text = text;
+    cache.lines = std::move(lines);
+    cache.text_measure = text_measure_;
+    cache.available_width = usable_text_width;
+    cache.content_width = content_width;
+    cache.rect_width = box.rect.width;
+    cache.rect_height = box.rect.height;
+    cache.viewport_width = box.viewport_width;
+    cache.viewport_height = box.viewport_height;
+    cache.font_size = box.style.font_size;
+    cache.font_weight = box.style.font_weight;
+    cache.font_family_hash = box.style.font_family_hash;
+    cache.line_height = line_height;
+    cache.text_indent = box.style.text_indent;
+    cache.letter_spacing = box.style.letter_spacing;
+    cache.text_transform = box.style.text_transform;
+    cache.overflow_wrap_anywhere = box.style.overflow_wrap_anywhere;
+    cache.white_space_nowrap = box.style.white_space_nowrap;
+    cache.text_overflow_ellipsis = box.style.text_overflow_ellipsis;
+    cache.text_align = box.style.text_align;
     return text_height;
 }
 
@@ -1194,7 +1301,7 @@ void LayoutEngine::layout_positioned_children(LayoutBox& box,
             continue;
         }
 
-        const bool fixed = child->style.position == "fixed";
+        const bool fixed = child->style.position_type == PositionType::Fixed;
         const int area_x = fixed ? 0 : content_x;
         const int area_y = fixed ? 0 : content_y;
         const int area_width = std::max(1, fixed ? viewport_width : content_width);
@@ -1538,7 +1645,7 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
     }
 
     const int row_gap = std::max(0, box.style.row_gap);
-    const GridColumns columns = resolve_grid_columns(box.style, content_width, in_flow_count);
+    GridColumns columns = resolve_grid_columns(box.style, content_width, in_flow_count);
 
     GridPlacementState placement_state;
     if (box.style.grid_template_row_count > 0) {
@@ -1605,24 +1712,34 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
                                   "maximum tracked rows=" + std::to_string(kMaxGridRows));
                 grid_placement_budget_reported = true;
             }
-            layout_box(*child, 0, 0, content_width, 0, depth + 1);
-            placements.push_back(placement);
-            continue;
         }
 
-        const int item_width = grid_item_width(columns, placement.column, column_span);
-        const int original_width = child->style.width;
-        const int original_width_percent = child->style.width_percent;
-        const bool original_box_sizing = child->style.box_sizing_border_box;
-        if (child->style.width < 0 && child->style.width_percent < 0) {
-            child->style.width = item_width;
-            child->style.width_percent = -1;
-            child->style.box_sizing_border_box = true;
+        placements.push_back(placement);
+    }
+
+    finalize_grid_columns(columns, placements, text_measure_, content_width);
+
+    for (const GridPlacement& placement : placements) {
+        LayoutBox& child = *placement.child;
+        if (placement.fallback_block) {
+            layout_box(child, 0, 0, content_width, 0, depth + 1);
+            continue;
         }
-        const int child_height = layout_box(*child, 0, 0, item_width, 0, depth + 1);
-        child->style.width = original_width;
-        child->style.width_percent = original_width_percent;
-        child->style.box_sizing_border_box = original_box_sizing;
+        const int column_span = placement.column_span;
+        const int row_span = placement.row_span;
+        const int item_width = grid_item_width(columns, placement.column, column_span);
+        const int original_width = child.style.width;
+        const int original_width_percent = child.style.width_percent;
+        const bool original_box_sizing = child.style.box_sizing_border_box;
+        if (child.style.width < 0 && child.style.width_percent < 0) {
+            child.style.width = item_width;
+            child.style.width_percent = -1;
+            child.style.box_sizing_border_box = true;
+        }
+        const int child_height = layout_box(child, 0, 0, item_width, 0, depth + 1);
+        child.style.width = original_width;
+        child.style.width_percent = original_width_percent;
+        child.style.box_sizing_border_box = original_box_sizing;
         const int min_allocated_height = bounded_add(
             bounded_non_negative_multiply(box.style.grid_auto_row_min, row_span),
             bounded_non_negative_multiply(row_gap, row_span - 1));
@@ -1636,8 +1753,32 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
                     std::max(placement_state.row_heights[static_cast<std::size_t>(r)], per_row_height);
             }
         }
+    }
 
-        placements.push_back(placement);
+    const int fixed_content_height = specified_content_height(box.style, containing_height);
+    if (fixed_content_height >= 0 && !placement_state.row_heights.empty()) {
+        int occupied_height = bounded_non_negative_multiply(
+            row_gap, std::max(0, static_cast<int>(placement_state.row_heights.size()) - 1));
+        int flexible_count = 0;
+        for (std::size_t row = 0; row < placement_state.row_heights.size(); ++row) {
+            occupied_height = bounded_add(occupied_height, placement_state.row_heights[row]);
+            if (!placement_state.row_fixed[row]) {
+                ++flexible_count;
+            }
+        }
+        int remaining_height = bounded_non_negative_subtract(fixed_content_height, occupied_height);
+        int remaining_flexible = flexible_count;
+        for (std::size_t row = 0;
+             row < placement_state.row_heights.size() && remaining_height > 0 && remaining_flexible > 0;
+             ++row) {
+            if (placement_state.row_fixed[row]) {
+                continue;
+            }
+            const int share = remaining_height / remaining_flexible;
+            placement_state.row_heights[row] = bounded_add(placement_state.row_heights[row], share);
+            remaining_height -= share;
+            --remaining_flexible;
+        }
     }
 
     std::vector<int> row_offsets(placement_state.row_heights.size(), 0);
@@ -1682,18 +1823,24 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
         }
         allocated_height = bounded_add(
             allocated_height, bounded_non_negative_multiply(row_gap, placement.row_span - 1));
+        const AlignItems alignment = flex_cross_axis_alignment(*placement.child, box.style.align_items);
+        const int row_y = bounded_add(content_y, row_offsets[static_cast<std::size_t>(placement.row)]);
         const int target_x = bounded_add(
             grid_column_x(columns, content_x, placement.column), placement.child->style.margin.left);
+        if (alignment == AlignItems::Stretch && flex_cross_size_is_auto(placement.child->style, true)) {
+            const int stretched_height = bounded_non_negative_subtract(
+                bounded_non_negative_subtract(allocated_height, placement.child->style.margin.top),
+                placement.child->style.margin.bottom);
+            placement.child->rect.height = std::max(placement.child->rect.height, stretched_height);
+        }
+        const int child_outer_height = flex_outer_cross_size(*placement.child, true);
         const int target_y = bounded_add(
-            bounded_add(content_y, row_offsets[static_cast<std::size_t>(placement.row)]),
+            flex_aligned_y(alignment, row_y, allocated_height, child_outer_height),
             placement.child->style.margin.top);
         shift_box(*placement.child,
                   bounded_subtract(target_x, placement.child->rect.x),
                   bounded_subtract(target_y, placement.child->rect.y));
         placement.child->rect.width = grid_item_width(columns, placement.column, placement.column_span);
-        if (placement.child->style.height < 0) {
-            placement.child->rect.height = std::max(placement.child->rect.height, allocated_height);
-        }
     }
 
     return has_fallback ? std::max(total_height, fallback_y - row_gap) : total_height;

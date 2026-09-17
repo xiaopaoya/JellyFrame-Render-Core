@@ -5,6 +5,7 @@
 #include "render_core/dirty_region.h"
 #include "render_core/embedded_framebuffer.h"
 #include "render_core/frame_scratch.h"
+#include "render_core/form_control.h"
 #include "render_core/html_parser.h"
 #include "render_core/layer_tree.h"
 #include "render_core/layout.h"
@@ -102,6 +103,36 @@ std::string make_flex_order_css() {
            ".ordered { display: flex; flex-wrap: wrap; width: 320px; gap: 4px; }"
            ".item { width: 36px; height: 20px; background: #ffffff; }"
            ".rank-0 { order: 1; } .rank-1 { order: -1; } .rank-2 { order: 0; }";
+}
+
+std::string make_flex_intrinsic_html(int count) {
+    std::ostringstream html;
+    html << "<!doctype html><html><body><main class='intrinsic-row'>";
+    for (int index = 0; index < count; ++index) {
+        html << "<article class='intrinsic-item'><span>Metric " << index
+             << " value</span></article>";
+    }
+    html << "</main></body></html>";
+    return html.str();
+}
+
+std::string make_flex_intrinsic_css() {
+    return "body { margin: 0; }"
+           ".intrinsic-row { display: flex; flex-wrap: nowrap; align-items: stretch; "
+           "width: 320px; gap: 4px; }"
+           ".intrinsic-item { flex-grow: 1; flex-shrink: 1; min-width: 0; padding: 4px; "
+           "background: #ffffff; }"
+           ".intrinsic-item span { display: block; }";
+}
+
+std::string make_select_html(int option_count) {
+    std::ostringstream html;
+    html << "<!doctype html><html><body><select id='benchmark-select'>";
+    for (int index = 0; index < option_count; ++index) {
+        html << "<option value='value-" << index << "'>Option " << index << "</option>";
+    }
+    html << "</select></body></html>";
+    return html.str();
 }
 
 std::string make_single_level_nested_css() {
@@ -210,6 +241,27 @@ bool fixed_measure(const std::string& text,
                    int,
                    TextMetrics* metrics,
                    void*) {
+    if (metrics == nullptr) {
+        return false;
+    }
+    metrics->width = static_cast<int>(text.size()) * 8;
+    metrics->line_height = 12;
+    return true;
+}
+
+struct TextMeasureCounter {
+    std::size_t calls = 0;
+};
+
+bool counting_fixed_measure(const std::string& text,
+                            int,
+                            int,
+                            TextMetrics* metrics,
+                            void* context) {
+    auto* counter = static_cast<TextMeasureCounter*>(context);
+    if (counter != nullptr) {
+        ++counter->calls;
+    }
     if (metrics == nullptr) {
         return false;
     }
@@ -359,6 +411,46 @@ int run_render_core_microbench(int argc, char** argv) {
         auto flex_order_layout_tree = flex_order_layout.layout(*flex_order_render_tree, 360, flex_order_layout_arena);
         (void)flex_order_layout_tree;
     }));
+
+    auto flex_intrinsic_document = html_parser.parse(make_flex_intrinsic_html(card_count));
+    auto flex_intrinsic_stylesheet = css_parser.parse(make_flex_intrinsic_css());
+    StyleResolver flex_intrinsic_resolver(flex_intrinsic_stylesheet);
+    RenderTreeBuilder flex_intrinsic_builder(flex_intrinsic_resolver);
+    MonotonicArena flex_intrinsic_render_arena;
+    auto flex_intrinsic_render_tree = flex_intrinsic_builder.build(
+        *flex_intrinsic_document, flex_intrinsic_render_arena);
+    TextMeasureCounter flex_intrinsic_measure_counter;
+    TextMeasureProvider flex_intrinsic_measure{
+        counting_fixed_measure, &flex_intrinsic_measure_counter};
+    LayoutEngine flex_intrinsic_layout_engine(flex_intrinsic_resolver, flex_intrinsic_measure);
+    MonotonicArena flex_intrinsic_probe_arena;
+    auto flex_intrinsic_probe_tree = flex_intrinsic_layout_engine.layout(
+        *flex_intrinsic_render_tree, 320, flex_intrinsic_probe_arena);
+    (void)flex_intrinsic_probe_tree;
+    const std::size_t flex_intrinsic_measure_calls = flex_intrinsic_measure_counter.calls;
+    print_result("flex_nonwrap_intrinsic_layout", iterations, average_microseconds(iterations, [&] {
+        flex_intrinsic_measure_counter.calls = 0;
+        LayoutEngine layout(flex_intrinsic_resolver, flex_intrinsic_measure);
+        MonotonicArena layout_arena;
+        auto layout_tree = layout.layout(*flex_intrinsic_render_tree, 320, layout_arena);
+        (void)layout_tree;
+    }));
+    std::cout << "flex_nonwrap_intrinsic_layout text_measure_calls_per_layout="
+              << flex_intrinsic_measure_calls << " layout_boxes="
+              << count_layout_boxes(*flex_intrinsic_probe_tree) << '\n';
+
+    auto select_document = html_parser.parse(make_select_html(256));
+    Node* benchmark_select = find_first_element_by_id(*select_document, "benchmark-select");
+    if (benchmark_select == nullptr) {
+        throw std::runtime_error("select benchmark fixture was not parsed");
+    }
+    const int benchmark_select_options = form_control_option_count(*benchmark_select);
+    int benchmark_select_index = 0;
+    print_result("form_select_set_index", iterations, average_microseconds(iterations, [&] {
+        set_form_control_selected_index(*benchmark_select,
+                                        benchmark_select_index++ % benchmark_select_options);
+    }));
+    std::cout << "form_select_set_index options=" << benchmark_select_options << '\n';
 
     print_result("render_tree", iterations, average_microseconds(iterations, [&] {
         StyleResolver resolver(stylesheet);
@@ -738,6 +830,42 @@ int run_render_core_microbench(int argc, char** argv) {
         }
     }));
 
+    // Keep a reproducible cost envelope for fragmented invalidation inputs.
+    // The coalescer intentionally falls back to one viewport rect above its
+    // pairwise threshold, so this also guards the bounded-work contract.
+    for (const std::size_t fragmented_count : {100U, 500U, 1000U}) {
+        std::vector<Rect> fragmented_dirty_rects;
+        fragmented_dirty_rects.reserve(fragmented_count);
+        for (std::size_t index = 0; index < fragmented_count; ++index) {
+            const int x = static_cast<int>((index * 17U) % 172U);
+            const int y = static_cast<int>((index * 29U) % 320U);
+            fragmented_dirty_rects.push_back(Rect{x, y, 2, 2});
+        }
+        const DirtyRectCoalescingOptions fragmented_options{128, 256, 10};
+        print_result(("dirty_rect_coalescing_fragmented_" + std::to_string(fragmented_count)).c_str(),
+                     iterations,
+                     average_microseconds(iterations, [&] {
+                         coalesce_dirty_rects_into(fragmented_dirty_rects.data(),
+                                                   fragmented_dirty_rects.size(),
+                                                   Rect{0, 0, 172, 320},
+                                                   fragmented_options,
+                                                   coalesced_dirty_rects);
+                         if (coalesced_dirty_rects.empty()) {
+                             throw std::runtime_error("fragmented dirty rectangles produced no output");
+                         }
+                     }));
+        DirtyRectCoalescingResult fragmented_result;
+        coalesce_dirty_rects_into(fragmented_dirty_rects.data(),
+                                  fragmented_dirty_rects.size(),
+                                  Rect{0, 0, 172, 320},
+                                  fragmented_options,
+                                  coalesced_dirty_rects,
+                                  &fragmented_result);
+        std::cout << "dirty_rect_coalescing_fragmented_" << fragmented_count
+                  << " output_rects=" << coalesced_dirty_rects.size()
+                  << " forced_merges=" << fragmented_result.forced_merges << '\n';
+    }
+
     print_result("scroll_blit_plan", iterations, average_microseconds(iterations, [&] {
         const ScrollBlitPlan plan = plan_vertical_scroll_blit(320, 240, 720, 96, 112);
         (void)plan;
@@ -940,6 +1068,35 @@ int run_render_core_microbench(int argc, char** argv) {
         auto typography_layer_tree = typography_layer_builder.build(*typography_layout_tree);
         (void)typography_layer_tree;
     }));
+
+    // Keep the candidate-measurement cost visible as text length grows. This
+    // is a diagnostic baseline for a future equivalent-measurement optimization.
+    const std::string anywhere_benchmark_text(2048, 'W');
+    for (const std::size_t width : {96U, 65536U}) {
+        const std::string name_prefix = width == 96U
+            ? "text_anywhere_wrap_"
+            : "text_anywhere_wrap_wide_";
+        const int benchmark_iterations = width == 65536U
+            ? std::max(1, iterations / 10)
+            : iterations;
+        for (const std::size_t length : {32U, 128U, 512U, 2048U}) {
+            const std::string text = anywhere_benchmark_text.substr(0, length);
+            volatile std::size_t line_count = 0;
+            print_result((name_prefix + std::to_string(length)).c_str(),
+                         benchmark_iterations,
+                         average_microseconds(benchmark_iterations, [&] {
+                             const auto lines = wrap_text_anywhere(fixed_text_measure(),
+                                                                   text,
+                                                                   12,
+                                                                   400,
+                                                                   0,
+                                                                   0,
+                                                                   static_cast<int>(width));
+                             line_count = lines.size();
+                         }));
+            (void)line_count;
+        }
+    }
 
     auto style_document = html_parser.parse(
         "<body><button id='pulse' class='pill'>Open</button><strong id='frame'>01</strong></body>");

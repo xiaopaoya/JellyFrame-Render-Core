@@ -1,6 +1,6 @@
 # Render Core 活动路线图
 
-> 最后更新：2026-09-08；适用版本：0.6.2 开发线
+> 最后更新：2026-09-17；适用版本：0.6.2 开发线
 
 本文只安排 Render Core 工作，不安排 JellyFrame App Runtime、设备 port、launcher
 策略、JerryScript 或 developer image。何时采用已发布的 Core 版本由其消费者决定。
@@ -8,15 +8,18 @@
 ## 当前开发线
 
 带签名的 `v0.6.0` 已建立 Core ABI `1`；带签名的 `v0.6.2` 是 Runtime 当前
-锁定依赖。当前 `master` 是 `0.6.2` release 之后的开发线。合并提交
-`0d04dfca` 已从 JellyFrame 主线 `8630bf6c` 同步经审阅的 Core 更新，包括后续
-runtime/resource 与 dirty-region 审查修复。该线保留独立 build/install CI 与
-确定性源码归档，并完成以下作者能力子集：
+锁定依赖。当前 `master` 是 `0.6.2` release 之后的开发线。最新同步从 JellyFrame
+主线导入截至 `b1196f67` 的经审阅 Core 改动，取代此前 `0d04dfca` / `8630bf6c`
+同步点。该源版本已通过 monorepo 的桌面、scripting、sanitizer 与 standalone Core
+CI，并已进入验收通过的 WS147 `0.6.2-ws147.2` Developer Image。独立仓库继续
+保留自身 build/install CI 与确定性源码归档，并新增：
 
 - LTR horizontal writing mode 的逻辑尺寸、间距与 inset 映射。
 - 常用 flex/grid placement（`order`、`align-self`、`place-*`、有界 row）。
 - 有界 sRGB `hsl()` / `hsla()` 与常用图片背景定位。
 - 文字 `letter-spacing`、scalar-safe `overflow-wrap: anywhere` 与 ellipsis。
+- 有界 dirty-region 与圆角光栅热路径、缓存文本布局和 viewport-aware 单位。
+- command owner/span trace 插桩和 Windows CPU2D 对比 workload。
 
 `text-wrap: balance` 曾在历史提交 `0fa5c41` 中探索，但当前开发实现和能力表
 不包含它。旧 candidate evidence 仅作为历史上下文保留，不能作为当前分支的支持证据。
