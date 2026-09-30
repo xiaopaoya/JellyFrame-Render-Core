@@ -196,8 +196,15 @@ bool evaluate_media_feature(std::string_view condition, const CssParserOptions& 
         return false;
     }
     const std::string feature = trim(std::string_view(text).substr(0, colon));
+    const std::string value = trim(std::string_view(text).substr(colon + 1));
+    if (feature == "orientation") {
+        return value == (options.media_viewport_width >= options.media_viewport_height ? "landscape" : "portrait");
+    }
+    if (feature == "prefers-reduced-motion") {
+        return value == (options.prefers_reduced_motion ? "reduce" : "no-preference");
+    }
     int expected = 0;
-    if (!parse_media_length_px(std::string_view(text).substr(colon + 1), expected)) {
+    if (!parse_media_length_px(value, expected)) {
         return false;
     }
 
@@ -223,6 +230,12 @@ bool is_recognized_media_feature(std::string_view condition) {
         return false;
     }
     const std::string feature = trim(std::string_view(text).substr(0, colon));
+    if (feature == "orientation" || feature == "prefers-reduced-motion") {
+        const std::string value = trim(std::string_view(text).substr(colon + 1));
+        return feature == "orientation"
+            ? (value == "landscape" || value == "portrait")
+            : (value == "reduce" || value == "no-preference");
+    }
     if (feature != "min-width" && feature != "max-width" &&
         feature != "min-height" && feature != "max-height") {
         return false;
