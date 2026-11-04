@@ -24,6 +24,8 @@ struct CssParserOptions {
     bool parse_supports_blocks = true;
     int media_viewport_width = 360;
     int media_viewport_height = 240;
+    // Host accessibility/user-preference hint used by prefers-reduced-motion.
+    bool prefers_reduced_motion = false;
     DiagnosticSink* diagnostics = nullptr;
 };
 

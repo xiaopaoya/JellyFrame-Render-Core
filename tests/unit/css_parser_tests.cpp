@@ -305,6 +305,22 @@ void conditional_media_queries_respect_viewport() {
     check(stylesheet[2].selector == ".listed", "comma media selector");
 }
 
+void preference_media_queries_cover_orientation_and_reduced_motion() {
+    CssParser parser;
+    CssParserOptions options;
+    options.media_viewport_width = 320;
+    options.media_viewport_height = 480;
+    options.prefers_reduced_motion = true;
+    const Stylesheet stylesheet = parser.parse(
+        "@media (orientation: portrait) { .portrait { color: red; } }"
+        "@media (orientation: landscape) { .landscape { color: blue; } }"
+        "@media (prefers-reduced-motion: reduce) { .calm { color: blue; } }"
+        "@media (prefers-reduced-motion: no-preference) { .motion { color: green; } }",
+        options);
+    check(stylesheet.size() == 2, "preference media only keeps matching queries");
+    check(stylesheet[0].selector == ".portrait", "portrait media selector");
+    check(stylesheet[1].selector == ".calm", "reduced motion media selector");
+}
 void conditional_media_queries_reject_nonrepresentable_lengths() {
     CssParser parser;
     CssParserOptions options;
@@ -1880,6 +1896,7 @@ int main() {
         flattens_layers_and_plain_media();
         conditional_media_queries_respect_viewport();
         conditional_media_queries_reject_nonrepresentable_lengths();
+        preference_media_queries_cover_orientation_and_reduced_motion();
         preserves_declaration_fallback_order();
         resolves_simple_css_custom_properties();
         custom_property_expansion_is_bounded();
