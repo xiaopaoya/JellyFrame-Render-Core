@@ -1,6 +1,6 @@
 # Render Core Release And Extraction Policy
 
-> Last updated: 2026-09-17; Applies to: 0.6.2 development line
+> Last updated: 2026-11-04; Applies to: 0.7.0 development line
 
 This policy governs the transition from the current monorepo boundary to an independently governed `jellyframe-render-core` project. It complements [engine_architecture.md](engine_architecture.md); it is not a user-facing app compatibility promise.
 
@@ -19,7 +19,10 @@ the existing license and contributor history unchanged. Its first signed
 `v0.6.0` release established the deterministic source archive and SHA-256
 sidecar; the Runtime currently accepts signed `v0.6.2`. Its `master` now contains
 the post-release development synchronization through JellyFrame `b1196f67`;
-this development head is not a Runtime dependency. No license change,
+the current `0.7.0` development line uses Core ABI `2` because the new
+`CssParserOptions` preference field changes its public layout on 32-bit targets.
+The signed `v0.6.2` artifact remains ABI `1` and is unchanged. This development
+head is not a Runtime dependency. No license change,
 contributor-policy change or open-source intent is implied. The Runtime
 accepts a release only through an explicit dependency-lock update;
 its in-tree provider remains the default for synchronized development only.
@@ -55,6 +58,8 @@ candidate archive. A signed release is still created from the reviewed tag.
   pre-release contracts may be removed rather than preserved as aliases.
 - ABI changes are independent of package version and increment only when the
   exported CMake/public-header binary contract is incompatible.
+- The `0.7.0` development line uses ABI `2`; the previously published `0.6.2`
+  package remains ABI `1`.
 - JFDP follows `JFDP/<major>`; a breaking wire change increments the major.
 
 ## Consumer Locks

@@ -45,7 +45,7 @@ the public headers and the generated capability profile. The package is a
 build artifact boundary; it does not include App Runtime, JerryScript, ports or
 device protocols.
 
-For Core ABI `1`, all installed `render_core/*.h` headers are the C++ consumer
+For Core ABI `2`, all installed `render_core/*.h` headers are the C++ consumer
 surface. Consumers include those installed paths and link the exported target;
 they must not reach into a checkout through `src/` paths or compile Core source
 files themselves. There is currently no separate C ABI or private-header tier.
@@ -58,8 +58,8 @@ configuration, maintainers can create a standalone source archive:
 
 ```powershell
 python project_tools\package_render_core_source.py --output-dir build\dist
-tar -xzf build\dist\jellyframe-render-core-0.6.2.tar.gz -C build\unpacked
-cmake -S build\unpacked\jellyframe-render-core-0.6.2 -B build\core-from-archive
+tar -xzf build\dist\jellyframe-render-core-0.7.0.tar.gz -C build\unpacked
+cmake -S build\unpacked\jellyframe-render-core-0.7.0 -B build\core-from-archive
 cmake --build build\core-from-archive --config Release --parallel
 ctest --test-dir build\core-from-archive -C Release --output-on-failure
 ```
