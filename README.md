@@ -1,6 +1,6 @@
 # JellyFrame Render Core
 
-> Last updated: 2026-09-17; Applies to: 0.6.2 development line
+> Last updated: 2026-11-04; Applies to: 0.7.0 development line
 
 JellyFrame Render Core is a platform-neutral, modular HTML/CSS subset,
 document/layout pipeline and CPU software renderer for bounded embedded and
@@ -53,7 +53,7 @@ directories contain platform-neutral Core maintenance material.
 
 ## C++ Integration Surface
 
-For Core ABI `1`, every installed header below `render_core/` is part of the
+For Core ABI `2`, every installed header below `render_core/` is part of the
 supported C++ integration surface. A host includes those installed paths and
 links `JellyFrame::jellyframe_render_core`; it must not include Core files by
 repository-relative `src/` paths or compile Core source files itself. This is

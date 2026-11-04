@@ -1,6 +1,6 @@
 # Render Core 发布与拆仓政策
 
-> 最后更新：2026-09-17；适用版本：0.6.2 开发线
+> 最后更新：2026-11-04；适用版本：0.7.0 开发线
 
 本政策规定当前 monorepo 边界迁移到独立 `jellyframe-render-core` 工程的方式。它补充 [engine_architecture_zh.md](engine_architecture_zh.md)，不是面向 App 作者的兼容性承诺。
 
@@ -15,7 +15,7 @@
 ## 迁移状态
 
 保留历史的 `xiaopaoya/JellyFrame-Render-Core` 仓库保留现有许可证和贡献者历史。
-首个带签名的 `v0.6.0` release 建立了确定性 source archive 和 SHA-256 sidecar；Runtime 当前接纳带签名的 `v0.6.2`。独立仓库 `master` 已同步 JellyFrame `b1196f67` 之前的 release 后开发更新，但该开发头不是 Runtime dependency。这不表示许可证、贡献者政策或开源意向的改变。
+首个带签名的 `v0.6.0` release 建立了确定性 source archive 和 SHA-256 sidecar；Runtime 当前接纳带签名的 `v0.6.2`。当前 `0.7.0` 开发线使用 ABI `2`，因为新增的 `CssParserOptions` preference 字段会改变 32 位目标上的公开结构布局。已发布的 `v0.6.2` 工件仍为 ABI `1` 且保持不变。该开发头不是 Runtime dependency。这不表示许可证、贡献者政策或开源意向的改变。
 Runtime 只能通过显式 dependency-lock 更新接纳 release；in-tree provider 仅继续作为同步开发的默认路径。
 Runtime CI 会下载已发布 archive、校验经审阅的 SHA-256、安装并运行锁定 package-consumer regression；
 这可避免误把 monorepo export 当成已发布 dependency。
@@ -37,6 +37,7 @@ tag 签名建立发布权威；source manifest/checksum 建立 artifact identity
 - patch 仅修复行为、鲁棒性或性能，不能改变已文档化的 Core 公开契约或 profile schema。
 - `1.0` 前若必须破坏 Core API、feature-profile 或渲染契约，使用新 minor line 并给出明确 release note；错误的预发布契约可以移除，不保留 alias。
 - ABI 与 package version 独立；只有导出的 CMake/公开头二进制契约不兼容时才递增 ABI。
+- `0.7.0` 开发线使用 ABI `2`；此前发布的 `0.6.2` package 仍为 ABI `1`。
 - JFDP 使用 `JFDP/<major>`；破坏 wire 兼容时升 major。
 
 ## Consumer Lock
