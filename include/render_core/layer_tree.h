@@ -131,6 +131,7 @@ struct LayerTreeBuilderOptions {
     ImageHandleResolver image_resolver;
     ScrollOffsetResolver scroll_resolver;
     TextMeasureProvider text_measure;
+    const TextSystem* text_system = nullptr;
     DisplayCommandTraceOwnerResolver trace_owner_resolver;
     bool paint_scroll_indicators = false;
 };

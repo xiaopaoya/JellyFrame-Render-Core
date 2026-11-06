@@ -1,6 +1,6 @@
 # Render Core 发布与拆仓政策
 
-> 最后更新：2026-11-04；适用版本：0.7.0 开发线
+> 最后更新：2026-11-06；适用版本：0.8.0 开发线
 
 本政策规定当前 monorepo 边界迁移到独立 `jellyframe-render-core` 工程的方式。它补充 [engine_architecture_zh.md](engine_architecture_zh.md)，不是面向 App 作者的兼容性承诺。
 
@@ -37,7 +37,7 @@ tag 签名建立发布权威；source manifest/checksum 建立 artifact identity
 - patch 仅修复行为、鲁棒性或性能，不能改变已文档化的 Core 公开契约或 profile schema。
 - `1.0` 前若必须破坏 Core API、feature-profile 或渲染契约，使用新 minor line 并给出明确 release note；错误的预发布契约可以移除，不保留 alias。
 - ABI 与 package version 独立；只有导出的 CMake/公开头二进制契约不兼容时才递增 ABI。
-- `0.7.0` 开发线使用 ABI `2`；此前发布的 `0.6.2` package 仍为 ABI `1`。
+- `0.7.0` 开发线使用 ABI `2`；`0.8.0` 候选使用 ABI `3`；此前发布的 `0.6.2` package 仍为 ABI `1`。
 - JFDP 使用 `JFDP/<major>`；破坏 wire 兼容时升 major。
 
 ## Consumer Lock

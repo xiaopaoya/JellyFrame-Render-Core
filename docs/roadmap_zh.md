@@ -1,15 +1,16 @@
 # Render Core 活动路线图
 
-> 最后更新：2026-11-04；适用版本：0.7.0 开发线
+> 最后更新：2026-11-06；适用版本：0.8.0 开发线
 
 本文只安排 Render Core 工作，不安排 JellyFrame App Runtime、设备 port、launcher
 策略、JerryScript 或 developer image。何时采用已发布的 Core 版本由其消费者决定。
 
 ## 当前开发线
 
-带签名的 `v0.6.0` 已建立 Core ABI `1`；带签名的 `v0.6.2` 是 Runtime 当前
-锁定依赖。当前 `master` 是 Core ABI `2` 的 `0.7.0` 开发线，因为
-`CssParserOptions` 新增 preference 字段会改变 32 位目标上的公开结构布局。最新同步从
+带签名的 `v0.6.0` 已建立 Core ABI `1`；带签名的 `v0.6.2` 是 Runtime 当前锁定依赖。
+已发布依赖。`0.7.0` 开发线使用 ABI `2`，因为 `CssParserOptions` 新增 preference
+字段会改变 32 位目标上的公开结构布局。当前 `0.8.0` 候选使用 ABI `3`，用于
+Core-owned font/text 协同迁移及其公开结构、renderer 与 Canvas2D API 变化。最近一次同步从
 JellyFrame 主线导入截至 `b1196f67` 的经审阅 Core 改动，取代此前 `0d04dfca` / `8630bf6c`
 同步点。该源版本已通过 monorepo 的桌面、scripting、sanitizer 与 standalone Core
 CI，并已进入验收通过的 WS147 `0.6.2-ws147.2` Developer Image。独立仓库继续

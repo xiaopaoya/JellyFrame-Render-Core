@@ -1,6 +1,6 @@
 # Render Core Active Roadmap
 
-> Last updated: 2026-11-04; Applies to: 0.7.0 development line
+> Last updated: 2026-11-06; Applies to: 0.8.0 development line
 
 This is the Core-only planning document. It does not schedule JellyFrame App
 Runtime, device ports, launcher policy, JerryScript or developer-image work.
@@ -9,9 +9,10 @@ Those consumers decide when a released Core version is adopted.
 ## Current Development Line
 
 Signed `v0.6.0` established Core ABI `1`; signed `v0.6.2` is the Runtime's
-current locked dependency. The current `master` is the `0.7.0` development line
-with Core ABI `2`, because the `CssParserOptions` preference field changes its
-public layout on 32-bit targets. The latest synchronization imports reviewed
+currently published dependency. The `0.7.0` line uses ABI `2` because the
+`CssParserOptions` preference field changes its public layout on 32-bit targets.
+The `0.8.0` candidate uses ABI `3` for the coordinated Core-owned font/text
+migration and its public layout, renderer, and Canvas2D API changes. The latest synchronization imports reviewed
 Core changes from JellyFrame mainline through `b1196f67`, superseding the earlier `0d04dfca` /
 `8630bf6c` synchronization point. This source revision passed the monorepo's
 desktop, scripting, sanitizer and standalone-Core CI and was integrated into the
