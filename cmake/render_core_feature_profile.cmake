@@ -3,7 +3,7 @@
 # resource and is not loaded by the renderer at runtime.
 
 if(NOT DEFINED JELLYFRAME_RENDER_CORE_ENGINE_ABI)
-    set(JELLYFRAME_RENDER_CORE_ENGINE_ABI "2" CACHE STRING
+    set(JELLYFRAME_RENDER_CORE_ENGINE_ABI "3" CACHE STRING
         "Render Core public engine ABI version")
 endif()
 
