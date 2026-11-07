@@ -1,7 +1,7 @@
 """Replay an externally supplied frozen HTML dimension corpus on a built Core.
 
 Writes a diagnostic report; differences are never reclassified as passing tests.
-Windows/Clang driver for ABI 3. The corpus and its expected values are not edited.
+Windows/Clang driver for the ratio-state candidate. Frozen expectations are not edited.
 """
 import argparse
 from decimal import Decimal, ROUND_HALF_UP
@@ -39,7 +39,7 @@ def main():
         program.append('std::cout << ' + literal(case['id']) +
                        ' << " " << s.width << " " << s.height << " " << s.width_percent'
                        ' << " " << s.height_percent << " " << s.aspect_ratio_width'
-                       ' << " " << s.aspect_ratio_height << "\\n";}')
+                       ' << " " << s.aspect_ratio_height << " " << s.aspect_ratio_auto << "\\n";}')
     program.append('}')
     source.write_text('\n'.join(program), encoding='utf8')
     executable = source.with_suffix('.exe')
@@ -51,7 +51,7 @@ def main():
     checks = []
     rounded = []
     for case in cases:
-        w, h, wp, hp, rw, rh = actuals[case['id']]
+        w, h, wp, hp, rw, rh, automatic = actuals[case['id']]
         for axis, px, percent in [('Width', w, wp), ('Height', h, hp)]:
             expected = case['expected' + axis]
             kind = expected['kind']
@@ -76,13 +76,15 @@ def main():
             a, b = map(Fraction, expected)
             match = ((rw == 0) == (a == 0) and (rh == 0) == (b == 0) and rw * b == rh * a)
         checks.append(dict(id=case['id'], property='ratio', match=match, frozen=expected, actual=[rw, rh]))
+        checks.append(dict(id=case['id'], property='ratioAuto', match=bool(automatic) == case['ratioAuto'],
+                           frozen=case['ratioAuto'], actual=bool(automatic)))
     report = dict(corpusSHA256=hashlib.sha256(args.cases.read_bytes()).hexdigest(),
                   styleSourceSHA256=hashlib.sha256((root / 'src/style.cpp').read_bytes()).hexdigest(),
                   librarySHA256=hashlib.sha256((args.build_dir / 'jellyframe_render_core.lib').read_bytes()).hexdigest(),
                   coreHead=subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip(),
                   checks=checks, total=len(checks), matches=sum(c['match'] for c in checks),
                   differences=[c for c in checks if not c['match']], scalarPrecisionDifferences=rounded,
-                  unavailable=['ABI 3 Style does not distinguish automatic from authored aspect ratios'],
+                  unavailable=[],
                   scope='Scalar computed values; no natural image geometry, device or performance acceptance')
     args.output.write_text(json.dumps(report, ensure_ascii=True, indent=2) + '\n', encoding='utf8')
     print(json.dumps({key: report[key] for key in ('total', 'matches', 'differences', 'scalarPrecisionDifferences')}, indent=2))

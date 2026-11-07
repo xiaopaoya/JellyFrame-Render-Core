@@ -1,0 +1,33 @@
+{
+  "files": {
+    "cmake/render_core_version.cmake": "df4d6001eba144afcdd65114d0337efa51afa3caa3bef11de3d2166ee6655e18",
+    "cmake/render_core_source_hash.cmake": "28e5b43733f979de38e26bac5f7edfa66b44d06c95a88e8474be81c2e6cc3585",
+    "include/render_core/style.h": "d5131f73ca2102cb745ffde11ca39cd3610f5890f9a283771b4a8e712c0428b9",
+    "src/css_aspect_ratio.cpp": "7cfafe37a3a3c3b173680af08c368c458f77f42939e5ecbd29299e6b6ea4a1d2",
+    "src/css_aspect_ratio.h": "d4a054efec39123ed1b2bb2dde461c587c90a0d72d4e28315304af6f7c8f25a4",
+    "src/css_selector_tokens.cpp": "f408e37f230a68bb33f60f8ace4a98a06e882205e36f36c2c70094909895c988",
+    "src/css_selector_tokens.h": "d9d91616fc49dac5443afdcff34cfd1f116d651bc6ebd3db7c962c33058e8785",
+    "src/css_ratio_tokens.h": "af81aabb5f27fbf21d4975a57ea5fc6d4be1d6e936903e3a0bf587366381b330",
+    "src/style.cpp": "2f433b9b6060245be3bde47600b1bd14035cd0f5ed843fd4caeb3682f59e4333",
+    "src/render_tree.cpp": "184baef01c79e24063e705dbee9a0850efe0a32d4bbe5a0851d866a576adf709",
+    "src/style_repaint.cpp": "b32fb127cf40b8e327f2d5fad1bb290809fa6bd5da74dd19bed19e36e5be6805",
+    "src/css_parser.cpp": "c74bae9c8e6cf3738b0efd040fa170abfcf43ce399b688394f4eca3b9e092b0a",
+    "tests/unit/aspect_ratio_literal_tests.cpp": "0b6fbf0f6969e5ef0386b0839ef94347a01c49ed7b1a03a93f68c663e148cc82",
+    "tests/unit/css_aspect_ratio_source_cases.h": "7a7243a519199d76af509d44c09b2585e5504bf1169d30fc6e4d5a245ca9c331",
+    "tests/unit/css_aspect_ratio_numeric_cases.h": "415fb2bc823595a600baa04c2e3e2a2f27d7efa0d9ebc09bf81ea966414de935"
+  },
+  "syntaxCases": 80,
+  "numericCases": 2660,
+  "version": "0.9.0-dev",
+  "abi": 4,
+  "styleBytesWindowsRelease": 776,
+  "coreFullCtest": "5/5",
+  "coreMinimalCtest": "5/5",
+  "installedConsumer": true,
+  "runtimeFirstProbe": {
+    "passed": 40,
+    "failed": 17,
+    "cause": "0.8 app manifests rejected by the configured 0.9 development Core line; lockEnforced=false source override"
+  },
+  "scope": "Literal ratios/state/inheritance only; 18 scalar precision differences remain; no MCU acceptance"
+}

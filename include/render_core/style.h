@@ -267,6 +267,7 @@ struct Style {
     Display display = Display::Inline;
     bool visibility_hidden = false;
     bool visibility_specified = false;
+    bool aspect_ratio_auto = true;
     Color color{0, 0, 0, 255};
     bool color_specified = false;
     BackgroundPaintKind background_paint = BackgroundPaintKind::Solid;

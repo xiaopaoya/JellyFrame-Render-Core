@@ -3,6 +3,7 @@
 #include "render_core/form_control.h"
 #include "render_core/feature_config.h"
 #include "render_core/text_backend.h"
+#include "css_aspect_ratio.h"
 
 #include <algorithm>
 #include <array>
@@ -13,7 +14,6 @@
 #include <cerrno>
 #include <cstring>
 #include <limits>
-#include <numeric>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -466,45 +466,6 @@ bool parse_integer(const std::string& raw_value, int& output) {
         return false;
     }
     output = static_cast<int>(parsed);
-    return true;
-}
-
-bool parse_positive_ratio_number(const std::string& raw_value, int& output) {
-    float parsed = 0.0F;
-    if (!parse_float(raw_value, parsed) || parsed <= 0.0F) {
-        return false;
-    }
-    if (parsed >= 1000.0F) {
-        output = 1000000;
-        return true;
-    }
-    return round_finite_float_to_int(parsed * 1000.0F, output) && output > 0;
-}
-
-bool parse_aspect_ratio(const std::string& raw_value, int& width, int& height) {
-    std::string value = lowercase(trim(raw_value));
-    if (value.rfind("auto", 0) == 0) {
-        value = trim(std::string_view(value).substr(4));
-    }
-    const std::size_t slash = value.find('/');
-    if (slash == std::string::npos) {
-        int single = 0;
-        if (!parse_positive_ratio_number(value, single)) {
-            return false;
-        }
-        width = single;
-        height = 1000;
-        return true;
-    }
-
-    int parsed_width = 0;
-    int parsed_height = 0;
-    if (!parse_positive_ratio_number(value.substr(0, slash), parsed_width) ||
-        !parse_positive_ratio_number(value.substr(slash + 1), parsed_height)) {
-        return false;
-    }
-    width = parsed_width;
-    height = parsed_height;
     return true;
 }
 
@@ -3307,19 +3268,11 @@ DeclarationApplyResult apply_sizing_declaration(Style& style,
         return apply_length_or_percent(style.max_height, style.max_height_percent, value, style.font_size, context);
     }
     if (property == "aspect-ratio") {
-        int ratio_width = 0;
-        int ratio_height = 0;
-        const auto keyword = lowercase(trim(value));
-        if (keyword == "auto" || keyword == "initial" || keyword == "unset") {
-            style.aspect_ratio_width = 0;
-            style.aspect_ratio_height = 0;
-            return DeclarationApplyResult::Applied;
-        }
-        if (!parse_aspect_ratio(value, ratio_width, ratio_height)) {
-            return DeclarationApplyResult::Invalid;
-        }
-        style.aspect_ratio_width = ratio_width;
-        style.aspect_ratio_height = ratio_height;
+        detail::CssAspectRatio ratio;
+        if (!detail::parse_css_aspect_ratio(value, ratio)) return DeclarationApplyResult::Invalid;
+        style.aspect_ratio_width = ratio.width;
+        style.aspect_ratio_height = ratio.height;
+        style.aspect_ratio_auto = ratio.automatic;
         return DeclarationApplyResult::Applied;
     }
     return DeclarationApplyResult::Unhandled;
@@ -5851,60 +5804,20 @@ Style StyleResolver::resolve_with_custom_properties(const Node& node,
             HtmlDimension width, height;
             const bool has_width = parse_dimension(node.attribute("width"), width, canvas);
             const bool has_height = parse_dimension(node.attribute("height"), height, canvas);
-            const auto apply_ratio = [&](const HtmlDimension& ratio_width_value,
-                                         const HtmlDimension& ratio_height_value) {
-                if (ratio_width_value.value == 0.0 && ratio_height_value.value == 0.0) {
-                    style.aspect_ratio_width = 0;
-                    style.aspect_ratio_height = 0;
-                    return;
-                }
-                if (ratio_width_value.value == 0.0 || ratio_height_value.value == 0.0) {
-                    style.aspect_ratio_width = ratio_width_value.value == 0.0 ? 0 : 1000;
-                    style.aspect_ratio_height = ratio_height_value.value == 0.0 ? 0 : 1000;
-                    return;
-                }
-                // Reduce decimal coefficients before scaling. Do not use the
-                // CSS parser's per-component clamp: it can turn a large 2:1
-                // pair into 1:1 or discard a representable tiny ratio.
-                const auto decimal = [](std::string_view number, std::uint64_t& coefficient, int& exponent) {
-                    const auto point = number.find('.');
-                    exponent = point == std::string_view::npos ? 0 :
-                        -static_cast<int>(number.size() - point - 1);
-                    while (!number.empty() && (number.back() == '0' || number.back() == '.')) {
-                        if (number.back() == '0') ++exponent;
-                        number.remove_suffix(1);
-                    }
-                    coefficient = 0;
-                    for (const char c : number) {
-                        if (c == '.' || c == '+') continue;
-                        const auto digit = static_cast<unsigned>(c - '0');
-                        if (coefficient > (std::numeric_limits<std::uint64_t>::max() - digit) / 10) return false;
-                        coefficient = coefficient * 10 + digit;
-                    }
-                    return coefficient != 0;
-                };
-                std::uint64_t numerator = 0, denominator = 0;
-                int numerator_exp = 0, denominator_exp = 0;
-                if (!decimal(ratio_width_value.number, numerator, numerator_exp) ||
-                    !decimal(ratio_height_value.number, denominator, denominator_exp)) return;
-                const auto divisor = std::gcd(numerator, denominator);
-                numerator /= divisor;
-                denominator /= divisor;
-                int exponent = numerator_exp - denominator_exp;
-                while (exponent != 0) {
-                    auto& grow = exponent > 0 ? numerator : denominator;
-                    auto& shrink = exponent > 0 ? denominator : numerator;
-                    const auto factor = std::gcd<std::uint64_t>(shrink, 10);
-                    shrink /= factor;
-                    const auto multiplier = 10 / factor;
-                    if (grow > static_cast<std::uint64_t>(std::numeric_limits<int>::max()) / multiplier) return;
-                    grow *= multiplier;
-                    exponent += exponent > 0 ? -1 : 1;
-                }
-                if (numerator > static_cast<std::uint64_t>(std::numeric_limits<int>::max()) ||
-                    denominator > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) return;
-                style.aspect_ratio_width = static_cast<int>(numerator);
-                style.aspect_ratio_height = static_cast<int>(denominator);
+            const auto apply_ratio = [&](const HtmlDimension& width_value, const HtmlDimension& height_value) {
+                auto width_number = width_value.number;
+                auto height_number = height_value.number;
+                if (!width_number.empty() && width_number.back() == '.') width_number.remove_suffix(1);
+                if (!height_number.empty() && height_number.back() == '.') height_number.remove_suffix(1);
+                char source[127];
+                auto* end = std::copy(width_number.begin(), width_number.end(), source);
+                *end++ = '/';
+                end = std::copy(height_number.begin(), height_number.end(), end);
+                detail::CssAspectRatio ratio;
+                if (!detail::parse_css_aspect_ratio(std::string_view(source, end - source), ratio)) return;
+                style.aspect_ratio_width = ratio.width;
+                style.aspect_ratio_height = ratio.height;
+                style.aspect_ratio_auto = true;
             };
             if (sized_element) {
                 int parsed_width = 0;

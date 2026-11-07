@@ -1,4 +1,5 @@
 ﻿#include "render_core/css_parser.h"
+#include "css_aspect_ratio.h"
 #include "render_core/feature_config.h"
 
 #include <algorithm>
@@ -963,8 +964,8 @@ bool is_supported_declaration_feature(std::string_view feature) {
         return is_supported_border_shorthand_value(value);
     }
     if (property == "aspect-ratio") {
-        return value.find('/') != std::string::npos ||
-               is_number_with_suffix(value, {""}, false);
+        detail::CssAspectRatio ratio;
+        return detail::parse_css_aspect_ratio(value, ratio);
     }
     if (property == "font-weight") {
         return supported_keyword(value, {"normal", "bold", "bolder", "lighter"}) ||

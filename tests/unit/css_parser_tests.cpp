@@ -1212,7 +1212,7 @@ void grid_and_aspect_ratio_properties_apply() {
     check(card_style.grid_column_start == 1 && card_style.grid_column_span == 2 &&
               card_style.grid_row_start == 1 && card_style.grid_row_span == 2,
           "numeric grid placement and span parse");
-    check(media_style.aspect_ratio_width == 1500 && media_style.aspect_ratio_height == 1000,
+    check(media_style.aspect_ratio_width == 3 && media_style.aspect_ratio_height == 2 && media_style.aspect_ratio_auto,
           "aspect ratio parsed");
 }
 

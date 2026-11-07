@@ -40,6 +40,7 @@ bool layout_fields_equal(const Style& left, const Style& right) {
         left.max_height_percent == right.max_height_percent &&
         left.aspect_ratio_width == right.aspect_ratio_width &&
         left.aspect_ratio_height == right.aspect_ratio_height &&
+        left.aspect_ratio_auto == right.aspect_ratio_auto &&
         left.font_size == right.font_size &&
         left.font_size_specified == right.font_size_specified &&
         left.font_weight == right.font_weight &&

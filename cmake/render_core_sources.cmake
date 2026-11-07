@@ -13,6 +13,8 @@ endif()
 set(JELLYFRAME_RENDER_CORE_CORE_DOCUMENT_SOURCES
     src/arena.cpp
     src/css_parser.cpp
+    src/css_aspect_ratio.cpp
+    src/css_selector_tokens.cpp
     src/document_script.cpp
     src/document_style.cpp
     src/dom.cpp

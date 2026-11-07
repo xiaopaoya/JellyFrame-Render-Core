@@ -139,7 +139,7 @@ void html_dimension_attributes_are_low_priority_sizing_hints() {
     check(ordinary && ordinary->style.width == -1 && ordinary->style.height == -1,
           "dimension attributes on ordinary elements are ignored");
     check(css && css->style.width == 12 && css->style.height == 7 &&
-              css->style.aspect_ratio_width == 3000 && css->style.aspect_ratio_height == 2000,
+              css->style.aspect_ratio_width == 3 && css->style.aspect_ratio_height == 2 && !css->style.aspect_ratio_auto,
           "author CSS overrides HTML dimension hints");
     check(invalid && invalid->style.width == -1 && invalid->style.height == 24,
           "invalid dimension hints are rejected independently");
@@ -184,7 +184,7 @@ void html_dimension_attributes_are_low_priority_sizing_hints() {
           "canvas dimensions contribute a ratio without becoming CSS sizes");
     check(negative && negative->style.aspect_ratio_width == 0 && negative->style.aspect_ratio_height == 0,
           "negative canvas dimensions are rejected");
-    check(zero && zero->style.aspect_ratio_width == 0 && zero->style.aspect_ratio_height == 1000,
+    check(zero && zero->style.aspect_ratio_width == 0 && zero->style.aspect_ratio_height == 1,
           "zero dimensions retain a representable degenerate ratio");
     const auto* tiny = find_fractional(*fractional_tree, "tiny");
     const auto* large = find_fractional(*fractional_tree, "large");

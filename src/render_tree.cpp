@@ -1,6 +1,7 @@
 ﻿#include "render_core/render_tree.h"
 
 #include "render_core/text_normalization.h"
+#include "css_aspect_ratio.h"
 
 #include <algorithm>
 #include <utility>
@@ -66,6 +67,7 @@ Style inherit_text_style(Style style, const Style& parent_style) {
 
 Style inherit_element_style(Style style, const Style& parent_style) {
     style = inherit_text_style(style, parent_style);
+    detail::finalize_inherited_aspect_ratio(style, &parent_style);
     if (!style.text_overflow_specified) {
         style.text_overflow_ellipsis = false;
     }
@@ -173,6 +175,7 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
     view->type = RenderObjectType::View;
     view->node = &document;
     view->style = style_resolver_.resolve(document, style_context);
+    detail::finalize_inherited_aspect_ratio(view->style, nullptr);
     apply_style_override(view->style, document, options_.style_overrides);
 
     std::size_t render_object_count = 1;
