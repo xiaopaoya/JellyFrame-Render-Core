@@ -4,6 +4,7 @@
 #include "render_core/feature_config.h"
 #include "render_core/text_backend.h"
 #include "css_aspect_ratio.h"
+#include "computed_size_values.h"
 
 #include <algorithm>
 #include <array>
@@ -3212,13 +3213,23 @@ enum class DeclarationApplyResult : std::uint8_t {
     Invalid,
 };
 
-DeclarationApplyResult apply_length_or_percent(int& length_px,
+DeclarationApplyResult apply_length_or_percent(Style& style, detail::SizeProperty property, int& length_px,
                                                int& percent,
                                                const std::string& value,
                                                int font_size,
                                                const LengthResolutionContext& context) {
+    const auto literal = trim(value);
+    char* end = nullptr;
+    const double number = std::strtod(literal.c_str(), &end);
+    const auto suffix = end ? lowercase(trim(end)) : std::string{};
+    const bool numeric = end && end != literal.c_str() && std::isfinite(number) && number >= 0;
     int parsed_percent = -1;
     if (parse_percentage_int(value, parsed_percent)) {
+        if (numeric && suffix == "%") {
+            return detail::apply_computed_size(style, property, detail::SizeKind::Percent, number)
+                ? DeclarationApplyResult::Applied : DeclarationApplyResult::Invalid;
+        }
+        style.computed_sizes.clear(property);
         length_px = -1;
         percent = parsed_percent;
         return DeclarationApplyResult::Applied;
@@ -3228,6 +3239,11 @@ DeclarationApplyResult apply_length_or_percent(int& length_px,
     if (!parse_length_px(value, px, font_size, context)) {
         return DeclarationApplyResult::Invalid;
     }
+    if (numeric && (suffix.empty() || suffix == "px")) {
+        return detail::apply_computed_size(style, property, detail::SizeKind::Pixels, number)
+            ? DeclarationApplyResult::Applied : DeclarationApplyResult::Invalid;
+    }
+    style.computed_sizes.clear(property);
     length_px = px;
     percent = -1;
     return DeclarationApplyResult::Applied;
@@ -3237,35 +3253,52 @@ DeclarationApplyResult apply_sizing_declaration(Style& style,
                                                 const std::string& property,
                                                 const std::string& value,
                                                 const LengthResolutionContext& context) {
+    const auto keyword = lowercase(trim(value));
+    const bool minimum = property == "min-width" || property == "min-height";
+    const bool maximum = property == "max-width" || property == "max-height";
+    if ((minimum || maximum) && (keyword == "initial" || keyword == "unset" ||
+        (minimum && keyword == "auto") || (maximum && keyword == "none"))) {
+        const auto slot = property == "min-width" ? detail::SizeProperty::MinWidth :
+            property == "min-height" ? detail::SizeProperty::MinHeight :
+            property == "max-width" ? detail::SizeProperty::MaxWidth : detail::SizeProperty::MaxHeight;
+        style.computed_sizes.clear(slot);
+        if (property == "min-width") { style.min_width = -1; style.min_width_percent = -1; }
+        if (property == "min-height") { style.min_height = -1; style.min_height_percent = -1; }
+        if (property == "max-width") { style.max_width = -1; style.max_width_percent = -1; }
+        if (property == "max-height") { style.max_height = -1; style.max_height_percent = -1; }
+        return DeclarationApplyResult::Applied;
+    }
     if (property == "width") {
         const auto keyword = lowercase(trim(value));
         if (keyword == "auto" || keyword == "initial" || keyword == "unset") {
+            style.computed_sizes.clear(detail::SizeProperty::Width);
             style.width = -1;
             style.width_percent = -1;
             return DeclarationApplyResult::Applied;
         }
-        return apply_length_or_percent(style.width, style.width_percent, value, style.font_size, context);
+        return apply_length_or_percent(style, detail::SizeProperty::Width, style.width, style.width_percent, value, style.font_size, context);
     }
     if (property == "height") {
         const auto keyword = lowercase(trim(value));
         if (keyword == "auto" || keyword == "initial" || keyword == "unset") {
+            style.computed_sizes.clear(detail::SizeProperty::Height);
             style.height = -1;
             style.height_percent = -1;
             return DeclarationApplyResult::Applied;
         }
-        return apply_length_or_percent(style.height, style.height_percent, value, style.font_size, context);
+        return apply_length_or_percent(style, detail::SizeProperty::Height, style.height, style.height_percent, value, style.font_size, context);
     }
     if (property == "min-width") {
-        return apply_length_or_percent(style.min_width, style.min_width_percent, value, style.font_size, context);
+        return apply_length_or_percent(style, detail::SizeProperty::MinWidth, style.min_width, style.min_width_percent, value, style.font_size, context);
     }
     if (property == "min-height") {
-        return apply_length_or_percent(style.min_height, style.min_height_percent, value, style.font_size, context);
+        return apply_length_or_percent(style, detail::SizeProperty::MinHeight, style.min_height, style.min_height_percent, value, style.font_size, context);
     }
     if (property == "max-width") {
-        return apply_length_or_percent(style.max_width, style.max_width_percent, value, style.font_size, context);
+        return apply_length_or_percent(style, detail::SizeProperty::MaxWidth, style.max_width, style.max_width_percent, value, style.font_size, context);
     }
     if (property == "max-height") {
-        return apply_length_or_percent(style.max_height, style.max_height_percent, value, style.font_size, context);
+        return apply_length_or_percent(style, detail::SizeProperty::MaxHeight, style.max_height, style.max_height_percent, value, style.font_size, context);
     }
     if (property == "aspect-ratio") {
         detail::CssAspectRatio ratio;
@@ -5820,29 +5853,10 @@ Style StyleResolver::resolve_with_custom_properties(const Node& node,
                 style.aspect_ratio_auto = true;
             };
             if (sized_element) {
-                int parsed_width = 0;
-                int parsed_height = 0;
-                const auto apply_percent = [](int& length, int& percent, const HtmlDimension& value) {
-                    int rounded = 0;
-                    if (!round_finite_float_to_int(static_cast<float>(value.value), rounded)) return false;
-                    length = -1;
-                    percent = std::clamp(rounded, -1000, 1000);
-                    return true;
-                };
-                if (has_width) {
-                    if (width.percent) {
-                        apply_percent(style.width, style.width_percent, width);
-                    } else if (round_finite_float_to_int(static_cast<float>(width.value), parsed_width)) {
-                        style.width = parsed_width;
-                    }
-                }
-                if (has_height) {
-                    if (height.percent) {
-                        apply_percent(style.height, style.height_percent, height);
-                    } else if (round_finite_float_to_int(static_cast<float>(height.value), parsed_height)) {
-                        style.height = parsed_height;
-                    }
-                }
+                if (has_width) detail::apply_computed_size(style, detail::SizeProperty::Width,
+                    width.percent ? detail::SizeKind::Percent : detail::SizeKind::Pixels, width.value);
+                if (has_height) detail::apply_computed_size(style, detail::SizeProperty::Height,
+                    height.percent ? detail::SizeKind::Percent : detail::SizeKind::Pixels, height.value);
                 if ((node.tag_name == "img" || node.tag_name == "video") && has_width && has_height &&
                     !width.percent && !height.percent) {
                     apply_ratio(width, height);

@@ -36,10 +36,16 @@ def main():
             if case[field] is not None:
                 program.append(f'node->set_attribute("{field}",{literal(case[field])});')
         program.append('auto s=StyleResolver(CssParser{}.parse(' + literal(case['css']) + ')).resolve(*node);')
+        program.append('std::int64_t precise_w = static_cast<std::int64_t>(s.width_percent >= 0 ? s.width_percent : s.width) * 1000;'
+                       'std::int64_t precise_h = static_cast<std::int64_t>(s.height_percent >= 0 ? s.height_percent : s.height) * 1000;'
+                       'detail::SizeKind kind;'
+                       's.computed_sizes.get(detail::SizeProperty::Width,kind,precise_w);'
+                       's.computed_sizes.get(detail::SizeProperty::Height,kind,precise_h);')
         program.append('std::cout << ' + literal(case['id']) +
                        ' << " " << s.width << " " << s.height << " " << s.width_percent'
                        ' << " " << s.height_percent << " " << s.aspect_ratio_width'
-                       ' << " " << s.aspect_ratio_height << " " << s.aspect_ratio_auto << "\\n";}')
+                       ' << " " << s.aspect_ratio_height << " " << s.aspect_ratio_auto'
+                       ' << " " << precise_w << " " << precise_h << "\\n";}')
     program.append('}')
     source.write_text('\n'.join(program), encoding='utf8')
     executable = source.with_suffix('.exe')
@@ -50,8 +56,9 @@ def main():
     actuals = {parts[0]: list(map(int, parts[1:])) for parts in map(str.split, output.splitlines())}
     checks = []
     rounded = []
+    retained_checks = []
     for case in cases:
-        w, h, wp, hp, rw, rh, automatic = actuals[case['id']]
+        w, h, wp, hp, rw, rh, automatic, precise_w, precise_h = actuals[case['id']]
         for axis, px, percent in [('Width', w, wp), ('Height', h, hp)]:
             expected = case['expected' + axis]
             kind = expected['kind']
@@ -69,6 +76,13 @@ def main():
                                frozen=expected, scalarExpected={'kind': kind, 'value': proxy}, actual=actual))
             if value != Decimal(proxy) and expected['kind'] != 'auto':
                 rounded.append(dict(id=case['id'], property=axis.lower(), frozen=str(value), scalar=proxy))
+            expected_number = min(value, Decimal(1000)) if kind == 'percent' else value
+            expected_units = -1000 if kind == 'auto' else int(
+                (expected_number * 1000).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+            actual_units = precise_w if axis == 'Width' else precise_h
+            retained_checks.append(dict(id=case['id'], property=axis.lower(),
+                expectedUnits=expected_units, actualUnits=actual_units,
+                match=actual['kind'] == kind and actual_units == expected_units))
         expected = case['expectedRatio']
         if expected is None:
             match = rw == 0 and rh == 0
@@ -84,11 +98,12 @@ def main():
                   coreHead=subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip(),
                   checks=checks, total=len(checks), matches=sum(c['match'] for c in checks),
                   differences=[c for c in checks if not c['match']], scalarPrecisionDifferences=rounded,
+                  retainedChecks=retained_checks, retainedMatches=sum(c['match'] for c in retained_checks),
                   unavailable=[],
-                  scope='Scalar computed values; no natural image geometry, device or performance acceptance')
+                  scope='Scalar projections and retained Q1000 dimensions; no layout, device or performance acceptance')
     args.output.write_text(json.dumps(report, ensure_ascii=True, indent=2) + '\n', encoding='utf8')
-    print(json.dumps({key: report[key] for key in ('total', 'matches', 'differences', 'scalarPrecisionDifferences')}, indent=2))
-    return 1 if report['differences'] else 0
+    print(json.dumps({key: report[key] for key in ('total', 'matches', 'retainedMatches', 'differences', 'scalarPrecisionDifferences')}, indent=2))
+    return 1 if report['differences'] or not all(c['match'] for c in retained_checks) else 0
 
 
 if __name__ == '__main__':

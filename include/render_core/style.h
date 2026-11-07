@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "render_core/dom.h"
+#include "render_core/computed_size_storage.h"
 #include "render_core/diagnostics.h"
 #include "render_core/geometry.h"
 
@@ -264,6 +265,8 @@ struct TextShadowStyle {
 };
 
 struct Style {
+    // Shared optional Q1000 residues; integral styles keep this owner empty.
+    detail::ComputedSizeStorage computed_sizes;
     Display display = Display::Inline;
     bool visibility_hidden = false;
     bool visibility_specified = false;

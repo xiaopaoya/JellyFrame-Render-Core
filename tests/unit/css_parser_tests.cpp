@@ -265,7 +265,8 @@ void text_wrap_alias_reuses_bounded_white_space_behavior() {
 
 void style_struct_size_has_embedded_guardrail() {
 #if !defined(JELLYFRAME_TEST_CONFIG_DEBUG)
-    check(sizeof(Style) <= 776, "Style should stay within the embedded size guardrail");
+    // One pointer for independently shared computed dimension residues.
+    check(sizeof(Style) <= 784, "Style should stay within the embedded size guardrail");
     check(sizeof(DisplayCommand) <= 160, "DisplayCommand should stay compact for display-list reuse");
 #endif
     const Style idle_style;
