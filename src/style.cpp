@@ -470,6 +470,20 @@ bool parse_integer(const std::string& raw_value, int& output) {
     return true;
 }
 
+bool publish_flex_basis(Style& style, int scalar, const std::string& token) {
+    const auto literal=trim(token);
+    char* end=nullptr;
+    const double number=std::strtod(literal.c_str(),&end);
+    if (scalar>=0 && end && end!=literal.c_str() && std::isfinite(number) && number>=0) {
+        const auto suffix=lowercase(trim(end));
+        if (suffix.empty() || suffix=="px")
+            return detail::apply_computed_size(style,detail::SizeProperty::FlexBasis,detail::SizeKind::Pixels,number);
+    }
+    style.computed_sizes.clear(detail::SizeProperty::FlexBasis);
+    style.flex_basis=scalar;
+    return true;
+}
+
 bool parse_span_value(const std::string& raw_value, int& span) {
     std::istringstream stream(lowercase(trim(raw_value)));
     std::string first;
@@ -3994,9 +4008,19 @@ bool apply_declaration(Style& style,
         if (!parse_flex_shorthand(value, style.font_size, grow, shrink, basis, context)) {
             return false;
         }
+        std::istringstream basis_stream(value);
+        std::vector<std::string> basis_tokens;
+        std::string basis_token;
+        while (basis_stream >> basis_token) basis_tokens.push_back(basis_token);
+        std::string literal_basis;
+        if (basis_tokens.size()==3) literal_basis=basis_tokens.back();
+        else if (basis_tokens.size()==2) {
+            int ignored=0;
+            if (!parse_flex_factor(basis_tokens.back(),ignored)) literal_basis=basis_tokens.back();
+        }
+        if (!publish_flex_basis(style,basis,literal_basis)) return false;
         style.flex_grow = grow;
         style.flex_shrink = shrink;
-        style.flex_basis = basis;
         return true;
     } else if (property == "flex-grow") {
         int factor = 0;
@@ -4017,8 +4041,7 @@ bool apply_declaration(Style& style,
         if (!parse_flex_basis_value(value, style.font_size, basis, context)) {
             return false;
         }
-        style.flex_basis = basis;
-        return true;
+        return publish_flex_basis(style,basis,value);
     } else if (property == "flex-direction") {
         const std::string lowered = lowercase(trim(value));
         if (lowered == "row") {

@@ -2,6 +2,9 @@
 
 #include "render_core/form_control.h"
 #include "computed_size_geometry.h"
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+#include "flex_length_resolution.h"
+#endif
 #include "render_core/prepared_text.h"
 #include "render_core/text_normalization.h"
 #include "render_core/text_scan.h"
@@ -898,6 +901,9 @@ struct LayoutEngine::PreciseBoxContext {
     std::int64_t height = -1;
     std::int64_t x = 0;
     std::int64_t y = 0;
+    std::int64_t allocated_width = -1;
+    std::int64_t allocated_height = -1;
+    bool border_origin = false;
 };
 
 LayoutEngine::LayoutEngine(const StyleResolver& style_resolver,
@@ -1022,6 +1028,152 @@ LayoutBoxPtr LayoutEngine::make_layout_box(MonotonicArena* arena) const {
     return LayoutBoxPtr(&arena->create<LayoutBox>(), LayoutBoxDeleter{true});
 }
 
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+bool LayoutEngine::layout_precise_flex(LayoutBox& box, std::int64_t width, std::int64_t fixed_height,
+    const PreciseBoxContext& parent, std::int64_t x, std::int64_t y, int legacy_height,
+    std::size_t depth, std::int64_t& natural_height) const {
+    using namespace detail;
+    const bool row = box.style.flex_direction == FlexDirection::Row;
+    if (box.style.flex_wrap || (!row && fixed_height < 0)) return false;
+    const auto main_size = row ? width : fixed_height;
+    const auto decoration = [](const Style& s, bool horizontal) {
+        return std::max<std::int64_t>(0,horizontal ?
+            static_cast<std::int64_t>(s.padding.left)+s.padding.right+s.border_width.left+s.border_width.right :
+            static_cast<std::int64_t>(s.padding.top)+s.padding.bottom+s.border_width.top+s.border_width.bottom)*1000;
+    };
+    const auto margins = [](const Style& s, bool horizontal) {
+        return (horizontal ? static_cast<std::int64_t>(s.margin_left_auto?0:s.margin.left)+(s.margin_right_auto?0:s.margin.right) :
+            static_cast<std::int64_t>(s.margin.top)+s.margin.bottom)*1000;
+    };
+    const auto outer = [&](const Style& s, bool horizontal, std::int64_t value) {
+        if (value < 0) return value;
+        return std::min(kDimensionPrecisionMaximum,std::max(decoration(s,horizontal),
+            s.box_sizing_border_box ? value : value+decoration(s,horizontal)));
+    };
+    auto ordered = ordered_flex_children(box);
+    if (ordered.empty()) for (auto& child : box.children)
+        if (!is_out_of_flow_positioned(child->style)) ordered.push_back(child.get());
+    std::vector<FlexLengthPrecisionItem> items;
+    std::vector<std::int64_t> cross;
+    items.reserve(ordered.size());cross.reserve(ordered.size());
+    // All admission checks precede probing or allocated child layout.
+    for (auto* child : ordered) {
+        if (is_out_of_flow_positioned(child->style)) continue;
+        const auto& s = child->style;
+        if (s.display != Display::Block || !child->node || child->node->type == NodeType::Text || is_form_control(*child->node)) return false;
+        const auto preferred = computed_size_units(s,row?SizeProperty::Width:SizeProperty::Height,main_size);
+        const auto basis = computed_size_units(s,SizeProperty::FlexBasis,main_size);
+        const auto minimum = computed_size_units(s,row?SizeProperty::MinWidth:SizeProperty::MinHeight,main_size);
+        const auto maximum = computed_size_units(s,row?SizeProperty::MaxWidth:SizeProperty::MaxHeight,main_size);
+        if (preferred < -1 || basis < -1 || minimum < -1 || maximum < -1 || (preferred < 0 && basis < 0)) return false;
+        // Content-based auto minima need their own intrinsic-size consumer.
+        if (minimum < 0 && (!child->children.empty() || has_aspect_ratio(s))) return false;
+        const auto alignment = flex_cross_axis_alignment(*child,box.style.align_items);
+        const auto cross_basis = row ? fixed_height : width;
+        const auto cross_preferred = computed_size_units(s,row?SizeProperty::Height:SizeProperty::Width,cross_basis);
+        const auto cross_min = computed_size_units(s,row?SizeProperty::MinHeight:SizeProperty::MinWidth,cross_basis);
+        const auto cross_max = computed_size_units(s,row?SizeProperty::MaxHeight:SizeProperty::MaxWidth,cross_basis);
+        if (cross_preferred < -1 || cross_min < -1 || cross_max < -1 ||
+            (!row && cross_preferred < 0 && alignment != AlignItems::Stretch)) return false;
+        FlexLengthPrecisionItem item;
+        item.child=child;
+        item.base=outer(s,row,basis>=0?basis:preferred);
+        item.inner_base=std::max<std::int64_t>(0,item.base-decoration(s,row));
+        item.minimum=minimum<0?decoration(s,row):outer(s,row,minimum);
+        item.maximum=maximum<0?-1:outer(s,row,maximum);
+        item.hypothetical=flex_length_clamp(item.base,item);
+        item.target=item.hypothetical;
+        item.margins=margins(s,row);
+        items.push_back(item);cross.push_back(0);
+    }
+    const auto gap=static_cast<std::int64_t>(std::max(0,row?box.style.column_gap:box.style.row_gap))*1000;
+    if (resolve_flex_lengths_precise(items,main_size,gap,[](std::size_t){}) != FlexLengthPrecisionStatus::Success) return false;
+    const auto make_context = [&](const FlexLengthPrecisionItem& item, std::int64_t cx, std::int64_t cy) {
+        PreciseBoxContext context{width,fixed_height,cx,cy};
+        context.border_origin=true;
+        const auto content=std::max<std::int64_t>(0,item.target-decoration(item.child->style,row));
+        if(row) context.allocated_width=content; else context.allocated_height=content;
+        return context;
+    };
+    auto cross_size=row?std::int64_t{0}:width;
+    for(std::size_t index=0;index<items.size();++index) {
+        auto& item=items[index];auto& child=*item.child;
+        const auto definite_cross=row?computed_content_axis(child.style,true,fixed_height,-1,decoration(child.style,false)):-1;
+        if(row && definite_cross>=0) {
+            // A definite cross size cannot depend on descendant layout. Avoid a
+            // redundant subtree probe; the final allocated layout still runs.
+            cross[index]=std::min(kDimensionPrecisionMaximum,definite_cross+decoration(child.style,false));
+            cross_size=std::max(cross_size,cross[index]+margins(child.style,false));
+        } else if(row) {
+            auto probe=make_context(item,0,0);
+            std::int64_t flow=std::numeric_limits<std::int64_t>::min();
+            const auto result=layout_box(child,0,0,project_size_edge(width),legacy_height,depth+1,&probe,&flow);
+            if(flow==std::numeric_limits<std::int64_t>::min()) flow=static_cast<std::int64_t>(result)*1000;
+            cross[index]=std::max<std::int64_t>(0,flow-margins(child.style,false));
+            cross_size=std::max(cross_size,cross[index]+margins(child.style,false));
+        } else {
+            const auto fallback=std::max<std::int64_t>(0,width-margins(child.style,true)-decoration(child.style,true));
+            const auto content=computed_content_axis(child.style,false,width,fallback,decoration(child.style,true));
+            cross[index]=std::min(kDimensionPrecisionMaximum,content+decoration(child.style,true));
+        }
+    }
+    if(row) {
+        if(has_aspect_ratio(box.style)) cross_size=std::max(cross_size,scale_size_units(width,box.style.aspect_ratio_height,box.style.aspect_ratio_width));
+        cross_size=parent.allocated_height>=0?parent.allocated_height:computed_content_axis(box.style,true,parent.height,
+            std::clamp<std::int64_t>(cross_size,0,kDimensionPrecisionMaximum),decoration(box.style,false));
+        if(cross_size<0) return false;
+    }
+    auto occupied=gap*static_cast<std::int64_t>(items.empty()?0:items.size()-1);
+    unsigned auto_edges=0;
+    for(const auto& item:items) {
+        occupied+=item.target+item.margins;
+        if(row) auto_edges+=static_cast<unsigned>(item.child->style.margin_left_auto)+item.child->style.margin_right_auto;
+    }
+    auto free=std::max<std::int64_t>(0,main_size-occupied);
+    auto auto_free=auto_edges?free:0;
+    if(auto_edges) free=0;
+    std::int64_t cursor=0, extra_gap=0;
+    switch(box.style.justify_content) {
+    case JustifyContent::End:cursor=free;break;
+    case JustifyContent::Center:cursor=free/2;break;
+    case JustifyContent::SpaceAround:extra_gap=items.empty()?0:free/static_cast<std::int64_t>(items.size());cursor=extra_gap/2;break;
+    case JustifyContent::SpaceBetween:extra_gap=items.size()<2?0:free/static_cast<std::int64_t>(items.size()-1);break;
+    case JustifyContent::SpaceEvenly:extra_gap=items.empty()?0:free/static_cast<std::int64_t>(items.size()+1);cursor=extra_gap;break;
+    default:break;
+    }
+    const auto take_margin=[&](bool automatic,int numeric) {
+        if(!automatic) return static_cast<std::int64_t>(numeric)*1000;
+        const auto share=auto_edges?auto_free/auto_edges:0;
+        auto_free-=share;if(auto_edges)--auto_edges;return share;
+    };
+    for(std::size_t index=0;index<items.size();++index) {
+        auto& item=items[index];auto& child=*item.child;const auto& s=child.style;
+        const auto alignment=flex_cross_axis_alignment(child,box.style.align_items);
+        const auto leading=row?take_margin(s.margin_left_auto,s.margin.left):static_cast<std::int64_t>(s.margin.top)*1000;
+        const auto trailing=row?take_margin(s.margin_right_auto,s.margin.right):static_cast<std::int64_t>(s.margin.bottom)*1000;
+        auto context=make_context(item,row?x+cursor+leading:x,row?y:y+cursor+leading);
+        auto cross_border=cross[index];
+        const auto cross_preferred=computed_size_units(s,row?SizeProperty::Height:SizeProperty::Width,row?fixed_height:width);
+        const bool stretch=alignment==AlignItems::Stretch && cross_preferred<0;
+        if(stretch) {
+            const auto fallback=std::max<std::int64_t>(0,cross_size-margins(s,!row)-decoration(s,!row));
+            const auto content=computed_content_axis(s,row,row?fixed_height:width,fallback,decoration(s,!row));
+            cross_border=std::min(kDimensionPrecisionMaximum,content+decoration(s,!row));
+            if(row) context.allocated_height=content;else context.allocated_width=content;
+        }
+        const auto cross_free=std::max<std::int64_t>(0,cross_size-cross_border-margins(s,!row));
+        const auto shift=alignment==AlignItems::Center?cross_free/2:alignment==AlignItems::End?cross_free:0;
+        if(row) context.y+=shift+static_cast<std::int64_t>(s.margin.top)*1000;
+        else context.x+=shift+static_cast<std::int64_t>(s.margin_left_auto?0:s.margin.left)*1000;
+        layout_box(child,project_size_edge(context.x),project_size_edge(context.y),project_size_edge(width),
+            legacy_height,depth+1,&context);
+        cursor+=leading+item.target+trailing+gap+extra_gap;
+    }
+    natural_height=row?cross_size:fixed_height;
+    return true;
+}
+#endif
+
 int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t depth,
     const PreciseBoxContext& context, std::int64_t* flow_units) const {
     using namespace detail;
@@ -1034,8 +1186,10 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
     const auto right_margin = style.margin_right_auto ? 0 : static_cast<std::int64_t>(style.margin.right)*1000;
     const auto fallback_width = std::clamp<std::int64_t>(context.width-left_margin-right_margin-horizontal_decoration,
         0,kDimensionPrecisionMaximum);
-    const auto content_width_units = computed_content_axis(style,false,context.width,fallback_width,horizontal_decoration);
-    const auto fixed_height_units = computed_content_axis(style,true,context.height,-1,vertical_decoration);
+    const auto content_width_units = context.allocated_width >= 0 ? context.allocated_width :
+        computed_content_axis(style,false,context.width,fallback_width,horizontal_decoration);
+    const auto fixed_height_units = context.allocated_height >= 0 ? context.allocated_height :
+        computed_content_axis(style,true,context.height,-1,vertical_decoration);
     if (content_width_units < 0 || fixed_height_units < -1) {
         const auto result = layout_box(box,project_size_edge(context.x),project_size_edge(context.y),
             project_size_edge(context.width),height,depth);
@@ -1044,10 +1198,10 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
     }
     const auto border_width_units = std::min(kDimensionPrecisionMaximum,content_width_units+horizontal_decoration);
     const auto auto_space = std::max<std::int64_t>(0,context.width-border_width_units-left_margin-right_margin);
-    auto border_x_units = context.x+left_margin;
-    if (style.margin_left_auto && style.margin_right_auto) border_x_units += auto_space/2;
-    else if (style.margin_left_auto) border_x_units += auto_space;
-    const auto border_y_units = context.y+static_cast<std::int64_t>(style.margin.top)*1000;
+    auto border_x_units = context.x+(context.border_origin?0:left_margin);
+    if (!context.border_origin && style.margin_left_auto && style.margin_right_auto) border_x_units += auto_space/2;
+    else if (!context.border_origin && style.margin_left_auto) border_x_units += auto_space;
+    const auto border_y_units = context.y+(context.border_origin?0:static_cast<std::int64_t>(style.margin.top)*1000);
     const auto content_x_units = border_x_units+
         (static_cast<std::int64_t>(style.border_width.left)+style.padding.left)*1000;
     const auto content_y_units = border_y_units+
@@ -1058,6 +1212,17 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
     const auto child_height_basis = fixed_height_units >= 0 ? fixed_height_units :
         viewport_root ? context.height : std::int64_t{-1};
     std::int64_t children_units = 0;
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    if (style.display == Display::Flex) {
+        if (!layout_precise_flex(box,content_width_units,fixed_height_units,context,content_x_units,content_y_units,
+                                height,depth,children_units)) {
+            const auto result = layout_box(box,project_size_edge(context.x),project_size_edge(context.y),
+                project_size_edge(context.width),height,depth);
+            if (flow_units) *flow_units = static_cast<std::int64_t>(result)*1000;
+            return result;
+        }
+    } else
+#endif
     if (has_only_inline_children(box)) {
         children_units = static_cast<std::int64_t>(layout_inline_children(box,project_size_edge(content_x_units),
             project_size_edge(content_y_units),content_width,depth))*1000;
@@ -1081,7 +1246,8 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
         if (ratio_height_units < 0) ratio_height_units = 0;
     }
     const auto auto_height = std::clamp<std::int64_t>(std::max(children_units,ratio_height_units),0,kDimensionPrecisionMaximum);
-    const auto content_height_units = computed_content_axis(style,true,context.height,auto_height,vertical_decoration);
+    const auto content_height_units = context.allocated_height >= 0 ? context.allocated_height :
+        computed_content_axis(style,true,context.height,auto_height,vertical_decoration);
     // A malformed retained value was already refused above while computing the
     // fixed height, before descendants were laid out.
     const auto border_height_units = std::min(kDimensionPrecisionMaximum,content_height_units+vertical_decoration);
@@ -1099,7 +1265,11 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
 int LayoutEngine::layout_box(LayoutBox& box, int x, int y, int width, int height, std::size_t depth,
                              const PreciseBoxContext* precision, std::int64_t* flow_units) const {
     if (precision && depth <= std::max<std::size_t>(1,options_.max_layout_depth) &&
-        box.style.display == Display::Block && !is_out_of_flow_positioned(box.style) &&
+        (box.style.display == Display::Block
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+         || (box.style.display == Display::Flex && !box.style.flex_wrap)
+#endif
+        ) && !is_out_of_flow_positioned(box.style) &&
         box.node && box.node->type != NodeType::Text && !is_form_control(*box.node)) {
         return layout_precise_block(box,height,depth,*precision,flow_units);
     }

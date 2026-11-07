@@ -1,0 +1,46 @@
+{
+  "parentCommit": "58146fdd",
+  "coreVersion": "0.9.0-dev",
+  "abi": 4,
+  "compiler": "Clang 22.1.8 Windows x64",
+  "rationalScenes": 36,
+  "fixtureRegenerationSHA256Matches": true,
+  "coreReleaseFull": "8/8",
+  "coreReleaseMinimal": "7/7",
+  "undefinedSanitizerTrapGeometryTests": "2/2",
+  "installedConsumer": {
+    "cappedWidths": [
+      25,
+      75
+    ],
+    "descendantWidth": 38,
+    "retainedAuthoredWidthUnits": 999250
+  },
+  "styleBytesHost": 784,
+  "solverItemBytesHost": 80,
+  "perLayoutBoxFieldGrowth": 0,
+  "buildRoots": {
+    "full": "E:/Builds/computed-flex-layout",
+    "minimal": "E:/Builds/computed-flex-layout-minimal",
+    "sanitizer": "E:/Builds/computed-flex-layout-ub",
+    "installedConsumer": "E:/Builds/computed-flex-layout-consumer"
+  },
+  "scope": "Bounded nowrap Flex, no general browser/device/Runtime acceptance",
+  "sourceSHA256": {
+    "cmake/render_core_sources.cmake": "246cdc7ba098f8fe42fa7faf4cf99efc17e39776c7a7a535db299db99402745f",
+    "cmake/render_core_tests.cmake": "763a1a6ffccb09249ee55a1932d3f0a2253239c388625815f967ea41e8823aad",
+    "include/render_core/layout.h": "d78c37a572adc72035c25bfbc0b1ec2de361b35ae5443aefa77c58bd55412ced",
+    "src/layout.cpp": "bed4ec7ec459a09681c4f04990ba89aa55b8d8cd125e178a6ccf5b902663caf7",
+    "src/style.cpp": "7f005008f9848199f4ad40e9e6ed365c00d93233bbdbedef90f057f736e5d9c0",
+    "src/flex_length_precision.cpp": "fcb750230afc0ae1552d28c0d903875e144a2ff4cead8d24c8fba347c06f4afa",
+    "src/flex_length_precision.h": "1f65e71eaaa591ae4e4ad0157c27264edd2c62b37c75ee9a8d2732a077345a78",
+    "src/flex_length_resolution.h": "7af9f6407bf8615627d09401c018a10a04418f40ad827618c9a86d6d4a829ff1",
+    "src/proportional_share.h": "af21413365d4b035a317b2986524f0b40b3fc02c926de95eab01d176c23ddf7a",
+    "tests/unit/computed_flex_layout_tests.cpp": "32c493e99d592f24c1f24259a50c9ef1e2f8dd9480b3995b73cd0b3961e08b62",
+    "tests/unit/flex_precision_cases.h": "d79f10e7d97c158a8c0e7f070928877ca943c73b6a69ff2770be04af440d7358",
+    "tests/tools/generate_flex_precision_cases.py": "299a3f68d023067e5e3e5ac2df95e864ad82ec75c657d108ee16ddcbc53ac61c",
+    "tests/unit/computed_block_layout_tests.cpp": "ac3697fd081f10fcb9a8df0c886b4f3632f1461d2bc0ba43d05a23006d1a6967",
+    "docs/evaluation/2026-11-07-computed-flex-layout/consumer/CMakeLists.txt": "66c1a290a44849022365f6b1804a1ab7a88a73a39ac335cb3c8e8bf62fcb8cb9",
+    "docs/evaluation/2026-11-07-computed-flex-layout/consumer/main.cpp": "e2f822eeda09ca369b50fa4661bd6bb37bd12431ad7d123f6a70c18c98f2c6fc"
+  }
+}

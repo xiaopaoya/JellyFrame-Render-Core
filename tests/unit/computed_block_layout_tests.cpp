@@ -101,7 +101,7 @@ int main() {
             detail::SizeKind kind;std::int64_t units=0;
             check(child->rect.width==100 && child->style.width==21 &&
                   child->style.computed_sizes.get(detail::SizeProperty::Width,kind,units) && units==20500,
-                  "unmigrated Flex allocation does not read or destroy retained authored width");
+                  "Flex allocation does not overwrite retained authored width");
         }
 #endif
     } catch(const std::exception& error) { std::cerr<<error.what()<<'\n';return 1; }

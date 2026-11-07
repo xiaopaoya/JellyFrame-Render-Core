@@ -1,4 +1,10 @@
 # Shared Render Core regression-test registration.
+if(JELLYFRAME_ENABLE_FLEX_GRID)
+    add_executable(jellyframe_computed_flex_layout_tests
+        "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/computed_flex_layout_tests.cpp")
+    target_link_libraries(jellyframe_computed_flex_layout_tests PRIVATE jellyframe_render_core)
+    add_test(NAME jellyframe_computed_flex_layout_tests COMMAND jellyframe_computed_flex_layout_tests)
+endif()
 add_executable(jellyframe_computed_block_layout_tests
     "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/computed_block_layout_tests.cpp")
 target_link_libraries(jellyframe_computed_block_layout_tests PRIVATE jellyframe_render_core)
