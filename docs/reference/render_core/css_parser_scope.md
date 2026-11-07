@@ -104,6 +104,13 @@ are accepted in `flex`; omitted bases remain `0px`. Flex syntax and `@supports`
 share validation. Mixed percentage math and the explicit `content` keyword are
 not admitted, and this does not qualify full intrinsic Flex sizing.
 
+The qualified nowrap candidate also applies automatic-minimum policy when it can
+prove the minimum from scrollable overflow, a definite cap at the decoration
+floor, or an empty ordinary box. Ratio transfer remains in Q1000 units. General
+content-based automatic minima still need a complete intrinsic-content query;
+unknown content uses the legacy fallback, not a guessed zero. This uses the
+existing coupled overflow representation and does not qualify independent axes.
+
 ## Phase 1: Lazy Handling
 
 - Unsupported/complex `@media`, unsupported/complex `@supports`, `@container`,

@@ -79,6 +79,7 @@ set(JELLYFRAME_RENDER_CORE_MODERN_PAINT_SOURCES
 set(JELLYFRAME_RENDER_CORE_FLEX_GRID_SOURCES
     src/flex_grid_paint.cpp
     src/flex_length_precision.cpp
+    src/flex_auto_min.cpp
 )
 
 set(JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_SOURCES

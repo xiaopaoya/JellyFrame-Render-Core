@@ -4,6 +4,7 @@
 #include "computed_size_geometry.h"
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
 #include "flex_length_resolution.h"
+#include "flex_auto_min.h"
 #endif
 #include "render_core/prepared_text.h"
 #include "render_core/text_normalization.h"
@@ -1074,8 +1075,6 @@ bool LayoutEngine::layout_precise_flex(LayoutBox& box, std::int64_t width, std::
         const auto minimum = computed_size_units(s,row?SizeProperty::MinWidth:SizeProperty::MinHeight,main_size);
         const auto maximum = computed_size_units(s,row?SizeProperty::MaxWidth:SizeProperty::MaxHeight,main_size);
         if (preferred < -1 || basis < -1 || minimum < -1 || maximum < -1 || (preferred < 0 && basis < 0)) return false;
-        // Content-based auto minima need their own intrinsic-size consumer.
-        if (minimum < 0 && (!child->children.empty() || has_aspect_ratio(s))) return false;
         const auto alignment = flex_cross_axis_alignment(*child,box.style.align_items);
         const auto cross_basis = row ? fixed_height : width;
         const auto cross_preferred = computed_size_units(s,row?SizeProperty::Height:SizeProperty::Width,cross_basis);
@@ -1089,6 +1088,36 @@ bool LayoutEngine::layout_precise_flex(LayoutBox& box, std::int64_t width, std::
         item.inner_base=std::max<std::int64_t>(0,item.base-decoration(s,row));
         item.minimum=minimum<0?decoration(s,row):outer(s,row,minimum);
         item.maximum=maximum<0?-1:outer(s,row,maximum);
+        if (minimum<0) {
+            const auto kind=flex_auto_min_kind(s,row?FlexMainAxis::Horizontal:FlexMainAxis::Vertical);
+            if (kind==FlexAutoMinKind::Unresolved) return false;
+            if (kind==FlexAutoMinKind::Content) {
+                FlexAutoMinInput input;
+                input.main_decoration_units=decoration(s,row);
+                input.cross_decoration_units=decoration(s,!row);
+                input.specified_main_units=outer(s,row,preferred);
+                input.max_main_units=item.maximum;
+                input.preferred_cross_units=outer(s,!row,cross_preferred);
+                input.min_cross_units=outer(s,!row,cross_min);
+                input.max_cross_units=outer(s,!row,cross_max);
+                if (has_aspect_ratio(s)) {
+                    input.ratio_main=row?s.aspect_ratio_width:s.aspect_ratio_height;
+                    input.ratio_cross=row?s.aspect_ratio_height:s.aspect_ratio_width;
+                    input.ratio_uses_border_box=s.box_sizing_border_box;
+                }
+                const auto& tag=child->node->tag_name;
+                const bool special=tag=="img" || tag=="video" || tag=="canvas" || tag=="object" ||
+                    tag=="embed" || tag=="iframe" || tag=="br" || tag=="hr";
+                // Only empty ordinary boxes have a source-proven zero content
+                // size here. Replaced metadata and general min-content are not
+                // inferred from prior rectangles or Grid's width estimate.
+                input.content_complete=child->children.empty() && !special;
+                if (input.content_complete)input.content_size_units=input.main_decoration_units;
+                const auto result=flex_auto_minimum(input);
+                if (result.status!=FlexAutoMinStatus::Complete)return false;
+                item.minimum=result.minimum_border_box_units;
+            }
+        }
         item.hypothetical=flex_length_clamp(item.base,item);
         item.target=item.hypothetical;
         item.margins=margins(s,row);

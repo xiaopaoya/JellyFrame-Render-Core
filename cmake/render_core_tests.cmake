@@ -1,3 +1,7 @@
+add_executable(jellyframe_flex_auto_min_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/flex_auto_min_tests.cpp")
+target_link_libraries(jellyframe_flex_auto_min_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_flex_auto_min_tests COMMAND jellyframe_flex_auto_min_tests)
 add_executable(jellyframe_flex_basis_percentage_tests
     "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/flex_basis_percentage_tests.cpp")
 target_link_libraries(jellyframe_flex_basis_percentage_tests PRIVATE jellyframe_render_core)
