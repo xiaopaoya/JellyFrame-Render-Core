@@ -1,5 +1,6 @@
-﻿#include "render_core/css_parser.h"
+#include "render_core/css_parser.h"
 #include "render_core/html_parser.h"
+#include "render_core/layout.h"
 #include "render_core/render_tree.h"
 
 #include <iostream>
@@ -95,6 +96,109 @@ void render_tree_carries_computed_style_and_text_inheritance() {
     check(button->style.padding.top == 8, "button computed padding");
     check(text != nullptr, "text object exists");
     check(text->style.color.b == 0xeb, "text inherited color");
+}
+
+void html_dimension_attributes_are_low_priority_sizing_hints() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse(
+        "<body><img id='image' width='80' height='40'><video id='video' width='64' height='32'>"
+        "</video><iframe id='frame' width='120'></iframe><div id='ordinary' width='90' height='45'></div>"
+        "<img id='css' width='80' height='40'><img id='invalid' width='-1' height='24'>"
+        "<img id='suffix' width='80px' height='24'></body>");
+    StyleResolver resolver(css_parser.parse(
+        "#css{width:12px;height:7px;aspect-ratio:3/2}"));
+    auto render_tree = RenderTreeBuilder(resolver).build(*document);
+    const auto find_by_id = [&](const char* id) {
+        const RenderObject* result = nullptr;
+        const auto visit = [&](const RenderObject& object, const auto& self) -> void {
+            if (object.node != nullptr && object.node->attribute("id") == id) {
+                result = &object;
+                return;
+            }
+            for (const auto& child : object.children) self(*child, self);
+        };
+        visit(*render_tree, visit);
+        return result;
+    };
+    const auto* image = find_by_id("image");
+    const auto* video = find_by_id("video");
+    const auto* frame = find_by_id("frame");
+    const auto* ordinary = find_by_id("ordinary");
+    const auto* css = find_by_id("css");
+    const auto* invalid = find_by_id("invalid");
+    const auto* suffix = find_by_id("suffix");
+    check(image && image->style.width == 80 && image->style.height == 40 &&
+              image->style.aspect_ratio_width == 80000 && image->style.aspect_ratio_height == 40000,
+          "image dimension attributes set size and automatic ratio hints");
+    check(video && video->style.width == 64 && video->style.height == 32 &&
+              video->style.aspect_ratio_width == 64000 && video->style.aspect_ratio_height == 32000,
+          "video dimension attributes set size and automatic ratio hints");
+    check(frame && frame->style.width == 120 && frame->style.height == -1,
+          "embedded content dimension attributes set independent size hints");
+    check(ordinary && ordinary->style.width == -1 && ordinary->style.height == -1,
+          "dimension attributes on ordinary elements are ignored");
+    check(css && css->style.width == 12 && css->style.height == 7 &&
+              css->style.aspect_ratio_width == 3000 && css->style.aspect_ratio_height == 2000,
+          "author CSS overrides HTML dimension hints");
+    check(invalid && invalid->style.width == -1 && invalid->style.height == 24,
+          "invalid dimension hints are rejected independently");
+    check(suffix && suffix->style.width == 80 && suffix->style.height == 24,
+          "dimension attributes consume the HTML numeric prefix");
+
+    auto fractional_document = html_parser.parse(
+        "<body><img id='fraction' width='64.5' height='32.25'>"
+        "<object id='percent' width='37.5%garbage'></object>"
+        "<canvas id='canvas' width='+300.9' height='150.1'></canvas>"
+        "<canvas id='negative' width='-1' height='5'></canvas>"
+        "<img id='zero' width='0' height='5'></body>");
+    auto fractional_tree = RenderTreeBuilder(resolver).build(*fractional_document);
+    const auto find_fractional = [&](const RenderObject& root, const char* id) {
+        const RenderObject* result = nullptr;
+        const auto visit = [&](const RenderObject& object, const auto& self) -> void {
+            if (object.node != nullptr && object.node->attribute("id") == id) {
+                result = &object;
+                return;
+            }
+            for (const auto& child : object.children) self(*child, self);
+        };
+        visit(root, visit);
+        return result;
+    };
+    const auto* fraction = find_fractional(*fractional_tree, "fraction");
+    const auto* percent = find_fractional(*fractional_tree, "percent");
+    const auto* canvas = find_fractional(*fractional_tree, "canvas");
+    const auto* negative = find_fractional(*fractional_tree, "negative");
+    const auto* zero = find_fractional(*fractional_tree, "zero");
+    check(fraction && fraction->style.width == 65 && fraction->style.height == 32 &&
+              fraction->style.aspect_ratio_width == 64500 && fraction->style.aspect_ratio_height == 32250,
+          "fractional HTML dimensions round into ABI 3 scalar storage while preserving ratio");
+    check(percent && percent->style.width == -1 && percent->style.width_percent == 38,
+          "percentage HTML dimensions map to the ABI 3 percentage storage");
+    check(canvas && canvas->style.aspect_ratio_width == 300000 && canvas->style.aspect_ratio_height == 150000 &&
+              canvas->style.width == -1 && canvas->style.height == -1,
+          "canvas dimensions contribute a ratio without becoming CSS sizes");
+    check(negative && negative->style.aspect_ratio_width == 0 && negative->style.aspect_ratio_height == 0,
+          "negative canvas dimensions are rejected");
+    check(zero && zero->style.aspect_ratio_width == 0 && zero->style.aspect_ratio_height == 1000,
+          "zero dimensions retain a representable degenerate ratio");
+
+    auto layout_tree = LayoutEngine(resolver).layout(*render_tree, 320, 240);
+    const auto find_layout_by_id = [&](const char* id) {
+        const LayoutBox* result = nullptr;
+        const auto visit = [&](const LayoutBox& box, const auto& self) -> void {
+            if (box.node != nullptr && box.node->attribute("id") == id) {
+                result = &box;
+                return;
+            }
+            for (const auto& child : box.children) self(*child, self);
+        };
+        visit(*layout_tree, visit);
+        return result;
+    };
+    const auto* image_layout = find_layout_by_id("image");
+    check(image_layout && image_layout->rect.width == 80 && image_layout->rect.height == 40,
+          "HTML dimensions flow through style resolution into layout geometry");
 }
 
 void closed_dialog_is_not_rendered_by_default() {
@@ -224,6 +328,7 @@ int main() {
     try {
         render_tree_filters_non_rendered_nodes();
         render_tree_carries_computed_style_and_text_inheritance();
+        html_dimension_attributes_are_low_priority_sizing_hints();
         closed_dialog_is_not_rendered_by_default();
         hidden_attribute_skips_rendering();
         closed_details_renders_only_first_summary();

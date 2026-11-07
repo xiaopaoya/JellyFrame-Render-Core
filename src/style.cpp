@@ -5777,6 +5777,118 @@ Style StyleResolver::resolve_with_custom_properties(const Node& node,
                                                     const std::vector<const CssRule*>* matched_rules,
                                                     const LengthResolutionContext& length_context) const {
     Style style = default_style_for(node);
+    if (node.type == NodeType::Element) {
+        struct HtmlDimension {
+            std::string_view number;
+            double value = 0.0;
+            bool percent = false;
+        };
+        const auto parse_dimension = [](std::string_view source, HtmlDimension& output, bool integer = false) {
+            if (source.empty() || source.size() > 4096) return false;
+            std::size_t position = 0;
+            while (position < source.size() &&
+                   (source[position] == ' ' || source[position] == '\t' || source[position] == '\n' ||
+                    source[position] == '\r' || source[position] == '\f')) {
+                ++position;
+            }
+            const std::size_t begin = position;
+            bool negative = false;
+            if (integer && position < source.size() &&
+                (source[position] == '+' || source[position] == '-')) {
+                negative = source[position] == '-';
+                ++position;
+            }
+            const std::size_t digits = position;
+            if (position == source.size() || source[position] < '0' || source[position] > '9') return false;
+            double value = 0.0;
+            while (position < source.size() && source[position] >= '0' && source[position] <= '9') {
+                value = value * 10.0 + static_cast<double>(source[position] - '0');
+                if (position - digits >= 63) return false;
+                ++position;
+            }
+            const std::size_t integer_end = position;
+            if (!integer && position < source.size() && source[position] == '.') {
+                ++position;
+                double factor = 0.1;
+                while (position < source.size() && source[position] >= '0' && source[position] <= '9') {
+                    value += static_cast<double>(source[position] - '0') * factor;
+                    factor *= 0.1;
+                    if (position - digits >= 63) return false;
+                    ++position;
+                }
+            }
+            if (negative && value != 0.0) return false;
+            if (integer) {
+                if (value > static_cast<double>(std::numeric_limits<int>::max())) return false;
+            }
+            const std::size_t number_end = integer ? integer_end : position;
+            output.number = source.substr(begin, number_end - begin);
+            output.value = value;
+            output.percent = !integer && position < source.size() && source[position] == '%';
+            return true;
+        };
+        const bool sized_element = node.tag_name == "img" || node.tag_name == "video" ||
+            node.tag_name == "object" || node.tag_name == "embed" || node.tag_name == "iframe";
+        const bool canvas = node.tag_name == "canvas";
+        if (sized_element || canvas) {
+            HtmlDimension width, height;
+            const bool has_width = parse_dimension(node.attribute("width"), width, canvas);
+            const bool has_height = parse_dimension(node.attribute("height"), height, canvas);
+            const auto apply_ratio = [&](const HtmlDimension& ratio_width_value,
+                                         const HtmlDimension& ratio_height_value) {
+                if (ratio_width_value.value == 0.0 && ratio_height_value.value == 0.0) {
+                    style.aspect_ratio_width = 0;
+                    style.aspect_ratio_height = 0;
+                    return;
+                }
+                if (ratio_width_value.value == 0.0 || ratio_height_value.value == 0.0) {
+                    style.aspect_ratio_width = ratio_width_value.value == 0.0 ? 0 : 1000;
+                    style.aspect_ratio_height = ratio_height_value.value == 0.0 ? 0 : 1000;
+                    return;
+                }
+                std::string source(ratio_width_value.number);
+                source.push_back('/');
+                source.append(ratio_height_value.number);
+                int ratio_width = 0;
+                int ratio_height = 0;
+                if (parse_aspect_ratio(source, ratio_width, ratio_height)) {
+                    style.aspect_ratio_width = ratio_width;
+                    style.aspect_ratio_height = ratio_height;
+                }
+            };
+            if (sized_element) {
+                int parsed_width = 0;
+                int parsed_height = 0;
+                const auto apply_percent = [](int& length, int& percent, const HtmlDimension& value) {
+                    int rounded = 0;
+                    if (!round_finite_float_to_int(static_cast<float>(value.value), rounded)) return false;
+                    length = -1;
+                    percent = std::clamp(rounded, -1000, 1000);
+                    return true;
+                };
+                if (has_width) {
+                    if (width.percent) {
+                        apply_percent(style.width, style.width_percent, width);
+                    } else if (round_finite_float_to_int(static_cast<float>(width.value), parsed_width)) {
+                        style.width = parsed_width;
+                    }
+                }
+                if (has_height) {
+                    if (height.percent) {
+                        apply_percent(style.height, style.height_percent, height);
+                    } else if (round_finite_float_to_int(static_cast<float>(height.value), parsed_height)) {
+                        style.height = parsed_height;
+                    }
+                }
+                if ((node.tag_name == "img" || node.tag_name == "video") && has_width && has_height &&
+                    !width.percent && !height.percent) {
+                    apply_ratio(width, height);
+                }
+            } else if (has_width && has_height) {
+                apply_ratio(width, height);
+            }
+        }
+    }
     CascadeSlots slots;
     const SelectorMatchContext context = selector_match_context_from_options(options_);
 
