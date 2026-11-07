@@ -49,6 +49,9 @@ enum class AlignItems : std::uint8_t {
     Auto,
 };
 
+// Percentage coefficients use thousandths of one percent; -1 Length means auto.
+enum class FlexBasisKind : std::uint8_t { Length, Percentage };
+
 enum class FlexDirection : std::uint8_t {
     Row,
     Column,
@@ -359,8 +362,9 @@ struct Style {
     JustifyContent align_content = JustifyContent::Start;
     int flex_grow = 0;
     int flex_shrink = 1;
-    int flex_basis = -1;
+    int flex_basis = -1; // Pixels/auto (-1), or thousandths of one percent according to kind.
     std::int16_t flex_order = 0;
+    FlexBasisKind flex_basis_kind = FlexBasisKind::Length;
     int grid_min_track_width = -1;
     int grid_template_column_count = 0;
     std::array<int, 4> grid_template_column_widths{{0, 0, 0, 0}};

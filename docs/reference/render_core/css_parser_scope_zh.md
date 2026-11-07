@@ -80,6 +80,13 @@ cascade。Parser 接受常见语法，在 at-rule 和 declaration 边界恢复�
 - `@keyframes` from/to 子集。命名 block 会保存 `from`/`to` 或 `0%`/`100%`
   declarations，供 animation timeline 使用。中间百分比会诊断并忽略，不做局部插值。
 
+本地 0.9.0-dev/ABI4 候选版将 `flex-basis` 百分比保留为 Q1000 系数，
+在容器主轴尺寸确定后求值；系数上限为 2,147,483.647%。自动高度纵向容器中，
+无法确定的百分比使用现有内容探测，不取元素声明的高度；此时 `0%` 与 `0px`
+不同。`flex` 支持单独基础尺寸及基础尺寸在前、连续伸缩因子在后的写法；
+省略基础尺寸仍为 `0px`。声明与 `@supports` 共用语法校验。
+混合百分比数学表达式和显式 `content` 关键字尚不接纳，完整内在 Flex 尺寸未完成验证。
+
 ## 第一阶段：懒处理
 
 - 不支持或复杂的 `@media`、不支持或复杂的 `@supports`、`@container`、`@scope`：

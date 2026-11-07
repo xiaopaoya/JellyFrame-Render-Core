@@ -4,6 +4,7 @@
 #include "render_core/feature_config.h"
 #include "render_core/text_backend.h"
 #include "css_aspect_ratio.h"
+#include "css_flex_values.h"
 #include "computed_size_values.h"
 
 #include <algorithm>
@@ -470,17 +471,21 @@ bool parse_integer(const std::string& raw_value, int& output) {
     return true;
 }
 
-bool publish_flex_basis(Style& style, int scalar, const std::string& token) {
+bool publish_flex_basis(Style& style, int scalar, FlexBasisKind kind, const std::string& token) {
     const auto literal=trim(token);
     char* end=nullptr;
     const double number=std::strtod(literal.c_str(),&end);
-    if (scalar>=0 && end && end!=literal.c_str() && std::isfinite(number) && number>=0) {
+    if (kind==FlexBasisKind::Length && scalar>=0 && end && end!=literal.c_str() && std::isfinite(number) && number>=0) {
         const auto suffix=lowercase(trim(end));
-        if (suffix.empty() || suffix=="px")
-            return detail::apply_computed_size(style,detail::SizeProperty::FlexBasis,detail::SizeKind::Pixels,number);
+        if (suffix.empty() || suffix=="px") {
+            if (!detail::apply_computed_size(style,detail::SizeProperty::FlexBasis,detail::SizeKind::Pixels,number)) return false;
+            style.flex_basis_kind=kind;
+            return true;
+        }
     }
     style.computed_sizes.clear(detail::SizeProperty::FlexBasis);
     style.flex_basis=scalar;
+    style.flex_basis_kind=kind;
     return true;
 }
 
@@ -612,80 +617,79 @@ bool parse_position_inset(const std::string& raw_value,
 }
 
 bool parse_flex_basis_value(const std::string& raw_value,
-                            int font_size,
-                            int& output,
+                            int font_size, int& output, FlexBasisKind& kind,
                             const LengthResolutionContext& context = {}) {
     const std::string value = lowercase(trim(raw_value));
-    if (value == "auto") {
+    kind = FlexBasisKind::Length;
+    if (value == "auto" || value == "initial" || value == "unset") {
         output = -1;
         return true;
     }
-    return parse_length_px(value, output, font_size, context);
+    char* end = nullptr;
+    const double number = std::strtod(value.c_str(), &end);
+    if (end && end != value.c_str() && (!std::isfinite(number) || number < 0)) return false;
+    if (end && end != value.c_str() && trim(end) == "%") {
+        if (!std::isfinite(number) || number < 0) return false;
+        // Keep the coefficient, never a viewport-derived pixel approximation.
+        // Saturate before arithmetic, using the experiment's int32 Q1000 bound.
+        std::int64_t units = 0;
+        if (!detail::encode_dimension_units(std::min(number,
+            static_cast<double>(std::numeric_limits<int>::max())/1000.0),units)) return false;
+        output = static_cast<int>(std::min<std::int64_t>(units,std::numeric_limits<int>::max()));
+        kind = FlexBasisKind::Percentage;
+        return true;
+    }
+    // Mixed percentage math needs a retained expression, not parse_length_px's
+    // viewport conversion. Do not advertise that unsupported interpretation.
+    if (value.find('%') != std::string::npos) return false;
+    return parse_length_px(value, output, font_size, context) && output >= 0;
 }
 
 bool parse_flex_shorthand(const std::string& raw_value,
-                          int font_size,
-                          int& grow,
-                          int& shrink,
-                          int& basis,
+                          int font_size, int& grow, int& shrink, int& basis,
+                          FlexBasisKind& kind, std::string& literal_basis,
                           const LengthResolutionContext& context = {}) {
     const std::string value = lowercase(trim(raw_value));
-    if (value == "none") {
-        grow = 0;
-        shrink = 0;
+    literal_basis.clear();
+    kind = FlexBasisKind::Length;
+    if (value == "none" || value == "auto" || value == "initial" || value == "unset") {
+        grow = value == "auto" ? 1000 : 0;
+        shrink = value == "none" ? 0 : 1000;
         basis = -1;
         return true;
     }
-    if (value == "auto") {
-        grow = 1000;
-        shrink = 1000;
-        basis = -1;
-        return true;
-    }
-
     std::istringstream stream(value);
     std::vector<std::string> tokens;
     std::string token;
     while (stream >> token) {
-        if (tokens.size() >= 3) {
-            return false;
-        }
+        if (tokens.size() >= 3) return false;
         tokens.push_back(token);
     }
-    if (tokens.empty()) {
-        return false;
-    }
-
-    int parsed_grow = 0;
-    if (!parse_flex_factor(tokens[0], parsed_grow)) {
-        return false;
-    }
-    int parsed_shrink = 1000;
-    int parsed_basis = 0;
-    if (tokens.size() == 1) {
-        grow = parsed_grow;
-        shrink = parsed_shrink;
-        basis = parsed_basis;
-        return true;
-    }
-
-    int second_factor = 0;
-    if (parse_flex_factor(tokens[1], second_factor)) {
-        parsed_shrink = second_factor;
-        if (tokens.size() == 3 && !parse_flex_basis_value(tokens[2], font_size, parsed_basis, context)) {
-            return false;
-        }
-    } else if (tokens.size() == 2) {
-        if (!parse_flex_basis_value(tokens[1], font_size, parsed_basis, context)) {
-            return false;
+    if (tokens.empty()) return false;
+    int parsed_grow=1000, parsed_shrink=1000, parsed_basis=0;
+    std::size_t basis_index=tokens.size();
+    if (parse_flex_factor(tokens[0],parsed_grow)) {
+        if (tokens.size() >= 2) {
+            if (parse_flex_factor(tokens[1],parsed_shrink)) {
+                if (tokens.size()==3) basis_index=2;
+            } else {
+                if (tokens.size()!=2) return false;
+                basis_index=1;
+            }
         }
     } else {
-        return false;
+        basis_index=0;
+        if (tokens.size()>=2 && !parse_flex_factor(tokens[1],parsed_grow)) return false;
+        if (tokens.size()==3 && !parse_flex_factor(tokens[2],parsed_shrink)) return false;
     }
-
-    grow = parsed_grow;
-    shrink = parsed_shrink;
-    basis = parsed_basis;
+    if (basis_index<tokens.size()) {
+        const auto& candidate=tokens[basis_index];
+        // Global reset keywords are accepted only as the complete declaration.
+        if (candidate=="initial" || candidate=="unset") return false;
+        if (!parse_flex_basis_value(candidate,font_size,parsed_basis,kind,context)) return false;
+        literal_basis=candidate;
+    }
+    grow=parsed_grow;shrink=parsed_shrink;basis=parsed_basis;
     return true;
 }
 
@@ -4005,20 +4009,10 @@ bool apply_declaration(Style& style,
         int grow = 0;
         int shrink = 0;
         int basis = -1;
-        if (!parse_flex_shorthand(value, style.font_size, grow, shrink, basis, context)) {
-            return false;
-        }
-        std::istringstream basis_stream(value);
-        std::vector<std::string> basis_tokens;
-        std::string basis_token;
-        while (basis_stream >> basis_token) basis_tokens.push_back(basis_token);
+        FlexBasisKind kind;
         std::string literal_basis;
-        if (basis_tokens.size()==3) literal_basis=basis_tokens.back();
-        else if (basis_tokens.size()==2) {
-            int ignored=0;
-            if (!parse_flex_factor(basis_tokens.back(),ignored)) literal_basis=basis_tokens.back();
-        }
-        if (!publish_flex_basis(style,basis,literal_basis)) return false;
+        if (!parse_flex_shorthand(value, style.font_size, grow, shrink, basis, kind, literal_basis, context)) return false;
+        if (!publish_flex_basis(style,basis,kind,literal_basis)) return false;
         style.flex_grow = grow;
         style.flex_shrink = shrink;
         return true;
@@ -4038,10 +4032,9 @@ bool apply_declaration(Style& style,
         return true;
     } else if (property == "flex-basis") {
         int basis = -1;
-        if (!parse_flex_basis_value(value, style.font_size, basis, context)) {
-            return false;
-        }
-        return publish_flex_basis(style,basis,value);
+        FlexBasisKind kind;
+        if (!parse_flex_basis_value(value, style.font_size, basis, kind, context)) return false;
+        return publish_flex_basis(style,basis,kind,value);
     } else if (property == "flex-direction") {
         const std::string lowered = lowercase(trim(value));
         if (lowered == "row") {
@@ -5971,6 +5964,23 @@ void StyleResolver::set_interaction_state(const Node* hovered_node,
     options_.hovered_node = hovered_node;
     options_.active_node = active_node;
     options_.focused_node = focused_node;
+}
+
+namespace detail {
+bool supports_flex_value(const std::string& property,const std::string& value) {
+#if !JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    return false;
+#else
+    int basis=-1, grow=0, shrink=0;
+    FlexBasisKind kind;
+    if (property=="flex-basis") return parse_flex_basis_value(value,16,basis,kind);
+    if (property=="flex") {
+        std::string literal;
+        return parse_flex_shorthand(value,16,grow,shrink,basis,kind,literal);
+    }
+    return (property=="flex-grow" || property=="flex-shrink") && parse_flex_factor(value,grow);
+#endif
+}
 }
 
 } // namespace jellyframe

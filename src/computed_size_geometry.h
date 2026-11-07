@@ -19,6 +19,10 @@ inline std::int64_t scale_size_units(std::int64_t value, std::int64_t numerator,
 inline std::int64_t computed_size_units(const Style& style, SizeProperty property, std::int64_t basis) {
     const auto p = static_cast<unsigned>(property);
     if (p >= 7 || basis < -1 || basis > kDimensionPrecisionMaximum) return -2;
+    if (property==SizeProperty::FlexBasis && style.flex_basis_kind==FlexBasisKind::Percentage) {
+        if (style.flex_basis<0) return -2;
+        return basis<0 ? -1 : scale_size_units(basis,style.flex_basis,100000);
+    }
     SizeKind kind;
     std::int64_t value;
     if (!style.computed_sizes.get(property,kind,value)) {

@@ -1,0 +1,46 @@
+{
+  "parentCommit": "30b53cb2",
+  "coreVersion": "0.9.0-dev",
+  "abi": 4,
+  "compiler": "Clang 22.1.8 Windows x64",
+  "rationalScenes": 48,
+  "fixtureRegenerationSHA256Matches": true,
+  "coreReleaseFull": "9/9",
+  "coreReleaseMinimal": "8/8",
+  "undefinedSanitizerTrapGeometryTests": "3/3",
+  "installedConsumer": {
+    "itemWidth": 38,
+    "descendantWidth": 19,
+    "indefiniteColumnHeight": 12,
+    "styleBytes": 784
+  },
+  "coefficientMaximumQ1000": 2147483647,
+  "styleBytesHost": 784,
+  "precisionOwnerForPercentage": "none",
+  "newLayoutBoxFields": 0,
+  "buildRoots": {
+    "full": "E:/Builds/computed-flex-basis",
+    "minimal": "E:/Builds/computed-flex-basis-minimal",
+    "sanitizer": "E:/Builds/computed-flex-basis-ub",
+    "installedConsumer": "E:/Builds/computed-flex-basis-consumer"
+  },
+  "installedSourceManifestSHA256": "7488b35142b29a17490f40c1b9e5f5d2e2940e8c2520eccd66c6f26215f3dc44",
+  "scope": "Bounded percentage-basis resolution, not full intrinsic/wrapped Flex or browser/device acceptance",
+  "sourceSHA256": {
+    "cmake/render_core_tests.cmake": "613f5320183f3ac9d728795ba217d63f8bbf702bbf04d015e3f602d1b2edaf39",
+    "include/render_core/style.h": "e05a383b26078e8842db4f0531abc2aac72b682f3c17f22413ffb9de69d0ac37",
+    "src/computed_size_geometry.h": "a4b62952c341a8c4652372f1e526085270a0ee6adef6f9c133efdd242af71816",
+    "src/css_parser.cpp": "d20305313f3510ffe9ef3d0947dd8e078337197a55094dc45fae76cb30e90563",
+    "src/css_flex_values.h": "78eee9691082a9c463ef4a8a6fabfacb128eb9c4e08002197612060e2f80b8d3",
+    "src/layout.cpp": "7df36878257bef8528d0d07b0bd6530bd2312524a7a452adc77a8cac1decea70",
+    "src/style.cpp": "6b19f2ee51148c57fd2f4bf7279e7c71329a799ea5d626f5a366dcdd3254e701",
+    "src/style_repaint.cpp": "e1e4a5db6da691ca2d577c0b982e451041fad57f94d3a660cd69a895b2a38482",
+    "tests/unit/flex_basis_percentage_tests.cpp": "f7affe4c237b8ac076144c3dad74e445ff749d82547daa759a10acb573d9494a",
+    "tests/unit/flex_basis_percentage_cases.h": "9004814e2460233b5b38a395278c0c630230f63c411b8dfb6d9148580b7d8a5c",
+    "tests/tools/generate_flex_basis_percentage_cases.py": "fa969195103af382ad2d844d1fc2ae2c815d3c9843ec135e8278cc49eccf3c6f",
+    "docs/reference/render_core/css_parser_scope.md": "1dd2cab944caab246bf9cb4b7653593f1aae425b497fff188777eb674542605f",
+    "docs/reference/render_core/css_parser_scope_zh.md": "73f6f0c8a35cd91efc35e371dc35b8398ae5e7cdfbc0328a5ba8fe8221c4b288",
+    "docs/evaluation/2026-11-07-flex-basis-percentage/consumer/CMakeLists.txt": "53775b465449fb0aedd7afa989f2975e6adb212f10dc73a802bb0c926d6c15c5",
+    "docs/evaluation/2026-11-07-flex-basis-percentage/consumer/main.cpp": "828146976c0b7cac1998209aeb2d459e11f7ab6fbf4724e4c324857f726839d5"
+  }
+}

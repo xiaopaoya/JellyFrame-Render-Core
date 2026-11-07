@@ -79,6 +79,7 @@ bool layout_fields_equal(const Style& left, const Style& right) {
         left.flex_grow == right.flex_grow &&
         left.flex_shrink == right.flex_shrink &&
         left.flex_basis == right.flex_basis &&
+        left.flex_basis_kind == right.flex_basis_kind &&
         left.flex_order == right.flex_order &&
         left.align_self == right.align_self &&
         left.align_content == right.align_content &&

@@ -95,6 +95,15 @@ layout behavior.
   declarations for the animation timeline. Intermediate percentages are
   diagnosed and ignored, not partially interpolated.
 
+The local 0.9.0-dev/ABI4 candidate retains `flex-basis` percentages as Q1000
+coefficients until the container's main size is known. Coefficients saturate at
+2,147,483.647%; unresolved percentages in auto-height columns use the existing
+content probe rather than the authored height. `0%` therefore differs from `0px`
+when the main size is indefinite. Lone bases and basis-first contiguous factors
+are accepted in `flex`; omitted bases remain `0px`. Flex syntax and `@supports`
+share validation. Mixed percentage math and the explicit `content` keyword are
+not admitted, and this does not qualify full intrinsic Flex sizing.
+
 ## Phase 1: Lazy Handling
 
 - Unsupported/complex `@media`, unsupported/complex `@supports`, `@container`,

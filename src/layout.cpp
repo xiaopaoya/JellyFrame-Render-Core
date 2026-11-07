@@ -390,6 +390,13 @@ int flex_aligned_x(AlignItems align_items, int content_x, int container_width, i
     return content_x;
 }
 
+// Legacy contexts project the same computed basis at their existing pixel boundary.
+int resolved_flex_basis_pixels(const Style& style, int main_size) {
+    const auto units=detail::computed_size_units(style,detail::SizeProperty::FlexBasis,
+        main_size<0 ? -1 : static_cast<std::int64_t>(main_size)*1000);
+    return units<0 ? -1 : detail::project_size_edge(units);
+}
+
 AlignItems flex_cross_axis_alignment(const LayoutBox& child, AlignItems parent_alignment) {
     return child.style.align_self == AlignItems::Auto ? parent_alignment : child.style.align_self;
 }
@@ -472,8 +479,9 @@ int layout_wrapped_flex_children(LayoutBox& box,
     int line_height = 0;
     const int max_line_width = std::max(1, content_width);
     const auto place_child = [&](LayoutBox& child) {
-        const bool use_basis = child.style.flex_basis >= 0;
-        layout_child_for_width(child, use_basis ? child.style.flex_basis : content_width, use_basis);
+        const int basis=resolved_flex_basis_pixels(child.style,content_width);
+        const bool use_basis = basis >= 0;
+        layout_child_for_width(child, use_basis ? basis : content_width, use_basis);
         const int child_width = bounded_add(
             bounded_add(child.rect.width, child.style.margin.left), child.style.margin.right);
         const int child_height = bounded_add(
@@ -1863,6 +1871,11 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
             if (force_height) {
                 child.style.height = std::max(0, target_height);
                 child.style.height_percent = -1;
+            } else if (fixed_height<0 && child.style.flex_basis_kind==FlexBasisKind::Percentage) {
+                // An unresolved percentage is content, not auto: ignore the
+                // preferred main size during every natural-size probe/layout.
+                child.style.height = -1;
+                child.style.height_percent = -1;
             }
             const int child_height = layout_box(child, 0, 0, content_width, child_containing_height, depth + 1);
             child.style.height = old_height;
@@ -1878,14 +1891,16 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
         std::int64_t total_shrink_weight = 0;
 
         for_each_in_flow_child([&](LayoutBox& child) {
-            const bool use_basis = child.style.flex_basis >= 0;
-            const bool flexible_zero_basis = !use_basis && child.style.flex_grow > 0 && child.style.height < 0;
-            const int probe_height = use_basis ? child.style.flex_basis : flexible_zero_basis ? 0 : 0;
+            const int basis=resolved_flex_basis_pixels(child.style,fixed_height);
+            const bool content_basis=fixed_height<0 && child.style.flex_basis_kind==FlexBasisKind::Percentage;
+            const bool use_basis = basis >= 0;
+            const bool flexible_zero_basis = !use_basis && !content_basis && child.style.flex_grow > 0 && child.style.height < 0;
+            const int probe_height = use_basis ? basis : 0;
             const bool force_height = use_basis || flexible_zero_basis;
             layout_child_for_size(child, probe_height, force_height);
 
-            int base_height = use_basis ? child.style.flex_basis : flexible_zero_basis ? 0 : child.rect.height;
-            if (child.style.height >= 0 && !use_basis) {
+            int base_height = use_basis ? basis : flexible_zero_basis ? 0 : child.rect.height;
+            if (child.style.height >= 0 && !use_basis && !content_basis) {
                 base_height = child.style.height;
             }
             base_height = std::max(std::max(0, child.style.min_height), base_height);
@@ -2025,13 +2040,14 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
     std::int64_t total_shrink_weight = 0;
 
     for_each_in_flow_child([&](LayoutBox& child) {
-        const bool use_basis = child.style.flex_basis >= 0;
+        const int basis=resolved_flex_basis_pixels(child.style,content_width);
+        const bool use_basis = basis >= 0;
         const bool flexible_zero_basis = !use_basis && child.style.flex_grow > 0 && child.style.width < 0;
-        const int probe_width = use_basis ? child.style.flex_basis : flexible_zero_basis ? 0 : content_width;
+        const int probe_width = use_basis ? basis : flexible_zero_basis ? 0 : content_width;
         const bool force_width = use_basis || flexible_zero_basis;
         layout_child_for_width(child, probe_width, force_width);
 
-        int base_width = use_basis ? child.style.flex_basis : flexible_zero_basis ? 0 : child.rect.width;
+        int base_width = use_basis ? basis : flexible_zero_basis ? 0 : child.rect.width;
         if (child.style.width >= 0 && !use_basis) {
             base_width = child.style.width;
         }
