@@ -1,0 +1,1257 @@
+{
+  "authorship": "Independent HTML dimension expectations and browser observations.\n\nThe source cases do not read Core, and expectations are retained even when the\nbrowser disagrees. First prototype preceded this corpus; this is an independent\nfinal-admission oracle, not a claim of blind implementation authorship.\n",
+  "cases": [
+    {
+      "id": "d000",
+      "tag": "img",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "80"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "40"
+      },
+      "expectedRatio": [
+        "80",
+        "40"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": ""
+    },
+    {
+      "id": "d001",
+      "tag": "img",
+      "width": "37.5%",
+      "height": "12.25",
+      "expectedWidth": {
+        "kind": "percent",
+        "value": "37.5"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "12.25"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "percentage prevents ratio hint"
+    },
+    {
+      "id": "d002",
+      "tag": "video",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "80"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "40"
+      },
+      "expectedRatio": [
+        "80",
+        "40"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": ""
+    },
+    {
+      "id": "d003",
+      "tag": "video",
+      "width": "37.5%",
+      "height": "12.25",
+      "expectedWidth": {
+        "kind": "percent",
+        "value": "37.5"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "12.25"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "percentage prevents ratio hint"
+    },
+    {
+      "id": "d004",
+      "tag": "embed",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "80"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "40"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": ""
+    },
+    {
+      "id": "d005",
+      "tag": "embed",
+      "width": "37.5%",
+      "height": "12.25",
+      "expectedWidth": {
+        "kind": "percent",
+        "value": "37.5"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "12.25"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "percentage prevents ratio hint"
+    },
+    {
+      "id": "d006",
+      "tag": "iframe",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "80"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "40"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": ""
+    },
+    {
+      "id": "d007",
+      "tag": "iframe",
+      "width": "37.5%",
+      "height": "12.25",
+      "expectedWidth": {
+        "kind": "percent",
+        "value": "37.5"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "12.25"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "percentage prevents ratio hint"
+    },
+    {
+      "id": "d008",
+      "tag": "object",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "80"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "40"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": ""
+    },
+    {
+      "id": "d009",
+      "tag": "object",
+      "width": "37.5%",
+      "height": "12.25",
+      "expectedWidth": {
+        "kind": "percent",
+        "value": "37.5"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "12.25"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "percentage prevents ratio hint"
+    },
+    {
+      "id": "d010",
+      "tag": "div",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": ""
+    },
+    {
+      "id": "d011",
+      "tag": "audio",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": ""
+    },
+    {
+      "id": "d012",
+      "tag": "img",
+      "width": "",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d013",
+      "tag": "img",
+      "width": "garbage",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d014",
+      "tag": "img",
+      "width": "+12",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d015",
+      "tag": "img",
+      "width": "-12",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d016",
+      "tag": "img",
+      "width": "-0",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d017",
+      "tag": "img",
+      "width": ".5",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d018",
+      "tag": "img",
+      "width": "  \t12",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "12"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": [
+        "12",
+        "2"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d019",
+      "tag": "img",
+      "width": "12px",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "12"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": [
+        "12",
+        "2"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d020",
+      "tag": "img",
+      "width": "12 garbage",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "12"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": [
+        "12",
+        "2"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d021",
+      "tag": "img",
+      "width": "12%garbage",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "percent",
+        "value": "12"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d022",
+      "tag": "img",
+      "width": "12 %",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "12"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": [
+        "12",
+        "2"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d023",
+      "tag": "img",
+      "width": "12.%",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "percent",
+        "value": "12"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d024",
+      "tag": "img",
+      "width": "12.",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "12"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": [
+        "12",
+        "2"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d025",
+      "tag": "img",
+      "width": "12.5%",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "percent",
+        "value": "12.5"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d026",
+      "tag": "img",
+      "width": "12.5junk",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "12.5"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": [
+        "25/2",
+        "2"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d027",
+      "tag": "img",
+      "width": "12e2",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "12"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": [
+        "12",
+        "2"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d028",
+      "tag": "img",
+      "width": "0012.2500",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "12.25"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": [
+        "49/4",
+        "2"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d029",
+      "tag": "img",
+      "width": "0",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": [
+        "0",
+        "2"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d030",
+      "tag": "img",
+      "width": "0%",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "percent",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d031",
+      "tag": "img",
+      "width": "0.0001",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "0.0001"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": [
+        "1/10000",
+        "2"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d032",
+      "tag": "img",
+      "width": "0000000000000000000000000000000000000000000012",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "12"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": [
+        "12",
+        "2"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d033",
+      "tag": "img",
+      "width": "\u00a012",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d034",
+      "tag": "img",
+      "width": "12\u00a0%",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "12"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": [
+        "12",
+        "2"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d035",
+      "tag": "img",
+      "width": "\u000b12",
+      "height": "2",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "HTML dimension prefix algorithm"
+    },
+    {
+      "id": "d036",
+      "tag": "img",
+      "width": "0",
+      "height": "0",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "0"
+      },
+      "expectedRatio": [
+        "0",
+        "0"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "exact ratio is independent of Q1000 used-size precision and size cap"
+    },
+    {
+      "id": "d037",
+      "tag": "img",
+      "width": "0",
+      "height": "5",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "5"
+      },
+      "expectedRatio": [
+        "0",
+        "5"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "exact ratio is independent of Q1000 used-size precision and size cap"
+    },
+    {
+      "id": "d038",
+      "tag": "img",
+      "width": "5",
+      "height": "0",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "5"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "0"
+      },
+      "expectedRatio": [
+        "5",
+        "0"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "exact ratio is independent of Q1000 used-size precision and size cap"
+    },
+    {
+      "id": "d039",
+      "tag": "img",
+      "width": "0.0001",
+      "height": "0.0002",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "0.0001"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "0.0002"
+      },
+      "expectedRatio": [
+        "1/10000",
+        "1/5000"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "exact ratio is independent of Q1000 used-size precision and size cap"
+    },
+    {
+      "id": "d040",
+      "tag": "img",
+      "width": "12.345678",
+      "height": "6.172839",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "12.345678"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "6.172839"
+      },
+      "expectedRatio": [
+        "6172839/500000",
+        "6172839/1000000"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "exact ratio is independent of Q1000 used-size precision and size cap"
+    },
+    {
+      "id": "d041",
+      "tag": "img",
+      "width": "2147483648",
+      "height": "1073741824",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "1073741824"
+      },
+      "expectedRatio": [
+        "2147483648",
+        "1073741824"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "exact ratio is independent of Q1000 used-size precision and size cap"
+    },
+    {
+      "id": "d042",
+      "tag": "img",
+      "width": null,
+      "height": "2",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "2"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": ""
+    },
+    {
+      "id": "d043",
+      "tag": "img",
+      "width": "12",
+      "height": null,
+      "expectedWidth": {
+        "kind": "px",
+        "value": "12"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": ""
+    },
+    {
+      "id": "d044",
+      "tag": "canvas",
+      "width": "300",
+      "height": "150",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": [
+        "300",
+        "150"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "canvas uses non-negative integer prefixes only"
+    },
+    {
+      "id": "d045",
+      "tag": "canvas",
+      "width": "+300",
+      "height": "+150",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": [
+        "300",
+        "150"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "canvas uses non-negative integer prefixes only"
+    },
+    {
+      "id": "d046",
+      "tag": "canvas",
+      "width": "300.9",
+      "height": "150.1",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": [
+        "300",
+        "150"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "canvas uses non-negative integer prefixes only"
+    },
+    {
+      "id": "d047",
+      "tag": "canvas",
+      "width": "300%",
+      "height": "150%",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": [
+        "300",
+        "150"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "canvas uses non-negative integer prefixes only"
+    },
+    {
+      "id": "d048",
+      "tag": "canvas",
+      "width": "-0",
+      "height": "5",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": [
+        "0",
+        "5"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "canvas uses non-negative integer prefixes only"
+    },
+    {
+      "id": "d049",
+      "tag": "canvas",
+      "width": "-1",
+      "height": "5",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "canvas uses non-negative integer prefixes only"
+    },
+    {
+      "id": "d050",
+      "tag": "canvas",
+      "width": "x300",
+      "height": "150",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "canvas uses non-negative integer prefixes only"
+    },
+    {
+      "id": "d051",
+      "tag": "canvas",
+      "width": "0",
+      "height": "0",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": [
+        "0",
+        "0"
+      ],
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "canvas uses non-negative integer prefixes only"
+    },
+    {
+      "id": "d052",
+      "tag": "canvas",
+      "width": "",
+      "height": "150",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "",
+      "note": "canvas uses non-negative integer prefixes only"
+    },
+    {
+      "id": "d053",
+      "tag": "img",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "width:auto;height:auto;aspect-ratio:auto",
+      "css": "",
+      "note": "author declaration follows hint; invalid declaration preserves hint"
+    },
+    {
+      "id": "d054",
+      "tag": "img",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "width:initial;height:unset;aspect-ratio:initial",
+      "css": "",
+      "note": "author declaration follows hint; invalid declaration preserves hint"
+    },
+    {
+      "id": "d055",
+      "tag": "img",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "17"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "9"
+      },
+      "expectedRatio": [
+        "3",
+        "2"
+      ],
+      "ratioAuto": false,
+      "style": "width:17px;height:9px;aspect-ratio:3/2",
+      "css": "",
+      "note": "author declaration follows hint; invalid declaration preserves hint"
+    },
+    {
+      "id": "d056",
+      "tag": "img",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "percent",
+        "value": "50"
+      },
+      "expectedHeight": {
+        "kind": "percent",
+        "value": "25"
+      },
+      "expectedRatio": [
+        "80",
+        "40"
+      ],
+      "ratioAuto": true,
+      "style": "width:50%;height:25%",
+      "css": "",
+      "note": "author declaration follows hint; invalid declaration preserves hint"
+    },
+    {
+      "id": "d057",
+      "tag": "img",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "80"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "40"
+      },
+      "expectedRatio": [
+        "80",
+        "40"
+      ],
+      "ratioAuto": true,
+      "style": "width:bad;height:bad;aspect-ratio:bad",
+      "css": "",
+      "note": "author declaration follows hint; invalid declaration preserves hint"
+    },
+    {
+      "id": "d058",
+      "tag": "img",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "7"
+      },
+      "expectedRatio": [
+        "80",
+        "40"
+      ],
+      "ratioAuto": true,
+      "style": "width:var(--x);--x:auto;height:7px!important",
+      "css": "",
+      "note": "author declaration follows hint; invalid declaration preserves hint"
+    },
+    {
+      "id": "d059",
+      "tag": "img",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedHeight": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "expectedRatio": null,
+      "ratioAuto": true,
+      "style": "",
+      "css": "*{width:auto;height:initial;aspect-ratio:unset}",
+      "note": "zero specificity universal author rule wins"
+    },
+    {
+      "id": "d060",
+      "tag": "img",
+      "width": "80",
+      "height": "40",
+      "expectedWidth": {
+        "kind": "px",
+        "value": "19"
+      },
+      "expectedHeight": {
+        "kind": "px",
+        "value": "11"
+      },
+      "expectedRatio": [
+        "7",
+        "3"
+      ],
+      "ratioAuto": false,
+      "style": "width:auto;height:auto;aspect-ratio:auto",
+      "css": "#target{width:19px!important;height:11px!important;aspect-ratio:7/3!important}",
+      "note": "author important wins over inline normal"
+    }
+  ]
+}

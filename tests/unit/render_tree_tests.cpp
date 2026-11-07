@@ -129,10 +129,10 @@ void html_dimension_attributes_are_low_priority_sizing_hints() {
     const auto* invalid = find_by_id("invalid");
     const auto* suffix = find_by_id("suffix");
     check(image && image->style.width == 80 && image->style.height == 40 &&
-              image->style.aspect_ratio_width == 80000 && image->style.aspect_ratio_height == 40000,
+              image->style.aspect_ratio_width == 2 && image->style.aspect_ratio_height == 1,
           "image dimension attributes set size and automatic ratio hints");
     check(video && video->style.width == 64 && video->style.height == 32 &&
-              video->style.aspect_ratio_width == 64000 && video->style.aspect_ratio_height == 32000,
+              video->style.aspect_ratio_width == 2 && video->style.aspect_ratio_height == 1,
           "video dimension attributes set size and automatic ratio hints");
     check(frame && frame->style.width == 120 && frame->style.height == -1,
           "embedded content dimension attributes set independent size hints");
@@ -151,7 +151,11 @@ void html_dimension_attributes_are_low_priority_sizing_hints() {
         "<object id='percent' width='37.5%garbage'></object>"
         "<canvas id='canvas' width='+300.9' height='150.1'></canvas>"
         "<canvas id='negative' width='-1' height='5'></canvas>"
-        "<img id='zero' width='0' height='5'></body>");
+        "<img id='zero' width='0' height='5'>"
+        "<img id='tiny' width='0.0001' height='0.0002'>"
+        "<img id='large' width='2147483648' height='1073741824'>"
+        "<img id='clear' width='80' height='40' style='width:initial;height:unset;aspect-ratio:auto'>"
+        "<img id='priority' width='80' height='40' style='height:7px!important;height:9px'></body>");
     auto fractional_tree = RenderTreeBuilder(resolver).build(*fractional_document);
     const auto find_fractional = [&](const RenderObject& root, const char* id) {
         const RenderObject* result = nullptr;
@@ -171,17 +175,30 @@ void html_dimension_attributes_are_low_priority_sizing_hints() {
     const auto* negative = find_fractional(*fractional_tree, "negative");
     const auto* zero = find_fractional(*fractional_tree, "zero");
     check(fraction && fraction->style.width == 65 && fraction->style.height == 32 &&
-              fraction->style.aspect_ratio_width == 64500 && fraction->style.aspect_ratio_height == 32250,
+              fraction->style.aspect_ratio_width == 2 && fraction->style.aspect_ratio_height == 1,
           "fractional HTML dimensions round into ABI 3 scalar storage while preserving ratio");
     check(percent && percent->style.width == -1 && percent->style.width_percent == 38,
           "percentage HTML dimensions map to the ABI 3 percentage storage");
-    check(canvas && canvas->style.aspect_ratio_width == 300000 && canvas->style.aspect_ratio_height == 150000 &&
+    check(canvas && canvas->style.aspect_ratio_width == 2 && canvas->style.aspect_ratio_height == 1 &&
               canvas->style.width == -1 && canvas->style.height == -1,
           "canvas dimensions contribute a ratio without becoming CSS sizes");
     check(negative && negative->style.aspect_ratio_width == 0 && negative->style.aspect_ratio_height == 0,
           "negative canvas dimensions are rejected");
     check(zero && zero->style.aspect_ratio_width == 0 && zero->style.aspect_ratio_height == 1000,
           "zero dimensions retain a representable degenerate ratio");
+    const auto* tiny = find_fractional(*fractional_tree, "tiny");
+    const auto* large = find_fractional(*fractional_tree, "large");
+    const auto* clear = find_fractional(*fractional_tree, "clear");
+    const auto* priority = find_fractional(*fractional_tree, "priority");
+    check(tiny && tiny->style.aspect_ratio_width == 1 && tiny->style.aspect_ratio_height == 2,
+          "tiny dimension ratios survive independent size rounding");
+    check(large && large->style.aspect_ratio_width == 2 && large->style.aspect_ratio_height == 1,
+          "large dimension pairs reduce before bounded ratio storage");
+    check(clear && clear->style.width == -1 && clear->style.height == -1 &&
+              clear->style.aspect_ratio_width == 0 && clear->style.aspect_ratio_height == 0,
+          "initial unset and auto declarations clear presentational hints");
+    check(priority && priority->style.height == 7,
+          "inline important suffix beats a later normal declaration");
 
     auto layout_tree = LayoutEngine(resolver).layout(*render_tree, 320, 240);
     const auto find_layout_by_id = [&](const char* id) {

@@ -13,6 +13,7 @@
 #include <cerrno>
 #include <cstring>
 #include <limits>
+#include <numeric>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -3276,7 +3277,8 @@ DeclarationApplyResult apply_sizing_declaration(Style& style,
                                                 const std::string& value,
                                                 const LengthResolutionContext& context) {
     if (property == "width") {
-        if (lowercase(trim(value)) == "auto") {
+        const auto keyword = lowercase(trim(value));
+        if (keyword == "auto" || keyword == "initial" || keyword == "unset") {
             style.width = -1;
             style.width_percent = -1;
             return DeclarationApplyResult::Applied;
@@ -3284,7 +3286,8 @@ DeclarationApplyResult apply_sizing_declaration(Style& style,
         return apply_length_or_percent(style.width, style.width_percent, value, style.font_size, context);
     }
     if (property == "height") {
-        if (lowercase(trim(value)) == "auto") {
+        const auto keyword = lowercase(trim(value));
+        if (keyword == "auto" || keyword == "initial" || keyword == "unset") {
             style.height = -1;
             style.height_percent = -1;
             return DeclarationApplyResult::Applied;
@@ -3306,6 +3309,12 @@ DeclarationApplyResult apply_sizing_declaration(Style& style,
     if (property == "aspect-ratio") {
         int ratio_width = 0;
         int ratio_height = 0;
+        const auto keyword = lowercase(trim(value));
+        if (keyword == "auto" || keyword == "initial" || keyword == "unset") {
+            style.aspect_ratio_width = 0;
+            style.aspect_ratio_height = 0;
+            return DeclarationApplyResult::Applied;
+        }
         if (!parse_aspect_ratio(value, ratio_width, ratio_height)) {
             return DeclarationApplyResult::Invalid;
         }
@@ -4938,6 +4947,14 @@ std::vector<CssDeclaration> parse_inline_style(const std::string& source,
         CssDeclaration declaration;
         declaration.property = lowercase(trim(std::string_view(source).substr(index, colon - index)));
         declaration.value = trim(std::string_view(source).substr(colon + 1, end - colon - 1));
+        constexpr std::string_view important = "!important";
+        const auto lowered_value = lowercase(declaration.value);
+        if (lowered_value.size() >= important.size() &&
+            lowered_value.compare(lowered_value.size() - important.size(), important.size(), important) == 0) {
+            declaration.important = true;
+            declaration.value = trim(std::string_view(declaration.value).substr(
+                0, declaration.value.size() - important.size()));
+        }
         if (!declaration.property.empty() && !declaration.value.empty()) {
             declarations.push_back(std::move(declaration));
         } else {
@@ -5846,15 +5863,48 @@ Style StyleResolver::resolve_with_custom_properties(const Node& node,
                     style.aspect_ratio_height = ratio_height_value.value == 0.0 ? 0 : 1000;
                     return;
                 }
-                std::string source(ratio_width_value.number);
-                source.push_back('/');
-                source.append(ratio_height_value.number);
-                int ratio_width = 0;
-                int ratio_height = 0;
-                if (parse_aspect_ratio(source, ratio_width, ratio_height)) {
-                    style.aspect_ratio_width = ratio_width;
-                    style.aspect_ratio_height = ratio_height;
+                // Reduce decimal coefficients before scaling. Do not use the
+                // CSS parser's per-component clamp: it can turn a large 2:1
+                // pair into 1:1 or discard a representable tiny ratio.
+                const auto decimal = [](std::string_view number, std::uint64_t& coefficient, int& exponent) {
+                    const auto point = number.find('.');
+                    exponent = point == std::string_view::npos ? 0 :
+                        -static_cast<int>(number.size() - point - 1);
+                    while (!number.empty() && (number.back() == '0' || number.back() == '.')) {
+                        if (number.back() == '0') ++exponent;
+                        number.remove_suffix(1);
+                    }
+                    coefficient = 0;
+                    for (const char c : number) {
+                        if (c == '.' || c == '+') continue;
+                        const auto digit = static_cast<unsigned>(c - '0');
+                        if (coefficient > (std::numeric_limits<std::uint64_t>::max() - digit) / 10) return false;
+                        coefficient = coefficient * 10 + digit;
+                    }
+                    return coefficient != 0;
+                };
+                std::uint64_t numerator = 0, denominator = 0;
+                int numerator_exp = 0, denominator_exp = 0;
+                if (!decimal(ratio_width_value.number, numerator, numerator_exp) ||
+                    !decimal(ratio_height_value.number, denominator, denominator_exp)) return;
+                const auto divisor = std::gcd(numerator, denominator);
+                numerator /= divisor;
+                denominator /= divisor;
+                int exponent = numerator_exp - denominator_exp;
+                while (exponent != 0) {
+                    auto& grow = exponent > 0 ? numerator : denominator;
+                    auto& shrink = exponent > 0 ? denominator : numerator;
+                    const auto factor = std::gcd<std::uint64_t>(shrink, 10);
+                    shrink /= factor;
+                    const auto multiplier = 10 / factor;
+                    if (grow > static_cast<std::uint64_t>(std::numeric_limits<int>::max()) / multiplier) return;
+                    grow *= multiplier;
+                    exponent += exponent > 0 ? -1 : 1;
                 }
+                if (numerator > static_cast<std::uint64_t>(std::numeric_limits<int>::max()) ||
+                    denominator > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) return;
+                style.aspect_ratio_width = static_cast<int>(numerator);
+                style.aspect_ratio_height = static_cast<int>(denominator);
             };
             if (sized_element) {
                 int parsed_width = 0;
