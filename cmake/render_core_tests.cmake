@@ -1,4 +1,8 @@
 # Shared Render Core regression-test registration.
+add_executable(jellyframe_computed_block_layout_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/computed_block_layout_tests.cpp")
+target_link_libraries(jellyframe_computed_block_layout_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_computed_block_layout_tests COMMAND jellyframe_computed_block_layout_tests)
 add_executable(jellyframe_computed_size_storage_tests
     "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/computed_size_storage_tests.cpp")
 target_link_libraries(jellyframe_computed_size_storage_tests PRIVATE jellyframe_render_core)

@@ -1,0 +1,19 @@
+{
+  "sourceSHA256": {
+    "src/computed_size_geometry.h": "458a6fdf91e0bcda9555908f585440e59e5f3f5d93e9157e8702847b0bca021a",
+    "src/layout.cpp": "bc21823c2c5e6f20df02e62fbada16614971d89e10b22a776c2e48ceb757b588",
+    "include/render_core/layout.h": "bc0a5ab8163a460f44b49d07bf458785a29dcde21753ca531e2ad5841b35bcc2",
+    "tests/unit/computed_block_layout_tests.cpp": "feba2c68b704f9125d6314f98bd943fa8d997fcf9d972aa49a0d126f9ff20a78",
+    "tests/unit/block_precision_cases.h": "7825305380738dd630c58a15bbc0320c13741e45fbac99439add2f85a72aa048",
+    "tests/tools/generate_block_precision_cases.py": "8a002e77d4809b0b4b14856ba1a55e82f4206dc3a2b9131edfeea45b0fd37978"
+  },
+  "coreVersion": "0.9.0-dev",
+  "abi": 4,
+  "rationalScenes": 72,
+  "coreReleaseFull": "7/7",
+  "coreReleaseMinimal": "7/7",
+  "undefinedSanitizerTrapBlockTest": "1/1",
+  "installedConsumerWidth": 38,
+  "perLayoutBoxFieldGrowth": 0,
+  "scope": "Ordinary in-flow Block chains; no browser raster/device/Flex/Grid/inline precision acceptance"
+}

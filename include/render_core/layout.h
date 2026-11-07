@@ -105,7 +105,11 @@ private:
     TextMeasureProvider text_measure_;
     LayoutEngineOptions options_;
 
-    int layout_box(LayoutBox& box, int x, int y, int width, int height, std::size_t depth) const;
+    struct PreciseBoxContext;
+    int layout_box(LayoutBox& box, int x, int y, int width, int height, std::size_t depth,
+                   const PreciseBoxContext* precision = nullptr, std::int64_t* flow_units = nullptr) const;
+    int layout_precise_block(LayoutBox&, int height, std::size_t depth,
+                             const PreciseBoxContext&, std::int64_t* flow_units) const;
     int layout_text_box(LayoutBox& box,
                         int border_box_x,
                         int border_box_y,

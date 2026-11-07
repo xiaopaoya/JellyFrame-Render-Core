@@ -1,6 +1,7 @@
 ﻿#include "render_core/layout.h"
 
 #include "render_core/form_control.h"
+#include "computed_size_geometry.h"
 #include "render_core/prepared_text.h"
 #include "render_core/text_normalization.h"
 #include "render_core/text_scan.h"
@@ -892,6 +893,13 @@ void LayoutBoxDeleter::operator()(LayoutBox* box) const {
     }
 }
 
+struct LayoutEngine::PreciseBoxContext {
+    std::int64_t width = 0;
+    std::int64_t height = -1;
+    std::int64_t x = 0;
+    std::int64_t y = 0;
+};
+
 LayoutEngine::LayoutEngine(const StyleResolver& style_resolver,
                            TextMeasureProvider text_measure,
                            LayoutEngineOptions options)
@@ -954,7 +962,9 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
     root_box->viewport_width = viewport_width;
     root_box->viewport_height = viewport_height;
     build_layout_tree(render_tree, *root_box, arena);
-    root_box->rect.height = layout_box(*root_box, 0, 0, viewport_width, viewport_height, 1);
+    const PreciseBoxContext precision{static_cast<std::int64_t>(std::max(0,viewport_width))*1000,
+        static_cast<std::int64_t>(std::max(0,viewport_height))*1000,0,0};
+    layout_box(*root_box, 0, 0, viewport_width, viewport_height, 1, &precision);
     return root_box;
 }
 
@@ -1012,7 +1022,87 @@ LayoutBoxPtr LayoutEngine::make_layout_box(MonotonicArena* arena) const {
     return LayoutBoxPtr(&arena->create<LayoutBox>(), LayoutBoxDeleter{true});
 }
 
-int LayoutEngine::layout_box(LayoutBox& box, int x, int y, int width, int height, std::size_t depth) const {
+int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t depth,
+    const PreciseBoxContext& context, std::int64_t* flow_units) const {
+    using namespace detail;
+    const auto& style = box.style;
+    const auto horizontal_decoration = std::max<std::int64_t>(0,
+        static_cast<std::int64_t>(horizontal_edges(style.padding))+horizontal_edges(style.border_width))*1000;
+    const auto vertical_decoration = std::max<std::int64_t>(0,
+        static_cast<std::int64_t>(vertical_edges(style.padding))+vertical_edges(style.border_width))*1000;
+    const auto left_margin = style.margin_left_auto ? 0 : static_cast<std::int64_t>(style.margin.left)*1000;
+    const auto right_margin = style.margin_right_auto ? 0 : static_cast<std::int64_t>(style.margin.right)*1000;
+    const auto fallback_width = std::clamp<std::int64_t>(context.width-left_margin-right_margin-horizontal_decoration,
+        0,kDimensionPrecisionMaximum);
+    const auto content_width_units = computed_content_axis(style,false,context.width,fallback_width,horizontal_decoration);
+    const auto fixed_height_units = computed_content_axis(style,true,context.height,-1,vertical_decoration);
+    if (content_width_units < 0 || fixed_height_units < -1) {
+        const auto result = layout_box(box,project_size_edge(context.x),project_size_edge(context.y),
+            project_size_edge(context.width),height,depth);
+        if (flow_units) *flow_units = static_cast<std::int64_t>(result)*1000;
+        return result;
+    }
+    const auto border_width_units = std::min(kDimensionPrecisionMaximum,content_width_units+horizontal_decoration);
+    const auto auto_space = std::max<std::int64_t>(0,context.width-border_width_units-left_margin-right_margin);
+    auto border_x_units = context.x+left_margin;
+    if (style.margin_left_auto && style.margin_right_auto) border_x_units += auto_space/2;
+    else if (style.margin_left_auto) border_x_units += auto_space;
+    const auto border_y_units = context.y+static_cast<std::int64_t>(style.margin.top)*1000;
+    const auto content_x_units = border_x_units+
+        (static_cast<std::int64_t>(style.border_width.left)+style.padding.left)*1000;
+    const auto content_y_units = border_y_units+
+        (static_cast<std::int64_t>(style.border_width.top)+style.padding.top)*1000;
+    const auto content_width = project_size_extent(content_x_units,content_width_units);
+    const bool viewport_root = box.node->tag_name == "document" ||
+        (box.node->tag_name == "html" && box.node->parent && box.node->parent->tag_name == "document");
+    const auto child_height_basis = fixed_height_units >= 0 ? fixed_height_units :
+        viewport_root ? context.height : std::int64_t{-1};
+    std::int64_t children_units = 0;
+    if (has_only_inline_children(box)) {
+        children_units = static_cast<std::int64_t>(layout_inline_children(box,project_size_edge(content_x_units),
+            project_size_edge(content_y_units),content_width,depth))*1000;
+    } else {
+        auto cursor_units = content_y_units;
+        for (auto& child : box.children) {
+            if (is_out_of_flow_positioned(child->style)) continue;
+            const PreciseBoxContext child_context{content_width_units,child_height_basis,content_x_units,cursor_units};
+            std::int64_t child_flow_units = std::numeric_limits<std::int64_t>::min();
+            const auto child_height = layout_box(*child,project_size_edge(content_x_units),project_size_edge(cursor_units),
+                content_width,height,depth+1,&child_context,&child_flow_units);
+            if (child_flow_units == std::numeric_limits<std::int64_t>::min())
+                child_flow_units = static_cast<std::int64_t>(child_height)*1000;
+            cursor_units += child_flow_units;
+            children_units += child_flow_units;
+        }
+    }
+    std::int64_t ratio_height_units = 0;
+    if (has_aspect_ratio(style) && content_width_units > 0) {
+        ratio_height_units = scale_size_units(content_width_units,style.aspect_ratio_height,style.aspect_ratio_width);
+        if (ratio_height_units < 0) ratio_height_units = 0;
+    }
+    const auto auto_height = std::clamp<std::int64_t>(std::max(children_units,ratio_height_units),0,kDimensionPrecisionMaximum);
+    const auto content_height_units = computed_content_axis(style,true,context.height,auto_height,vertical_decoration);
+    // A malformed retained value was already refused above while computing the
+    // fixed height, before descendants were laid out.
+    const auto border_height_units = std::min(kDimensionPrecisionMaximum,content_height_units+vertical_decoration);
+    box.rect = Rect{project_size_edge(border_x_units),project_size_edge(border_y_units),
+        project_size_extent(border_x_units,border_width_units),project_size_extent(border_y_units,border_height_units)};
+    layout_positioned_children(box,project_size_edge(content_x_units),project_size_edge(content_y_units),
+        content_width,project_size_extent(content_y_units,content_height_units),project_size_edge(context.width),depth);
+    apply_relative_position_offset(box);
+    const auto total_units = static_cast<std::int64_t>(style.margin.top)*1000+border_height_units+
+        static_cast<std::int64_t>(style.margin.bottom)*1000;
+    if (flow_units) *flow_units = total_units;
+    return project_size_edge(total_units);
+}
+
+int LayoutEngine::layout_box(LayoutBox& box, int x, int y, int width, int height, std::size_t depth,
+                             const PreciseBoxContext* precision, std::int64_t* flow_units) const {
+    if (precision && depth <= std::max<std::size_t>(1,options_.max_layout_depth) &&
+        box.style.display == Display::Block && !is_out_of_flow_positioned(box.style) &&
+        box.node && box.node->type != NodeType::Text && !is_form_control(*box.node)) {
+        return layout_precise_block(box,height,depth,*precision,flow_units);
+    }
     if (depth > std::max<std::size_t>(1, options_.max_layout_depth)) {
         report_diagnostic(options_.diagnostics,
                           DiagnosticStage::Layout,
