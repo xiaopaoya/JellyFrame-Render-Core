@@ -1,0 +1,51 @@
+{
+  "parentCommit": "1172db5e",
+  "coreVersion": "0.9.0-dev",
+  "abi": 4,
+  "compiler": "Clang 22.1.8 Windows x64",
+  "policyArithmeticCases": 16,
+  "layoutScenes": 10,
+  "coreReleaseFull": "10/10",
+  "coreReleaseMinimal": "9/9",
+  "undefinedSanitizerTrapGeometryTests": "4/4",
+  "installedConsumer": {
+    "itemWidths": [
+      50,
+      51
+    ],
+    "contentWidths": [
+      44,
+      45
+    ],
+    "ratioMinimumWidth": 41,
+    "styleBytes": 784
+  },
+  "styleBytesHost": 784,
+  "newPersistentFields": 0,
+  "policyAllocations": 0,
+  "scope": "Proof-only automatic minima; general intrinsic measurement not migrated",
+  "buildRoots": {
+    "full": "E:/Builds/computed-flex-auto-min",
+    "minimal": "E:/Builds/computed-flex-auto-min-minimal",
+    "sanitizer": "E:/Builds/computed-flex-auto-min-ub",
+    "installedConsumer": "E:/Builds/computed-flex-auto-min-consumer"
+  },
+  "sourceSHA256": {
+    "cmake/render_core_sources.cmake": "7536135572d3ce1a9438d3f106b298b9f6734b8c3ea0dc5bb0a227cc6bfad29b",
+    "cmake/render_core_tests.cmake": "067807e58d6aafd38ac53fc7f615097434fed989b7d9f750830af1be27ef1b0f",
+    "src/layout.cpp": "c86e75f00e34fa1f86b348cb3cad2d849ffdcd5390528a13e45f437f1397423b",
+    "src/flex_auto_min.h": "f75efa9193a99fbf3fb301a974feedfa9a04ccc9c9502c362f5782fa29bd2a5e",
+    "src/flex_auto_min.cpp": "bf6f67fe7695fd3a404283c8cedf3172b9cab674592f599e560fc4ed0108b3e4",
+    "tests/unit/flex_auto_min_tests.cpp": "508b2b3ae07d81e4b4e19fca71f5becd2b61ae61a028153445113a7b4dbb8ed6",
+    "docs/evaluation/2026-11-07-flex-auto-min/consumer/CMakeLists.txt": "87c23b09fa07748cbed619d782d012adac6b1e7cb981c6e745346bc5953fde2c",
+    "docs/evaluation/2026-11-07-flex-auto-min/consumer/main.cpp": "19040f04de19db029d63aebbf406aaa28a6bfe232ce963c7a1b526f9c20d1947",
+    "docs/reference/render_core/css_parser_scope.md": "90524308483c02027a623dc7145aa6cf2790901a63cdbb47f75e4535581c62f6",
+    "docs/reference/render_core/css_parser_scope_zh.md": "1f1f0a93bf4967cdabaecde8da46d46f654d63342f0c5e4fdb8a1b96c26136a4"
+  },
+  "referenceExperimentFileSHA256": {
+    "src/flex_auto_min.h": "da319c8a1a25c3da7ec64359a31cb66d91fd987c187ef8a5fa423d8e7366581c",
+    "src/flex_auto_min.cpp": "4a45c00273c0321ab0f490ba7f4de25a56771318615c6eda7e1907fbb2bb7546",
+    "src/intrinsic_source_sizes.h": "e0c3a3efb0bc8f7c73a5fad005ad327dd69b746939d579f666e73e09c1215a73",
+    "src/intrinsic_flex_rows.cpp": "06623e82d19843a93d6f9691fd05a2f1c46f35b6543955e3b2166e6b62e519b0"
+  }
+}

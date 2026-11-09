@@ -2,9 +2,9 @@
 # Keep this file in the Render Core source checkout so a Runtime source override
 # carries its own package identity instead of inheriting the Runtime version.
 
-set(JELLYFRAME_RENDER_CORE_PACKAGE_VERSION "0.8.0" CACHE STRING
+set(JELLYFRAME_RENDER_CORE_PACKAGE_VERSION "0.9.0-dev" CACHE STRING
     "Render Core package version")
-set(JELLYFRAME_RENDER_CORE_CMAKE_VERSION "0.8.0" CACHE STRING
+set(JELLYFRAME_RENDER_CORE_CMAKE_VERSION "0.9.0" CACHE STRING
     "Numeric CMake project version for the Render Core package")
-set(JELLYFRAME_RENDER_CORE_ENGINE_ABI "3" CACHE STRING
+set(JELLYFRAME_RENDER_CORE_ENGINE_ABI "4" CACHE STRING
     "Render Core public engine ABI version")

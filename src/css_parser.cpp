@@ -1,4 +1,6 @@
 ﻿#include "render_core/css_parser.h"
+#include "css_aspect_ratio.h"
+#include "css_flex_values.h"
 #include "render_core/feature_config.h"
 
 #include <algorithm>
@@ -862,15 +864,8 @@ bool is_supported_declaration_feature(std::string_view feature) {
     if (property == "visibility") {
         return supported_keyword(value, {"visible", "hidden"});
     }
-    if (property == "flex") {
-        return value == "auto" || value == "none" ||
-               value.find("px") != std::string::npos || is_number_with_suffix(value, {""}, false);
-    }
-    if (property == "flex-grow" || property == "flex-shrink") {
-        return is_number_with_suffix(value, {""}, false);
-    }
-    if (property == "flex-basis") {
-        return value == "auto" || is_supported_length_value(value);
+    if (property == "flex" || property == "flex-basis" || property == "flex-grow" || property == "flex-shrink") {
+        return detail::supports_flex_value(property,value);
     }
     if (property == "flex-direction") {
         return supported_keyword(value, {"row", "column"});
@@ -963,8 +958,8 @@ bool is_supported_declaration_feature(std::string_view feature) {
         return is_supported_border_shorthand_value(value);
     }
     if (property == "aspect-ratio") {
-        return value.find('/') != std::string::npos ||
-               is_number_with_suffix(value, {""}, false);
+        detail::CssAspectRatio ratio;
+        return detail::parse_css_aspect_ratio(value, ratio);
     }
     if (property == "font-weight") {
         return supported_keyword(value, {"normal", "bold", "bolder", "lighter"}) ||

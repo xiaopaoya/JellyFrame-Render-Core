@@ -105,7 +105,11 @@ private:
     TextMeasureProvider text_measure_;
     LayoutEngineOptions options_;
 
-    int layout_box(LayoutBox& box, int x, int y, int width, int height, std::size_t depth) const;
+    struct PreciseBoxContext;
+    int layout_box(LayoutBox& box, int x, int y, int width, int height, std::size_t depth,
+                   const PreciseBoxContext* precision = nullptr, std::int64_t* flow_units = nullptr) const;
+    int layout_precise_block(LayoutBox&, int height, std::size_t depth,
+                             const PreciseBoxContext&, std::int64_t* flow_units) const;
     int layout_text_box(LayoutBox& box,
                         int border_box_x,
                         int border_box_y,
@@ -113,6 +117,9 @@ private:
                         int min_width,
                         int height) const;
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    bool layout_precise_flex(LayoutBox&, std::int64_t content_width, std::int64_t fixed_height,
+                             const PreciseBoxContext&, std::int64_t content_x, std::int64_t content_y,
+                             int legacy_height, std::size_t depth, std::int64_t& natural_height) const;
     int layout_flex_box(LayoutBox& box,
                         int content_x,
                         int content_y,

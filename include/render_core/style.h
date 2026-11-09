@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "render_core/dom.h"
+#include "render_core/computed_size_storage.h"
 #include "render_core/diagnostics.h"
 #include "render_core/geometry.h"
 
@@ -47,6 +48,9 @@ enum class AlignItems : std::uint8_t {
     End,
     Auto,
 };
+
+// Percentage coefficients use thousandths of one percent; -1 Length means auto.
+enum class FlexBasisKind : std::uint8_t { Length, Percentage };
 
 enum class FlexDirection : std::uint8_t {
     Row,
@@ -264,9 +268,12 @@ struct TextShadowStyle {
 };
 
 struct Style {
+    // Shared optional Q1000 residues; integral styles keep this owner empty.
+    detail::ComputedSizeStorage computed_sizes;
     Display display = Display::Inline;
     bool visibility_hidden = false;
     bool visibility_specified = false;
+    bool aspect_ratio_auto = true;
     Color color{0, 0, 0, 255};
     bool color_specified = false;
     BackgroundPaintKind background_paint = BackgroundPaintKind::Solid;
@@ -355,8 +362,9 @@ struct Style {
     JustifyContent align_content = JustifyContent::Start;
     int flex_grow = 0;
     int flex_shrink = 1;
-    int flex_basis = -1;
+    int flex_basis = -1; // Pixels/auto (-1), or thousandths of one percent according to kind.
     std::int16_t flex_order = 0;
+    FlexBasisKind flex_basis_kind = FlexBasisKind::Length;
     int grid_min_track_width = -1;
     int grid_template_column_count = 0;
     std::array<int, 4> grid_template_column_widths{{0, 0, 0, 0}};

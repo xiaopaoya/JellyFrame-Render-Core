@@ -13,6 +13,9 @@ endif()
 set(JELLYFRAME_RENDER_CORE_CORE_DOCUMENT_SOURCES
     src/arena.cpp
     src/css_parser.cpp
+    src/css_aspect_ratio.cpp
+    src/computed_size_storage.cpp
+    src/css_selector_tokens.cpp
     src/document_script.cpp
     src/document_style.cpp
     src/dom.cpp
@@ -75,6 +78,8 @@ set(JELLYFRAME_RENDER_CORE_MODERN_PAINT_SOURCES
 
 set(JELLYFRAME_RENDER_CORE_FLEX_GRID_SOURCES
     src/flex_grid_paint.cpp
+    src/flex_length_precision.cpp
+    src/flex_auto_min.cpp
 )
 
 set(JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_SOURCES

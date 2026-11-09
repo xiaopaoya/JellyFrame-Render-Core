@@ -20,6 +20,7 @@ bool color_equal(Color left, Color right) {
 
 bool layout_fields_equal(const Style& left, const Style& right) {
     return left.display == right.display &&
+        left.computed_sizes.equals(right.computed_sizes) &&
         edge_sizes_equal(left.margin, right.margin) &&
         left.margin_left_auto == right.margin_left_auto &&
         left.margin_right_auto == right.margin_right_auto &&
@@ -40,6 +41,7 @@ bool layout_fields_equal(const Style& left, const Style& right) {
         left.max_height_percent == right.max_height_percent &&
         left.aspect_ratio_width == right.aspect_ratio_width &&
         left.aspect_ratio_height == right.aspect_ratio_height &&
+        left.aspect_ratio_auto == right.aspect_ratio_auto &&
         left.font_size == right.font_size &&
         left.font_size_specified == right.font_size_specified &&
         left.font_weight == right.font_weight &&
@@ -77,6 +79,7 @@ bool layout_fields_equal(const Style& left, const Style& right) {
         left.flex_grow == right.flex_grow &&
         left.flex_shrink == right.flex_shrink &&
         left.flex_basis == right.flex_basis &&
+        left.flex_basis_kind == right.flex_basis_kind &&
         left.flex_order == right.flex_order &&
         left.align_self == right.align_self &&
         left.align_content == right.align_content &&

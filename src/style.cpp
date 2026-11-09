@@ -3,6 +3,9 @@
 #include "render_core/form_control.h"
 #include "render_core/feature_config.h"
 #include "render_core/text_backend.h"
+#include "css_aspect_ratio.h"
+#include "css_flex_values.h"
+#include "computed_size_values.h"
 
 #include <algorithm>
 #include <array>
@@ -468,42 +471,21 @@ bool parse_integer(const std::string& raw_value, int& output) {
     return true;
 }
 
-bool parse_positive_ratio_number(const std::string& raw_value, int& output) {
-    float parsed = 0.0F;
-    if (!parse_float(raw_value, parsed) || parsed <= 0.0F) {
-        return false;
-    }
-    if (parsed >= 1000.0F) {
-        output = 1000000;
-        return true;
-    }
-    return round_finite_float_to_int(parsed * 1000.0F, output) && output > 0;
-}
-
-bool parse_aspect_ratio(const std::string& raw_value, int& width, int& height) {
-    std::string value = lowercase(trim(raw_value));
-    if (value.rfind("auto", 0) == 0) {
-        value = trim(std::string_view(value).substr(4));
-    }
-    const std::size_t slash = value.find('/');
-    if (slash == std::string::npos) {
-        int single = 0;
-        if (!parse_positive_ratio_number(value, single)) {
-            return false;
+bool publish_flex_basis(Style& style, int scalar, FlexBasisKind kind, const std::string& token) {
+    const auto literal=trim(token);
+    char* end=nullptr;
+    const double number=std::strtod(literal.c_str(),&end);
+    if (kind==FlexBasisKind::Length && scalar>=0 && end && end!=literal.c_str() && std::isfinite(number) && number>=0) {
+        const auto suffix=lowercase(trim(end));
+        if (suffix.empty() || suffix=="px") {
+            if (!detail::apply_computed_size(style,detail::SizeProperty::FlexBasis,detail::SizeKind::Pixels,number)) return false;
+            style.flex_basis_kind=kind;
+            return true;
         }
-        width = single;
-        height = 1000;
-        return true;
     }
-
-    int parsed_width = 0;
-    int parsed_height = 0;
-    if (!parse_positive_ratio_number(value.substr(0, slash), parsed_width) ||
-        !parse_positive_ratio_number(value.substr(slash + 1), parsed_height)) {
-        return false;
-    }
-    width = parsed_width;
-    height = parsed_height;
+    style.computed_sizes.clear(detail::SizeProperty::FlexBasis);
+    style.flex_basis=scalar;
+    style.flex_basis_kind=kind;
     return true;
 }
 
@@ -635,80 +617,79 @@ bool parse_position_inset(const std::string& raw_value,
 }
 
 bool parse_flex_basis_value(const std::string& raw_value,
-                            int font_size,
-                            int& output,
+                            int font_size, int& output, FlexBasisKind& kind,
                             const LengthResolutionContext& context = {}) {
     const std::string value = lowercase(trim(raw_value));
-    if (value == "auto") {
+    kind = FlexBasisKind::Length;
+    if (value == "auto" || value == "initial" || value == "unset") {
         output = -1;
         return true;
     }
-    return parse_length_px(value, output, font_size, context);
+    char* end = nullptr;
+    const double number = std::strtod(value.c_str(), &end);
+    if (end && end != value.c_str() && (!std::isfinite(number) || number < 0)) return false;
+    if (end && end != value.c_str() && trim(end) == "%") {
+        if (!std::isfinite(number) || number < 0) return false;
+        // Keep the coefficient, never a viewport-derived pixel approximation.
+        // Saturate before arithmetic, using the experiment's int32 Q1000 bound.
+        std::int64_t units = 0;
+        if (!detail::encode_dimension_units(std::min(number,
+            static_cast<double>(std::numeric_limits<int>::max())/1000.0),units)) return false;
+        output = static_cast<int>(std::min<std::int64_t>(units,std::numeric_limits<int>::max()));
+        kind = FlexBasisKind::Percentage;
+        return true;
+    }
+    // Mixed percentage math needs a retained expression, not parse_length_px's
+    // viewport conversion. Do not advertise that unsupported interpretation.
+    if (value.find('%') != std::string::npos) return false;
+    return parse_length_px(value, output, font_size, context) && output >= 0;
 }
 
 bool parse_flex_shorthand(const std::string& raw_value,
-                          int font_size,
-                          int& grow,
-                          int& shrink,
-                          int& basis,
+                          int font_size, int& grow, int& shrink, int& basis,
+                          FlexBasisKind& kind, std::string& literal_basis,
                           const LengthResolutionContext& context = {}) {
     const std::string value = lowercase(trim(raw_value));
-    if (value == "none") {
-        grow = 0;
-        shrink = 0;
+    literal_basis.clear();
+    kind = FlexBasisKind::Length;
+    if (value == "none" || value == "auto" || value == "initial" || value == "unset") {
+        grow = value == "auto" ? 1000 : 0;
+        shrink = value == "none" ? 0 : 1000;
         basis = -1;
         return true;
     }
-    if (value == "auto") {
-        grow = 1000;
-        shrink = 1000;
-        basis = -1;
-        return true;
-    }
-
     std::istringstream stream(value);
     std::vector<std::string> tokens;
     std::string token;
     while (stream >> token) {
-        if (tokens.size() >= 3) {
-            return false;
-        }
+        if (tokens.size() >= 3) return false;
         tokens.push_back(token);
     }
-    if (tokens.empty()) {
-        return false;
-    }
-
-    int parsed_grow = 0;
-    if (!parse_flex_factor(tokens[0], parsed_grow)) {
-        return false;
-    }
-    int parsed_shrink = 1000;
-    int parsed_basis = 0;
-    if (tokens.size() == 1) {
-        grow = parsed_grow;
-        shrink = parsed_shrink;
-        basis = parsed_basis;
-        return true;
-    }
-
-    int second_factor = 0;
-    if (parse_flex_factor(tokens[1], second_factor)) {
-        parsed_shrink = second_factor;
-        if (tokens.size() == 3 && !parse_flex_basis_value(tokens[2], font_size, parsed_basis, context)) {
-            return false;
-        }
-    } else if (tokens.size() == 2) {
-        if (!parse_flex_basis_value(tokens[1], font_size, parsed_basis, context)) {
-            return false;
+    if (tokens.empty()) return false;
+    int parsed_grow=1000, parsed_shrink=1000, parsed_basis=0;
+    std::size_t basis_index=tokens.size();
+    if (parse_flex_factor(tokens[0],parsed_grow)) {
+        if (tokens.size() >= 2) {
+            if (parse_flex_factor(tokens[1],parsed_shrink)) {
+                if (tokens.size()==3) basis_index=2;
+            } else {
+                if (tokens.size()!=2) return false;
+                basis_index=1;
+            }
         }
     } else {
-        return false;
+        basis_index=0;
+        if (tokens.size()>=2 && !parse_flex_factor(tokens[1],parsed_grow)) return false;
+        if (tokens.size()==3 && !parse_flex_factor(tokens[2],parsed_shrink)) return false;
     }
-
-    grow = parsed_grow;
-    shrink = parsed_shrink;
-    basis = parsed_basis;
+    if (basis_index<tokens.size()) {
+        const auto& candidate=tokens[basis_index];
+        // Global reset keywords are accepted only as the complete declaration.
+        if (candidate=="initial" || candidate=="unset") return false;
+        if (!parse_flex_basis_value(candidate,font_size,parsed_basis,kind,context)) return false;
+        literal_basis=candidate;
+    }
+    grow=parsed_grow;shrink=parsed_shrink;basis=parsed_basis;
     return true;
 }
 
@@ -3250,13 +3231,23 @@ enum class DeclarationApplyResult : std::uint8_t {
     Invalid,
 };
 
-DeclarationApplyResult apply_length_or_percent(int& length_px,
+DeclarationApplyResult apply_length_or_percent(Style& style, detail::SizeProperty property, int& length_px,
                                                int& percent,
                                                const std::string& value,
                                                int font_size,
                                                const LengthResolutionContext& context) {
+    const auto literal = trim(value);
+    char* end = nullptr;
+    const double number = std::strtod(literal.c_str(), &end);
+    const auto suffix = end ? lowercase(trim(end)) : std::string{};
+    const bool numeric = end && end != literal.c_str() && std::isfinite(number) && number >= 0;
     int parsed_percent = -1;
     if (parse_percentage_int(value, parsed_percent)) {
+        if (numeric && suffix == "%") {
+            return detail::apply_computed_size(style, property, detail::SizeKind::Percent, number)
+                ? DeclarationApplyResult::Applied : DeclarationApplyResult::Invalid;
+        }
+        style.computed_sizes.clear(property);
         length_px = -1;
         percent = parsed_percent;
         return DeclarationApplyResult::Applied;
@@ -3266,6 +3257,11 @@ DeclarationApplyResult apply_length_or_percent(int& length_px,
     if (!parse_length_px(value, px, font_size, context)) {
         return DeclarationApplyResult::Invalid;
     }
+    if (numeric && (suffix.empty() || suffix == "px")) {
+        return detail::apply_computed_size(style, property, detail::SizeKind::Pixels, number)
+            ? DeclarationApplyResult::Applied : DeclarationApplyResult::Invalid;
+    }
+    style.computed_sizes.clear(property);
     length_px = px;
     percent = -1;
     return DeclarationApplyResult::Applied;
@@ -3275,42 +3271,59 @@ DeclarationApplyResult apply_sizing_declaration(Style& style,
                                                 const std::string& property,
                                                 const std::string& value,
                                                 const LengthResolutionContext& context) {
+    const auto keyword = lowercase(trim(value));
+    const bool minimum = property == "min-width" || property == "min-height";
+    const bool maximum = property == "max-width" || property == "max-height";
+    if ((minimum || maximum) && (keyword == "initial" || keyword == "unset" ||
+        (minimum && keyword == "auto") || (maximum && keyword == "none"))) {
+        const auto slot = property == "min-width" ? detail::SizeProperty::MinWidth :
+            property == "min-height" ? detail::SizeProperty::MinHeight :
+            property == "max-width" ? detail::SizeProperty::MaxWidth : detail::SizeProperty::MaxHeight;
+        style.computed_sizes.clear(slot);
+        if (property == "min-width") { style.min_width = -1; style.min_width_percent = -1; }
+        if (property == "min-height") { style.min_height = -1; style.min_height_percent = -1; }
+        if (property == "max-width") { style.max_width = -1; style.max_width_percent = -1; }
+        if (property == "max-height") { style.max_height = -1; style.max_height_percent = -1; }
+        return DeclarationApplyResult::Applied;
+    }
     if (property == "width") {
-        if (lowercase(trim(value)) == "auto") {
+        const auto keyword = lowercase(trim(value));
+        if (keyword == "auto" || keyword == "initial" || keyword == "unset") {
+            style.computed_sizes.clear(detail::SizeProperty::Width);
             style.width = -1;
             style.width_percent = -1;
             return DeclarationApplyResult::Applied;
         }
-        return apply_length_or_percent(style.width, style.width_percent, value, style.font_size, context);
+        return apply_length_or_percent(style, detail::SizeProperty::Width, style.width, style.width_percent, value, style.font_size, context);
     }
     if (property == "height") {
-        if (lowercase(trim(value)) == "auto") {
+        const auto keyword = lowercase(trim(value));
+        if (keyword == "auto" || keyword == "initial" || keyword == "unset") {
+            style.computed_sizes.clear(detail::SizeProperty::Height);
             style.height = -1;
             style.height_percent = -1;
             return DeclarationApplyResult::Applied;
         }
-        return apply_length_or_percent(style.height, style.height_percent, value, style.font_size, context);
+        return apply_length_or_percent(style, detail::SizeProperty::Height, style.height, style.height_percent, value, style.font_size, context);
     }
     if (property == "min-width") {
-        return apply_length_or_percent(style.min_width, style.min_width_percent, value, style.font_size, context);
+        return apply_length_or_percent(style, detail::SizeProperty::MinWidth, style.min_width, style.min_width_percent, value, style.font_size, context);
     }
     if (property == "min-height") {
-        return apply_length_or_percent(style.min_height, style.min_height_percent, value, style.font_size, context);
+        return apply_length_or_percent(style, detail::SizeProperty::MinHeight, style.min_height, style.min_height_percent, value, style.font_size, context);
     }
     if (property == "max-width") {
-        return apply_length_or_percent(style.max_width, style.max_width_percent, value, style.font_size, context);
+        return apply_length_or_percent(style, detail::SizeProperty::MaxWidth, style.max_width, style.max_width_percent, value, style.font_size, context);
     }
     if (property == "max-height") {
-        return apply_length_or_percent(style.max_height, style.max_height_percent, value, style.font_size, context);
+        return apply_length_or_percent(style, detail::SizeProperty::MaxHeight, style.max_height, style.max_height_percent, value, style.font_size, context);
     }
     if (property == "aspect-ratio") {
-        int ratio_width = 0;
-        int ratio_height = 0;
-        if (!parse_aspect_ratio(value, ratio_width, ratio_height)) {
-            return DeclarationApplyResult::Invalid;
-        }
-        style.aspect_ratio_width = ratio_width;
-        style.aspect_ratio_height = ratio_height;
+        detail::CssAspectRatio ratio;
+        if (!detail::parse_css_aspect_ratio(value, ratio)) return DeclarationApplyResult::Invalid;
+        style.aspect_ratio_width = ratio.width;
+        style.aspect_ratio_height = ratio.height;
+        style.aspect_ratio_auto = ratio.automatic;
         return DeclarationApplyResult::Applied;
     }
     return DeclarationApplyResult::Unhandled;
@@ -3996,12 +4009,12 @@ bool apply_declaration(Style& style,
         int grow = 0;
         int shrink = 0;
         int basis = -1;
-        if (!parse_flex_shorthand(value, style.font_size, grow, shrink, basis, context)) {
-            return false;
-        }
+        FlexBasisKind kind;
+        std::string literal_basis;
+        if (!parse_flex_shorthand(value, style.font_size, grow, shrink, basis, kind, literal_basis, context)) return false;
+        if (!publish_flex_basis(style,basis,kind,literal_basis)) return false;
         style.flex_grow = grow;
         style.flex_shrink = shrink;
-        style.flex_basis = basis;
         return true;
     } else if (property == "flex-grow") {
         int factor = 0;
@@ -4019,11 +4032,9 @@ bool apply_declaration(Style& style,
         return true;
     } else if (property == "flex-basis") {
         int basis = -1;
-        if (!parse_flex_basis_value(value, style.font_size, basis, context)) {
-            return false;
-        }
-        style.flex_basis = basis;
-        return true;
+        FlexBasisKind kind;
+        if (!parse_flex_basis_value(value, style.font_size, basis, kind, context)) return false;
+        return publish_flex_basis(style,basis,kind,value);
     } else if (property == "flex-direction") {
         const std::string lowered = lowercase(trim(value));
         if (lowered == "row") {
@@ -4938,6 +4949,14 @@ std::vector<CssDeclaration> parse_inline_style(const std::string& source,
         CssDeclaration declaration;
         declaration.property = lowercase(trim(std::string_view(source).substr(index, colon - index)));
         declaration.value = trim(std::string_view(source).substr(colon + 1, end - colon - 1));
+        constexpr std::string_view important = "!important";
+        const auto lowered_value = lowercase(declaration.value);
+        if (lowered_value.size() >= important.size() &&
+            lowered_value.compare(lowered_value.size() - important.size(), important.size(), important) == 0) {
+            declaration.important = true;
+            declaration.value = trim(std::string_view(declaration.value).substr(
+                0, declaration.value.size() - important.size()));
+        }
         if (!declaration.property.empty() && !declaration.value.empty()) {
             declarations.push_back(std::move(declaration));
         } else {
@@ -5777,6 +5796,92 @@ Style StyleResolver::resolve_with_custom_properties(const Node& node,
                                                     const std::vector<const CssRule*>* matched_rules,
                                                     const LengthResolutionContext& length_context) const {
     Style style = default_style_for(node);
+    if (node.type == NodeType::Element) {
+        struct HtmlDimension {
+            std::string_view number;
+            double value = 0.0;
+            bool percent = false;
+        };
+        const auto parse_dimension = [](std::string_view source, HtmlDimension& output, bool integer = false) {
+            if (source.empty() || source.size() > 4096) return false;
+            std::size_t position = 0;
+            while (position < source.size() &&
+                   (source[position] == ' ' || source[position] == '\t' || source[position] == '\n' ||
+                    source[position] == '\r' || source[position] == '\f')) {
+                ++position;
+            }
+            const std::size_t begin = position;
+            bool negative = false;
+            if (integer && position < source.size() &&
+                (source[position] == '+' || source[position] == '-')) {
+                negative = source[position] == '-';
+                ++position;
+            }
+            const std::size_t digits = position;
+            if (position == source.size() || source[position] < '0' || source[position] > '9') return false;
+            double value = 0.0;
+            while (position < source.size() && source[position] >= '0' && source[position] <= '9') {
+                value = value * 10.0 + static_cast<double>(source[position] - '0');
+                if (position - digits >= 63) return false;
+                ++position;
+            }
+            const std::size_t integer_end = position;
+            if (!integer && position < source.size() && source[position] == '.') {
+                ++position;
+                double factor = 0.1;
+                while (position < source.size() && source[position] >= '0' && source[position] <= '9') {
+                    value += static_cast<double>(source[position] - '0') * factor;
+                    factor *= 0.1;
+                    if (position - digits >= 63) return false;
+                    ++position;
+                }
+            }
+            if (negative && value != 0.0) return false;
+            if (integer) {
+                if (value > static_cast<double>(std::numeric_limits<int>::max())) return false;
+            }
+            const std::size_t number_end = integer ? integer_end : position;
+            output.number = source.substr(begin, number_end - begin);
+            output.value = value;
+            output.percent = !integer && position < source.size() && source[position] == '%';
+            return true;
+        };
+        const bool sized_element = node.tag_name == "img" || node.tag_name == "video" ||
+            node.tag_name == "object" || node.tag_name == "embed" || node.tag_name == "iframe";
+        const bool canvas = node.tag_name == "canvas";
+        if (sized_element || canvas) {
+            HtmlDimension width, height;
+            const bool has_width = parse_dimension(node.attribute("width"), width, canvas);
+            const bool has_height = parse_dimension(node.attribute("height"), height, canvas);
+            const auto apply_ratio = [&](const HtmlDimension& width_value, const HtmlDimension& height_value) {
+                auto width_number = width_value.number;
+                auto height_number = height_value.number;
+                if (!width_number.empty() && width_number.back() == '.') width_number.remove_suffix(1);
+                if (!height_number.empty() && height_number.back() == '.') height_number.remove_suffix(1);
+                char source[127];
+                auto* end = std::copy(width_number.begin(), width_number.end(), source);
+                *end++ = '/';
+                end = std::copy(height_number.begin(), height_number.end(), end);
+                detail::CssAspectRatio ratio;
+                if (!detail::parse_css_aspect_ratio(std::string_view(source, end - source), ratio)) return;
+                style.aspect_ratio_width = ratio.width;
+                style.aspect_ratio_height = ratio.height;
+                style.aspect_ratio_auto = true;
+            };
+            if (sized_element) {
+                if (has_width) detail::apply_computed_size(style, detail::SizeProperty::Width,
+                    width.percent ? detail::SizeKind::Percent : detail::SizeKind::Pixels, width.value);
+                if (has_height) detail::apply_computed_size(style, detail::SizeProperty::Height,
+                    height.percent ? detail::SizeKind::Percent : detail::SizeKind::Pixels, height.value);
+                if ((node.tag_name == "img" || node.tag_name == "video") && has_width && has_height &&
+                    !width.percent && !height.percent) {
+                    apply_ratio(width, height);
+                }
+            } else if (has_width && has_height) {
+                apply_ratio(width, height);
+            }
+        }
+    }
     CascadeSlots slots;
     const SelectorMatchContext context = selector_match_context_from_options(options_);
 
@@ -5859,6 +5964,23 @@ void StyleResolver::set_interaction_state(const Node* hovered_node,
     options_.hovered_node = hovered_node;
     options_.active_node = active_node;
     options_.focused_node = focused_node;
+}
+
+namespace detail {
+bool supports_flex_value(const std::string& property,const std::string& value) {
+#if !JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    return false;
+#else
+    int basis=-1, grow=0, shrink=0;
+    FlexBasisKind kind;
+    if (property=="flex-basis") return parse_flex_basis_value(value,16,basis,kind);
+    if (property=="flex") {
+        std::string literal;
+        return parse_flex_shorthand(value,16,grow,shrink,basis,kind,literal);
+    }
+    return (property=="flex-grow" || property=="flex-shrink") && parse_flex_factor(value,grow);
+#endif
+}
 }
 
 } // namespace jellyframe

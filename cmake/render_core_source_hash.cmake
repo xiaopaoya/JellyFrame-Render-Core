@@ -17,6 +17,8 @@ function(jellyframe_compute_render_core_source_hash source_root)
     file(GLOB_RECURSE _jellyframe_render_core_hash_sources CONFIGURE_DEPENDS
         RELATIVE "${_jellyframe_render_core_hash_root}"
         "${_jellyframe_render_core_hash_root}/src/*.cpp"
+        "${_jellyframe_render_core_hash_root}/src/*.h"
+        "${_jellyframe_render_core_hash_root}/src/*.hpp"
         "${_jellyframe_render_core_hash_root}/include/render_core/*.h"
         "${_jellyframe_render_core_hash_root}/include/render_core/*.hpp")
     file(GLOB _jellyframe_render_core_hash_cmake CONFIGURE_DEPENDS

@@ -1,4 +1,35 @@
+add_executable(jellyframe_flex_auto_min_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/flex_auto_min_tests.cpp")
+target_link_libraries(jellyframe_flex_auto_min_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_flex_auto_min_tests COMMAND jellyframe_flex_auto_min_tests)
+add_executable(jellyframe_flex_basis_percentage_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/flex_basis_percentage_tests.cpp")
+target_link_libraries(jellyframe_flex_basis_percentage_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_flex_basis_percentage_tests COMMAND jellyframe_flex_basis_percentage_tests)
 # Shared Render Core regression-test registration.
+if(JELLYFRAME_ENABLE_FLEX_GRID)
+    add_executable(jellyframe_computed_flex_layout_tests
+        "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/computed_flex_layout_tests.cpp")
+    target_link_libraries(jellyframe_computed_flex_layout_tests PRIVATE jellyframe_render_core)
+    add_test(NAME jellyframe_computed_flex_layout_tests COMMAND jellyframe_computed_flex_layout_tests)
+endif()
+add_executable(jellyframe_computed_block_layout_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/computed_block_layout_tests.cpp")
+target_link_libraries(jellyframe_computed_block_layout_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_computed_block_layout_tests COMMAND jellyframe_computed_block_layout_tests)
+add_executable(jellyframe_computed_size_storage_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/computed_size_storage_tests.cpp")
+target_link_libraries(jellyframe_computed_size_storage_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_computed_size_storage_tests COMMAND jellyframe_computed_size_storage_tests)
+add_executable(jellyframe_aspect_ratio_literal_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/aspect_ratio_literal_tests.cpp")
+target_link_libraries(jellyframe_aspect_ratio_literal_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_aspect_ratio_literal_tests COMMAND jellyframe_aspect_ratio_literal_tests)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME jellyframe_source_hash_private_headers
+        COMMAND "${Python3_EXECUTABLE}" "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/tools/source_hash_private_header_tests.py")
+endif()
 
 set(JELLYFRAME_RENDER_CORE_TEST_SOURCES
     tests/unit/tokenizer_tests.cpp

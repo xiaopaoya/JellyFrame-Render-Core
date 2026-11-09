@@ -265,7 +265,8 @@ void text_wrap_alias_reuses_bounded_white_space_behavior() {
 
 void style_struct_size_has_embedded_guardrail() {
 #if !defined(JELLYFRAME_TEST_CONFIG_DEBUG)
-    check(sizeof(Style) <= 776, "Style should stay within the embedded size guardrail");
+    // One pointer for independently shared computed dimension residues.
+    check(sizeof(Style) <= 784, "Style should stay within the embedded size guardrail");
     check(sizeof(DisplayCommand) <= 160, "DisplayCommand should stay compact for display-list reuse");
 #endif
     const Style idle_style;
@@ -1212,7 +1213,7 @@ void grid_and_aspect_ratio_properties_apply() {
     check(card_style.grid_column_start == 1 && card_style.grid_column_span == 2 &&
               card_style.grid_row_start == 1 && card_style.grid_row_span == 2,
           "numeric grid placement and span parse");
-    check(media_style.aspect_ratio_width == 1500 && media_style.aspect_ratio_height == 1000,
+    check(media_style.aspect_ratio_width == 3 && media_style.aspect_ratio_height == 2 && media_style.aspect_ratio_auto,
           "aspect ratio parsed");
 }
 

@@ -1,0 +1,2902 @@
+{
+  "corpusSHA256": "4c1799baa74cb5657405b57ed32d82f2523146f3512a3de5d429a28f041da791",
+  "styleSourceSHA256": "63b33b99fbd5944cf63d4a6111dbe08d1fa2a53d91537f0570fc68f716416122",
+  "librarySHA256": "eb0caa5dc3585567a4c600c3650e4a90e394e6bb14c5660772ab953d6b938ee6",
+  "coreHead": "64f0cf94a923d72abe76ab5073c7a62723f6346d",
+  "checks": [
+    {
+      "id": "d000",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "80"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 80
+      },
+      "actual": {
+        "kind": "px",
+        "value": 80
+      }
+    },
+    {
+      "id": "d000",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "40"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 40
+      },
+      "actual": {
+        "kind": "px",
+        "value": 40
+      }
+    },
+    {
+      "id": "d000",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "80",
+        "40"
+      ],
+      "actual": [
+        2,
+        1
+      ]
+    },
+    {
+      "id": "d001",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "percent",
+        "value": "37.5"
+      },
+      "scalarExpected": {
+        "kind": "percent",
+        "value": 38
+      },
+      "actual": {
+        "kind": "percent",
+        "value": 38
+      }
+    },
+    {
+      "id": "d001",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12.25"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d001",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d002",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "80"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 80
+      },
+      "actual": {
+        "kind": "px",
+        "value": 80
+      }
+    },
+    {
+      "id": "d002",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "40"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 40
+      },
+      "actual": {
+        "kind": "px",
+        "value": 40
+      }
+    },
+    {
+      "id": "d002",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "80",
+        "40"
+      ],
+      "actual": [
+        2,
+        1
+      ]
+    },
+    {
+      "id": "d003",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "percent",
+        "value": "37.5"
+      },
+      "scalarExpected": {
+        "kind": "percent",
+        "value": 38
+      },
+      "actual": {
+        "kind": "percent",
+        "value": 38
+      }
+    },
+    {
+      "id": "d003",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12.25"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d003",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d004",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "80"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 80
+      },
+      "actual": {
+        "kind": "px",
+        "value": 80
+      }
+    },
+    {
+      "id": "d004",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "40"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 40
+      },
+      "actual": {
+        "kind": "px",
+        "value": 40
+      }
+    },
+    {
+      "id": "d004",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d005",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "percent",
+        "value": "37.5"
+      },
+      "scalarExpected": {
+        "kind": "percent",
+        "value": 38
+      },
+      "actual": {
+        "kind": "percent",
+        "value": 38
+      }
+    },
+    {
+      "id": "d005",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12.25"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d005",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d006",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "80"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 80
+      },
+      "actual": {
+        "kind": "px",
+        "value": 80
+      }
+    },
+    {
+      "id": "d006",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "40"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 40
+      },
+      "actual": {
+        "kind": "px",
+        "value": 40
+      }
+    },
+    {
+      "id": "d006",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d007",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "percent",
+        "value": "37.5"
+      },
+      "scalarExpected": {
+        "kind": "percent",
+        "value": 38
+      },
+      "actual": {
+        "kind": "percent",
+        "value": 38
+      }
+    },
+    {
+      "id": "d007",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12.25"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d007",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d008",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "80"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 80
+      },
+      "actual": {
+        "kind": "px",
+        "value": 80
+      }
+    },
+    {
+      "id": "d008",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "40"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 40
+      },
+      "actual": {
+        "kind": "px",
+        "value": 40
+      }
+    },
+    {
+      "id": "d008",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d009",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "percent",
+        "value": "37.5"
+      },
+      "scalarExpected": {
+        "kind": "percent",
+        "value": 38
+      },
+      "actual": {
+        "kind": "percent",
+        "value": 38
+      }
+    },
+    {
+      "id": "d009",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12.25"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d009",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d010",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d010",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d010",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d011",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d011",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d011",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d012",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d012",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d012",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d013",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d013",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d013",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d014",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d014",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d014",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d015",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d015",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d015",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d016",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d016",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d016",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d017",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d017",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d017",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d018",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d018",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d018",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "12",
+        "2"
+      ],
+      "actual": [
+        6,
+        1
+      ]
+    },
+    {
+      "id": "d019",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d019",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d019",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "12",
+        "2"
+      ],
+      "actual": [
+        6,
+        1
+      ]
+    },
+    {
+      "id": "d020",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d020",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d020",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "12",
+        "2"
+      ],
+      "actual": [
+        6,
+        1
+      ]
+    },
+    {
+      "id": "d021",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "percent",
+        "value": "12"
+      },
+      "scalarExpected": {
+        "kind": "percent",
+        "value": 12
+      },
+      "actual": {
+        "kind": "percent",
+        "value": 12
+      }
+    },
+    {
+      "id": "d021",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d021",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d022",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d022",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d022",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "12",
+        "2"
+      ],
+      "actual": [
+        6,
+        1
+      ]
+    },
+    {
+      "id": "d023",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "percent",
+        "value": "12"
+      },
+      "scalarExpected": {
+        "kind": "percent",
+        "value": 12
+      },
+      "actual": {
+        "kind": "percent",
+        "value": 12
+      }
+    },
+    {
+      "id": "d023",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d023",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d024",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d024",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d024",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "12",
+        "2"
+      ],
+      "actual": [
+        6,
+        1
+      ]
+    },
+    {
+      "id": "d025",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "percent",
+        "value": "12.5"
+      },
+      "scalarExpected": {
+        "kind": "percent",
+        "value": 13
+      },
+      "actual": {
+        "kind": "percent",
+        "value": 13
+      }
+    },
+    {
+      "id": "d025",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d025",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d026",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12.5"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 13
+      },
+      "actual": {
+        "kind": "px",
+        "value": 13
+      }
+    },
+    {
+      "id": "d026",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d026",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "25/2",
+        "2"
+      ],
+      "actual": [
+        25,
+        4
+      ]
+    },
+    {
+      "id": "d027",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d027",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d027",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "12",
+        "2"
+      ],
+      "actual": [
+        6,
+        1
+      ]
+    },
+    {
+      "id": "d028",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12.25"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d028",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d028",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "49/4",
+        "2"
+      ],
+      "actual": [
+        49,
+        8
+      ]
+    },
+    {
+      "id": "d029",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 0
+      },
+      "actual": {
+        "kind": "px",
+        "value": 0
+      }
+    },
+    {
+      "id": "d029",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d029",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "0",
+        "2"
+      ],
+      "actual": [
+        0,
+        1000
+      ]
+    },
+    {
+      "id": "d030",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "percent",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "percent",
+        "value": 0
+      },
+      "actual": {
+        "kind": "percent",
+        "value": 0
+      }
+    },
+    {
+      "id": "d030",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d030",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d031",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "0.0001"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 0
+      },
+      "actual": {
+        "kind": "px",
+        "value": 0
+      }
+    },
+    {
+      "id": "d031",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d031",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "1/10000",
+        "2"
+      ],
+      "actual": [
+        1,
+        20000
+      ]
+    },
+    {
+      "id": "d032",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d032",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d032",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "12",
+        "2"
+      ],
+      "actual": [
+        6,
+        1
+      ]
+    },
+    {
+      "id": "d033",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d033",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d033",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d034",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d034",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d034",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "12",
+        "2"
+      ],
+      "actual": [
+        6,
+        1
+      ]
+    },
+    {
+      "id": "d035",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d035",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d035",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d036",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 0
+      },
+      "actual": {
+        "kind": "px",
+        "value": 0
+      }
+    },
+    {
+      "id": "d036",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 0
+      },
+      "actual": {
+        "kind": "px",
+        "value": 0
+      }
+    },
+    {
+      "id": "d036",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "0",
+        "0"
+      ],
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d037",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 0
+      },
+      "actual": {
+        "kind": "px",
+        "value": 0
+      }
+    },
+    {
+      "id": "d037",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "5"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 5
+      },
+      "actual": {
+        "kind": "px",
+        "value": 5
+      }
+    },
+    {
+      "id": "d037",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "0",
+        "5"
+      ],
+      "actual": [
+        0,
+        1000
+      ]
+    },
+    {
+      "id": "d038",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "5"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 5
+      },
+      "actual": {
+        "kind": "px",
+        "value": 5
+      }
+    },
+    {
+      "id": "d038",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 0
+      },
+      "actual": {
+        "kind": "px",
+        "value": 0
+      }
+    },
+    {
+      "id": "d038",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "5",
+        "0"
+      ],
+      "actual": [
+        1000,
+        0
+      ]
+    },
+    {
+      "id": "d039",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "0.0001"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 0
+      },
+      "actual": {
+        "kind": "px",
+        "value": 0
+      }
+    },
+    {
+      "id": "d039",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "0.0002"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 0
+      },
+      "actual": {
+        "kind": "px",
+        "value": 0
+      }
+    },
+    {
+      "id": "d039",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "1/10000",
+        "1/5000"
+      ],
+      "actual": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "d040",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12.345678"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d040",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "6.172839"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 6
+      },
+      "actual": {
+        "kind": "px",
+        "value": 6
+      }
+    },
+    {
+      "id": "d040",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "6172839/500000",
+        "6172839/1000000"
+      ],
+      "actual": [
+        2,
+        1
+      ]
+    },
+    {
+      "id": "d041",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d041",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "1073741824"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 1073741824
+      },
+      "actual": {
+        "kind": "px",
+        "value": 1073741824
+      }
+    },
+    {
+      "id": "d041",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "2147483648",
+        "1073741824"
+      ],
+      "actual": [
+        2,
+        1
+      ]
+    },
+    {
+      "id": "d042",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d042",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "2"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 2
+      },
+      "actual": {
+        "kind": "px",
+        "value": 2
+      }
+    },
+    {
+      "id": "d042",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d043",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "12"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 12
+      },
+      "actual": {
+        "kind": "px",
+        "value": 12
+      }
+    },
+    {
+      "id": "d043",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d043",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d044",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d044",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d044",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "300",
+        "150"
+      ],
+      "actual": [
+        2,
+        1
+      ]
+    },
+    {
+      "id": "d045",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d045",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d045",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "300",
+        "150"
+      ],
+      "actual": [
+        2,
+        1
+      ]
+    },
+    {
+      "id": "d046",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d046",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d046",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "300",
+        "150"
+      ],
+      "actual": [
+        2,
+        1
+      ]
+    },
+    {
+      "id": "d047",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d047",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d047",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "300",
+        "150"
+      ],
+      "actual": [
+        2,
+        1
+      ]
+    },
+    {
+      "id": "d048",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d048",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d048",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "0",
+        "5"
+      ],
+      "actual": [
+        0,
+        1000
+      ]
+    },
+    {
+      "id": "d049",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d049",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d049",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d050",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d050",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d050",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d051",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d051",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d051",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "0",
+        "0"
+      ],
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d052",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d052",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d052",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d053",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d053",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d053",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d054",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d054",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d054",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d055",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "17"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 17
+      },
+      "actual": {
+        "kind": "px",
+        "value": 17
+      }
+    },
+    {
+      "id": "d055",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "9"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 9
+      },
+      "actual": {
+        "kind": "px",
+        "value": 9
+      }
+    },
+    {
+      "id": "d055",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "3",
+        "2"
+      ],
+      "actual": [
+        3000,
+        2000
+      ]
+    },
+    {
+      "id": "d056",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "percent",
+        "value": "50"
+      },
+      "scalarExpected": {
+        "kind": "percent",
+        "value": 50
+      },
+      "actual": {
+        "kind": "percent",
+        "value": 50
+      }
+    },
+    {
+      "id": "d056",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "percent",
+        "value": "25"
+      },
+      "scalarExpected": {
+        "kind": "percent",
+        "value": 25
+      },
+      "actual": {
+        "kind": "percent",
+        "value": 25
+      }
+    },
+    {
+      "id": "d056",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "80",
+        "40"
+      ],
+      "actual": [
+        2,
+        1
+      ]
+    },
+    {
+      "id": "d057",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "80"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 80
+      },
+      "actual": {
+        "kind": "px",
+        "value": 80
+      }
+    },
+    {
+      "id": "d057",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "40"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 40
+      },
+      "actual": {
+        "kind": "px",
+        "value": 40
+      }
+    },
+    {
+      "id": "d057",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "80",
+        "40"
+      ],
+      "actual": [
+        2,
+        1
+      ]
+    },
+    {
+      "id": "d058",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d058",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "7"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 7
+      },
+      "actual": {
+        "kind": "px",
+        "value": 7
+      }
+    },
+    {
+      "id": "d058",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "80",
+        "40"
+      ],
+      "actual": [
+        2,
+        1
+      ]
+    },
+    {
+      "id": "d059",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d059",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "auto",
+        "value": "0"
+      },
+      "scalarExpected": {
+        "kind": "auto",
+        "value": 0
+      },
+      "actual": {
+        "kind": "auto",
+        "value": 0
+      }
+    },
+    {
+      "id": "d059",
+      "property": "ratio",
+      "match": true,
+      "frozen": null,
+      "actual": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d060",
+      "property": "width",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "19"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 19
+      },
+      "actual": {
+        "kind": "px",
+        "value": 19
+      }
+    },
+    {
+      "id": "d060",
+      "property": "height",
+      "match": true,
+      "frozen": {
+        "kind": "px",
+        "value": "11"
+      },
+      "scalarExpected": {
+        "kind": "px",
+        "value": 11
+      },
+      "actual": {
+        "kind": "px",
+        "value": 11
+      }
+    },
+    {
+      "id": "d060",
+      "property": "ratio",
+      "match": true,
+      "frozen": [
+        "7",
+        "3"
+      ],
+      "actual": [
+        7000,
+        3000
+      ]
+    }
+  ],
+  "total": 183,
+  "matches": 183,
+  "differences": [],
+  "scalarPrecisionDifferences": [
+    {
+      "id": "d001",
+      "property": "width",
+      "frozen": "37.5",
+      "scalar": 38
+    },
+    {
+      "id": "d001",
+      "property": "height",
+      "frozen": "12.25",
+      "scalar": 12
+    },
+    {
+      "id": "d003",
+      "property": "width",
+      "frozen": "37.5",
+      "scalar": 38
+    },
+    {
+      "id": "d003",
+      "property": "height",
+      "frozen": "12.25",
+      "scalar": 12
+    },
+    {
+      "id": "d005",
+      "property": "width",
+      "frozen": "37.5",
+      "scalar": 38
+    },
+    {
+      "id": "d005",
+      "property": "height",
+      "frozen": "12.25",
+      "scalar": 12
+    },
+    {
+      "id": "d007",
+      "property": "width",
+      "frozen": "37.5",
+      "scalar": 38
+    },
+    {
+      "id": "d007",
+      "property": "height",
+      "frozen": "12.25",
+      "scalar": 12
+    },
+    {
+      "id": "d009",
+      "property": "width",
+      "frozen": "37.5",
+      "scalar": 38
+    },
+    {
+      "id": "d009",
+      "property": "height",
+      "frozen": "12.25",
+      "scalar": 12
+    },
+    {
+      "id": "d025",
+      "property": "width",
+      "frozen": "12.5",
+      "scalar": 13
+    },
+    {
+      "id": "d026",
+      "property": "width",
+      "frozen": "12.5",
+      "scalar": 13
+    },
+    {
+      "id": "d028",
+      "property": "width",
+      "frozen": "12.25",
+      "scalar": 12
+    },
+    {
+      "id": "d031",
+      "property": "width",
+      "frozen": "0.0001",
+      "scalar": 0
+    },
+    {
+      "id": "d039",
+      "property": "width",
+      "frozen": "0.0001",
+      "scalar": 0
+    },
+    {
+      "id": "d039",
+      "property": "height",
+      "frozen": "0.0002",
+      "scalar": 0
+    },
+    {
+      "id": "d040",
+      "property": "width",
+      "frozen": "12.345678",
+      "scalar": 12
+    },
+    {
+      "id": "d040",
+      "property": "height",
+      "frozen": "6.172839",
+      "scalar": 6
+    }
+  ],
+  "unavailable": [
+    "ABI 3 Style does not distinguish automatic from authored aspect ratios"
+  ],
+  "scope": "Scalar computed values; no natural image geometry, device or performance acceptance"
+}
