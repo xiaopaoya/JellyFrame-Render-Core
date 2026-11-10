@@ -1305,7 +1305,7 @@ bool Canvas2DRegistry::fill_text(Node& node, std::string_view text, double x, do
         target.height = surface->height;
         target.pixels.swap(surface->pixels);
         DisplayCommand command;
-        command.type = DisplayCommandType::PreparedText;
+        command.set_type(DisplayCommandType::PreparedText);
         command.rect = Rect{left, safe_add(baseline, -line_height), width, line_height};
         command.color = with_global_alpha(
             color_for_style(surface->state.fill_style, gradients_, left, baseline),

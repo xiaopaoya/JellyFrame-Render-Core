@@ -225,7 +225,7 @@ void trace_owner_tokens_are_opt_in_and_preserve_box_ownership() {
     bool first_found = false;
     bool second_found = false;
     for (const DisplayCommand& command : traced_commands) {
-        if (command.type != DisplayCommandType::FillRect) {
+        if (command.type() != DisplayCommandType::FillRect) {
             continue;
         }
         if (command.color.r == 255 && command.color.g == 0 && command.color.b == 0) {
@@ -362,7 +362,7 @@ void flatten_clip_metadata_preserves_nested_parent_and_translation() {
     inner->transform.translate_x = 7.0F;
     inner->transform.translate_y = -3.0F;
     DisplayCommand fill;
-    fill.type = DisplayCommandType::FillRect;
+    fill.set_type(DisplayCommandType::FillRect);
     fill.rect = {20, 24, 8, 8};
     fill.color = {20, 40, 60, 255};
     inner->display_list.push_back(fill);
@@ -381,13 +381,50 @@ void flatten_clip_metadata_preserves_nested_parent_and_translation() {
           "paint references the innermost clip");
 }
 
+void flatten_translates_prepared_text_bounds_and_origin() {
+    LayerNode root;
+    root.type = LayerType::Root;
+    LayerNodePtr translated(new LayerNode(), LayerNodeDeleter{});
+    translated->transform.translate_x = 7.0F;
+    translated->transform.translate_y = -3.0F;
+    translated->has_clip = true;
+    translated->clip_rect = {0, 0, 100, 80};
+
+    DisplayCommand prepared(DisplayCommandType::PreparedText);
+    prepared.rect = {20, 24, 30, 16};
+    prepared.color = {10, 20, 30, 255};
+    set_prepared_text_origin(prepared, 22, 37);
+    translated->display_list.push_back(prepared);
+    root.children.push_back(std::move(translated));
+
+    LayerTreeBuilder builder;
+    const DisplayList plain = builder.flatten(root);
+    const FlattenedLayerTree metadata = builder.flatten_with_clip_metadata(root);
+    const auto check_translated = [](const DisplayList& commands) {
+        check(commands.size() == 1, "translated prepared text remains visible");
+        const DisplayCommand& command = commands.front();
+        check(command.type() == DisplayCommandType::PreparedText, "flatten preserves prepared text kind");
+        check(command.rect.x == 27 && command.rect.y == 21 &&
+                  command.rect.width == 30 && command.rect.height == 16,
+              "flatten translates prepared text bounds");
+        check(prepared_text_origin_x(command) == 29 && prepared_text_baseline_y(command) == 34,
+              "flatten translates prepared text origin with bounds");
+    };
+    check_translated(plain);
+    check_translated(metadata.display_list);
+    check(metadata.display_clip_indices.size() == 1 && metadata.display_clip_indices.front() == 0,
+          "translated prepared text retains clip metadata");
+    check(prepared_text_origin_x(root.children.front()->display_list.front()) == 22,
+          "flatten leaves source prepared origin unchanged");
+}
+
 void flatten_clip_metadata_skips_empty_clips() {
     LayerNode root;
     LayerNodePtr empty(new LayerNode(), LayerNodeDeleter{});
     empty->has_clip = true;
     empty->clip_rect = {0, 0, 0, 10};
     DisplayCommand fill;
-    fill.type = DisplayCommandType::FillRect;
+    fill.set_type(DisplayCommandType::FillRect);
     fill.rect = {0, 0, 10, 10};
     fill.color = {255, 0, 0, 255};
     empty->display_list.push_back(fill);
@@ -421,7 +458,7 @@ void visibility_preserves_layout_and_suppresses_hidden_paint_and_hit_testing() {
     bool found_visible_red = false;
     bool found_after_blue = false;
     for (const DisplayCommand& command : commands) {
-        if (command.type != DisplayCommandType::FillRect) {
+        if (command.type() != DisplayCommandType::FillRect) {
             continue;
         }
         found_hidden_black |= command.color.r == 0 && command.color.g == 0 && command.color.b == 0;
@@ -455,7 +492,7 @@ void text_spacing_and_anywhere_wrap_emit_only_declared_extra_commands() {
     const DisplayList normal_commands = builder.flatten(*normal.layer_tree);
     int normal_text_count = 0;
     for (const DisplayCommand& command : normal_commands) {
-        normal_text_count += command.type == DisplayCommandType::Text ? 1 : 0;
+        normal_text_count += command.type() == DisplayCommandType::Text ? 1 : 0;
     }
     check(normal_text_count == 1, "normal text remains one display command");
 
@@ -466,7 +503,7 @@ void text_spacing_and_anywhere_wrap_emit_only_declared_extra_commands() {
     const DisplayList spaced_commands = builder.flatten(*spaced.layer_tree);
     int spaced_text_count = 0;
     for (const DisplayCommand& command : spaced_commands) {
-        spaced_text_count += command.type == DisplayCommandType::Text ? 1 : 0;
+        spaced_text_count += command.type() == DisplayCommandType::Text ? 1 : 0;
     }
     check(spaced_text_count == 2, "declared letter spacing emits one command per scalar");
 
@@ -475,7 +512,7 @@ void text_spacing_and_anywhere_wrap_emit_only_declared_extra_commands() {
     const DisplayList wrapped_commands = builder.flatten(*wrapped.layer_tree);
     int wrapped_text_count = 0;
     for (const DisplayCommand& command : wrapped_commands) {
-        wrapped_text_count += command.type == DisplayCommandType::Text ? 1 : 0;
+        wrapped_text_count += command.type() == DisplayCommandType::Text ? 1 : 0;
     }
     check(wrapped_text_count > 1, "declared overflow-wrap emits individual wrapped line commands");
 }
@@ -492,7 +529,7 @@ void normal_text_wrap_matches_layout_line_breaks() {
     const DisplayList commands = builder.flatten(*pipeline.layer_tree);
     std::vector<Rect> text_rects;
     for (const DisplayCommand& command : commands) {
-        if (command.type == DisplayCommandType::Text && command.text != "") {
+        if (command.type() == DisplayCommandType::Text && command.text != "") {
             text_rects.push_back(command.rect);
         }
     }
@@ -529,7 +566,7 @@ void text_layout_cache_handoffs_wrapped_and_newline_lines() {
     int wrapped_lines = 0;
     int newline_lines = 0;
     for (const DisplayCommand& command : commands) {
-        if (command.type != DisplayCommandType::Text || command.text.empty()) {
+        if (command.type() != DisplayCommandType::Text || command.text.empty()) {
             continue;
         }
         if (command.text == "ALPHA" || command.text == "BETA" || command.text == "GAMMA") {
@@ -574,7 +611,7 @@ void text_layout_cache_rejects_dirty_text_and_viewport_changes() {
     const DisplayList dirty_commands = builder.flatten(*dirty_layer_tree);
     bool found_changed = false;
     for (const DisplayCommand& command : dirty_commands) {
-        found_changed = found_changed || command.type == DisplayCommandType::Text &&
+        found_changed = found_changed || command.type() == DisplayCommandType::Text &&
             command.text == "Changed";
     }
     check(found_changed, "dirty text takes the updated display-list path");
@@ -605,7 +642,7 @@ void text_layout_cache_keeps_unwrapped_letter_spaced_text() {
     const DisplayList commands = builder.flatten(*layer_tree);
     bool found_text = false;
     for (const DisplayCommand& command : commands) {
-        found_text = found_text || command.type == DisplayCommandType::Text;
+        found_text = found_text || command.type() == DisplayCommandType::Text;
     }
     check(found_text, "cached unwrapped letter-spaced text remains paintable");
 }
@@ -637,7 +674,7 @@ void scroll_container_offsets_descendant_paint() {
     DisplayList flattened = layer_tree_builder.flatten(*layer_tree);
     bool found_shifted_child = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::FillRect && command.color.r == 0 &&
+        if (command.type() == DisplayCommandType::FillRect && command.color.r == 0 &&
             command.rect.y == 0 && command.rect.height == 24) {
             found_shifted_child = true;
         }
@@ -754,7 +791,7 @@ void scroll_container_keeps_absolute_sibling_navigation_fixed() {
     bool found_shifted_list_row = false;
     bool found_fixed_navigation = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type != DisplayCommandType::FillRect) {
+        if (command.type() != DisplayCommandType::FillRect) {
             continue;
         }
         if (command.color.r == 0 && command.color.g == 0 && command.color.b == 0 &&
@@ -793,7 +830,7 @@ void scroll_indicator_is_opt_in_overlay() {
 
     bool found_thumb = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::FillRect &&
+        if (command.type() == DisplayCommandType::FillRect &&
             command.rect.width == 3 &&
             command.color.a == 176) {
             found_thumb = true;
@@ -814,7 +851,7 @@ void opacity_layer_flattens_alpha() {
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     bool found_translucent_fill = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::FillRect && command.color.a > 0 && command.color.a < 255) {
+        if (command.type() == DisplayCommandType::FillRect && command.color.a > 0 && command.color.a < 255) {
             found_translucent_fill = true;
         }
     }
@@ -865,7 +902,7 @@ void flatten_into_reuses_storage_and_matches_flatten() {
     check(reused.size() == expected.size(), "flatten_into command count matches flatten");
     check(reused.capacity() == capacity, "flatten_into keeps caller storage when capacity is sufficient");
     for (std::size_t i = 0; i < expected.size(); ++i) {
-        check(reused[i].type == expected[i].type, "flatten_into command type matches");
+        check(reused[i].type() == expected[i].type(), "flatten_into command type matches");
         check(reused[i].rect.x == expected[i].rect.x &&
                   reused[i].rect.y == expected[i].rect.y &&
                   reused[i].rect.width == expected[i].rect.width &&
@@ -888,8 +925,8 @@ void rounded_equal_border_emits_stroke_command() {
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     bool found_rounded_stroke = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::StrokeRect && command.border_radius == 12 &&
-            command.stroke_width == 2) {
+        if (command.type() == DisplayCommandType::StrokeRect && command.basic_paint().border_radius == 12 &&
+            command.basic_paint().stroke_width == 2) {
             found_rounded_stroke = true;
         }
     }
@@ -906,11 +943,11 @@ void linear_gradient_background_emits_gradient_command() {
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     bool found_gradient = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::LinearGradient) {
+        if (command.type() == DisplayCommandType::LinearGradient) {
             found_gradient = true;
             check(command.color.r == 0x10 && command.color2.r == 80, "gradient command carries colors");
-            check(command.gradient_axis == GradientAxis::Horizontal, "gradient command carries axis");
-            check(command.border_radius == 8, "gradient command carries radius");
+            check(command.basic_paint().gradient_axis == GradientAxis::Horizontal, "gradient command carries axis");
+            check(command.basic_paint().border_radius == 8, "gradient command carries radius");
         }
     }
 #if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
@@ -933,15 +970,15 @@ void outline_and_text_shadow_emit_paint_commands() {
     bool found_decoration = false;
     int glow_text_commands = 0;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::StrokeRect && command.stroke_width == 2 &&
+        if (command.type() == DisplayCommandType::StrokeRect && command.basic_paint().stroke_width == 2 &&
             command.color.a >= 126 && command.color.a <= 128) {
             found_outline = true;
         }
-        if (command.type == DisplayCommandType::FillRect && command.rect.height <= 2 &&
+        if (command.type() == DisplayCommandType::FillRect && command.rect.height <= 2 &&
             command.rect.width > 20 && command.color.a == 255) {
             found_decoration = true;
         }
-        if (command.type == DisplayCommandType::Text && command.text == "Glow") {
+        if (command.type() == DisplayCommandType::Text && command.text == "Glow") {
             ++glow_text_commands;
         }
     }
@@ -964,13 +1001,13 @@ void outline_offset_expands_focus_stroke_without_affecting_layout() {
     LayerTreeBuilder layer_tree_builder;
     const DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     for (const DisplayCommand& command : flattened) {
-        if (command.type != DisplayCommandType::StrokeRect || command.stroke_width != 2) {
+        if (command.type() != DisplayCommandType::StrokeRect || command.basic_paint().stroke_width != 2) {
             continue;
         }
         check(command.rect.x == button->rect.x - 5 && command.rect.y == button->rect.y - 5 &&
                   command.rect.width == button->rect.width + 10 && command.rect.height == button->rect.height + 10,
               "outline offset expands only the non-layout stroke geometry");
-        check(command.border_radius == 0, "square outline remains square after offset");
+        check(command.basic_paint().border_radius == 0, "square outline remains square after offset");
         return;
     }
     check(false, "outline offset fixture emits a stroke command");
@@ -1002,7 +1039,7 @@ void progress_and_meter_emit_value_fill() {
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     int colored_bar_count = 0;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::FillRect &&
+        if (command.type() == DisplayCommandType::FillRect &&
             ((command.color.r == 37 && command.color.g == 99 && command.color.b == 235) ||
              (command.color.r == 22 && command.color.g == 163 && command.color.b == 74))) {
             ++colored_bar_count;
@@ -1020,7 +1057,7 @@ void progress_and_meter_ignore_invalid_numeric_attributes() {
     LayerTreeBuilder layer_tree_builder;
     const DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     for (const DisplayCommand& command : flattened) {
-        check(command.type != DisplayCommandType::FillRect ||
+        check(command.type() != DisplayCommandType::FillRect ||
                   !((command.color.r == 37 && command.color.g == 99 && command.color.b == 235) ||
                     (command.color.r == 22 && command.color.g == 163 && command.color.b == 74)),
               "invalid progress and meter values do not produce a filled bar");
@@ -1034,7 +1071,7 @@ void inline_mark_background_shrinks_to_text() {
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     bool found_compact_mark = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::FillRect &&
+        if (command.type() == DisplayCommandType::FillRect &&
             command.color.r == 254 && command.color.g == 240 && command.color.b == 138 &&
             command.rect.width > 0 && command.rect.width < 120) {
             found_compact_mark = true;
@@ -1050,7 +1087,7 @@ void inline_run_flows_horizontally() {
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     std::vector<DisplayCommand> text_commands;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::Text) {
+        if (command.type() == DisplayCommandType::Text) {
             text_commands.push_back(command);
         }
     }
@@ -1070,7 +1107,7 @@ void centered_inline_text_aligns_in_parent() {
     LayerTreeBuilder layer_tree_builder;
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::Text && command.text == "Centered") {
+        if (command.type() == DisplayCommandType::Text && command.text == "Centered") {
             check(command.rect.x > 40, "centered heading text is shifted from the left edge");
             return;
         }
@@ -1085,7 +1122,7 @@ void button_inline_block_shrink_wraps_text() {
     LayerTreeBuilder layer_tree_builder;
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::FillRect &&
+        if (command.type() == DisplayCommandType::FillRect &&
             command.color.r == 243 && command.color.g == 244 && command.color.b == 246) {
             check(command.rect.width > 60 && command.rect.width < 160,
                   "button shrink-wraps instead of filling the line");
@@ -1103,7 +1140,7 @@ void select_does_not_paint_option_list_inline() {
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     bool painted_selected_option = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type != DisplayCommandType::Text) {
+        if (command.type() != DisplayCommandType::Text) {
             continue;
         }
         check(command.text != "Beta", "select does not paint the collapsed option list");
@@ -1132,7 +1169,7 @@ void form_paint_only_state_changes_rebuild_visible_commands() {
     auto widest_blue_fill = [](const DisplayList& commands) {
         int width = 0;
         for (const DisplayCommand& command : commands) {
-            if (command.type == DisplayCommandType::FillRect &&
+            if (command.type() == DisplayCommandType::FillRect &&
                 command.color.r == 37 && command.color.g == 99 && command.color.b == 235) {
                 width = std::max(width, command.rect.width);
             }
@@ -1148,7 +1185,7 @@ void form_paint_only_state_changes_rebuild_visible_commands() {
     const DisplayList malformed_range = builder.flatten(*malformed_range_tree);
     bool painted_range_fill = false;
     for (const DisplayCommand& command : malformed_range) {
-        if (command.type == DisplayCommandType::FillRect && command.color.r == 37 &&
+        if (command.type() == DisplayCommandType::FillRect && command.color.r == 37 &&
             command.color.g == 99 && command.color.b == 235 && command.rect.height == 4) {
             painted_range_fill = command.rect.width > 0;
             break;
@@ -1169,7 +1206,7 @@ void form_paint_only_state_changes_rebuild_visible_commands() {
     const DisplayList after_select = builder.flatten(*after_select_tree);
     auto has_text = [](const DisplayList& commands, const char* text) {
         for (const DisplayCommand& command : commands) {
-            if (command.type == DisplayCommandType::Text && command.text == text) {
+            if (command.type() == DisplayCommandType::Text && command.text == text) {
                 return true;
             }
         }
@@ -1198,7 +1235,7 @@ void select_popup_paints_above_document_and_hit_tests_to_owner() {
     const DisplayList commands = builder.flatten(*popup_tree);
     bool painted_beta = false;
     for (const DisplayCommand& command : commands) {
-        painted_beta = painted_beta || (command.type == DisplayCommandType::Text && command.text == "Beta");
+        painted_beta = painted_beta || (command.type() == DisplayCommandType::Text && command.text == "Beta");
     }
     check(painted_beta, "open select paints the option overlay");
 
@@ -1290,8 +1327,8 @@ void box_shadow_emits_bounded_soft_shadow_command() {
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     int found_shadows = 0;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::BoxShadow && command.color.a > 0 && command.color.a < 80 &&
-            command.stroke_width > 0 && command.gradient_stop_percent > 0) {
+        if (command.type() == DisplayCommandType::BoxShadow && command.color.a > 0 && command.color.a < 80 &&
+            command.basic_paint().stroke_width > 0 && command.basic_paint().gradient_stop_percent > 0) {
             ++found_shadows;
         }
     }
@@ -1310,7 +1347,7 @@ void colored_spread_box_shadow_keeps_author_color() {
     LayerTreeBuilder layer_tree_builder;
     const DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     for (const DisplayCommand& command : flattened) {
-        if (command.type != DisplayCommandType::BoxShadow) {
+        if (command.type() != DisplayCommandType::BoxShadow) {
             continue;
         }
         check(command.color.r == 98 && command.color.g == 223 && command.color.b == 247,
@@ -1338,9 +1375,9 @@ void two_layer_background_emits_base_then_highlight() {
     int linear_index = -1;
     int radial_index = -1;
     for (std::size_t index = 0; index < flattened.size(); ++index) {
-        if (flattened[index].type == DisplayCommandType::LinearGradient) {
+        if (flattened[index].type() == DisplayCommandType::LinearGradient) {
             linear_index = static_cast<int>(index);
-        } else if (flattened[index].type == DisplayCommandType::RadialGradient) {
+        } else if (flattened[index].type() == DisplayCommandType::RadialGradient) {
             radial_index = static_cast<int>(index);
         }
     }
@@ -1360,7 +1397,7 @@ void box_shadow_none_and_large_shadow_are_diagnosed() {
     DisplayList none_flattened = layer_tree_builder.flatten(*none_pipeline.layer_tree);
     int shadow_commands = 0;
     for (const DisplayCommand& command : none_flattened) {
-        if (command.type == DisplayCommandType::BoxShadow) {
+        if (command.type() == DisplayCommandType::BoxShadow) {
             ++shadow_commands;
         }
     }
@@ -1402,7 +1439,7 @@ void list_markers_and_generated_counters_emit_text() {
     bool found_disc = false;
     bool found_bold_text = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type != DisplayCommandType::Text) {
+        if (command.type() != DisplayCommandType::Text) {
             continue;
         }
         if (command.text == "1." && command.color.b == 0xb0) {
@@ -1411,7 +1448,7 @@ void list_markers_and_generated_counters_emit_text() {
         if (command.text == "*") {
             found_disc = true;
         }
-        if (command.text == "1." && command.font_weight >= 600) {
+        if (command.text == "1." && command.text_paint().font_weight >= 600) {
             found_bold_text = true;
         }
     }
@@ -1431,11 +1468,11 @@ void generated_after_and_percentage_radius_emit_commands() {
     bool found_round_fill = false;
     bool found_after = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::FillRect && command.border_radius == 40) {
+        if (command.type() == DisplayCommandType::FillRect && command.basic_paint().border_radius == 40) {
             found_round_fill = true;
         }
-        if (command.type == DisplayCommandType::Text && command.text == "%" &&
-            command.text_align == TextCommandAlign::End && command.font_weight >= 700) {
+        if (command.type() == DisplayCommandType::Text && command.text == "%" &&
+            command.text_paint().text_align == TextCommandAlign::End && command.text_paint().font_weight >= 700) {
             found_after = true;
         }
     }
@@ -1456,9 +1493,9 @@ void conic_gradient_background_emits_progress_command() {
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     bool found_conic = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::ConicGradient &&
-            command.gradient_stop_percent == 75 &&
-            command.border_radius == 32) {
+        if (command.type() == DisplayCommandType::ConicGradient &&
+            command.basic_paint().gradient_stop_percent == 75 &&
+            command.basic_paint().border_radius == 32) {
             found_conic = true;
             break;
         }
@@ -1479,8 +1516,8 @@ void radial_gradient_background_emits_center_circle_command() {
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     bool found_radial = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::RadialGradient &&
-            command.border_radius == 18 &&
+        if (command.type() == DisplayCommandType::RadialGradient &&
+            command.basic_paint().border_radius == 18 &&
             command.color.r == 240 &&
             command.color2.b == 160) {
             found_radial = true;
@@ -1585,7 +1622,7 @@ void flex_order_changes_same_stack_paint_order() {
     const DisplayList flattened = builder.flatten(*pipeline.layer_tree);
     std::vector<Color> fills;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::FillRect && command.rect.width == 20 && command.rect.height == 20) {
+        if (command.type() == DisplayCommandType::FillRect && command.rect.width == 20 && command.rect.height == 20) {
             fills.push_back(command.color);
         }
     }
@@ -1605,9 +1642,9 @@ void unbreakable_symbol_stays_single_line() {
     LayerTreeBuilder layer_tree_builder;
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::Text && command.text == "\xC3\x97") {
+        if (command.type() == DisplayCommandType::Text && command.text == "\xC3\x97") {
             check(command.rect.height == 34, "single unbreakable symbol does not wrap taller than the control");
-            check(command.text_single_line, "single unbreakable symbol is marked single-line");
+            check(command.text_paint().text_single_line, "single unbreakable symbol is marked single-line");
             return;
         }
     }
@@ -1622,7 +1659,7 @@ void text_overflow_ellipsis_truncates_painted_text() {
     LayerTreeBuilder layer_tree_builder;
     const DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     for (const DisplayCommand& command : flattened) {
-        if (command.type != DisplayCommandType::Text) {
+        if (command.type() != DisplayCommandType::Text) {
             continue;
         }
         check(command.text != "SuperLongStatusLabelWithoutBreaks",
@@ -1650,7 +1687,7 @@ void utf8_text_overflow_ellipsis_keeps_scalar_boundaries() {
     LayerTreeBuilder layer_tree_builder;
     const DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     for (const DisplayCommand& command : flattened) {
-        if (command.type != DisplayCommandType::Text) {
+        if (command.type() != DisplayCommandType::Text) {
             continue;
         }
         check(command.text.size() >= 3 && command.text.compare(command.text.size() - 3, 3, "...") == 0,
@@ -1676,7 +1713,7 @@ void text_transform_paints_transformed_text() {
     bool found_upper = false;
     bool found_capitalized = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type != DisplayCommandType::Text) {
+        if (command.type() != DisplayCommandType::Text) {
             continue;
         }
         found_upper = found_upper || command.text == "HELLO UI";
@@ -1697,12 +1734,12 @@ void grid_item_auto_width_reflows_centered_text() {
     Rect first_button{};
     Rect first_text{};
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::FillRect && command.rect.width > 70 &&
+        if (command.type() == DisplayCommandType::FillRect && command.rect.width > 70 &&
             command.color.r == 243 && command.color.g == 244 && command.color.b == 246 &&
             first_button.width == 0) {
             first_button = command.rect;
         }
-        if (command.type == DisplayCommandType::Text && command.text == "7") {
+        if (command.type() == DisplayCommandType::Text && command.text == "7") {
             first_text = command.rect;
         }
     }
@@ -1718,8 +1755,8 @@ void text_input_respects_text_align() {
     LayerTreeBuilder layer_tree_builder;
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::Text && command.text == "42") {
-            check(command.text_align == TextCommandAlign::End, "input text follows text-align right");
+        if (command.type() == DisplayCommandType::Text && command.text == "42") {
+            check(command.text_paint().text_align == TextCommandAlign::End, "input text follows text-align right");
             return;
         }
     }
@@ -1815,14 +1852,14 @@ void package_background_image_emits_image_display_command_when_surface_resolves(
 
     bool found_image = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::Image && command.image_handle == context.handle) {
+        if (command.type() == DisplayCommandType::Image && command.image_paint().image_handle == context.handle) {
             found_image = true;
             check(command.rect.width == 48 && command.rect.height == 32,
                   "background image fills the documented element paint area");
-            check(has_corner_radius(command.border_radius),
+            check(has_corner_radius(command.image_paint().border_radius),
                   "background image inherits the element rounded paint clip");
-            check(command.object_fit == ObjectFit::Cover && command.object_position.x_percent == 100 &&
-                      command.object_position.y_percent == 0 && command.image_rendering == ImageRendering::CrispEdges,
+            check(command.image_paint().object_fit == ObjectFit::Cover && command.image_paint().object_position.x_percent == 100 &&
+                      command.image_paint().object_position.y_percent == 0 && command.image_paint().image_rendering == ImageRendering::CrispEdges,
                   "background image command carries bounded size, position and sampling controls");
         }
     }
@@ -1850,16 +1887,16 @@ void image_element_emits_image_display_command_when_surface_resolves() {
 
     bool found_image = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::Image) {
+        if (command.type() == DisplayCommandType::Image) {
             found_image = true;
-            check(command.image_handle == 77, "image command carries resolved handle");
+            check(command.image_paint().image_handle == 77, "image command carries resolved handle");
             check(command.rect.width == 32 && command.rect.height == 24, "image command uses content rect");
-            check(command.object_fit == ObjectFit::Cover, "image command carries object-fit");
-            check(command.object_position.x_percent == 100 && command.object_position.y_percent == 0,
+            check(command.image_paint().object_fit == ObjectFit::Cover, "image command carries object-fit");
+            check(command.image_paint().object_position.x_percent == 100 && command.image_paint().object_position.y_percent == 0,
                   "image command carries object-position");
-            check(command.image_rendering == ImageRendering::CrispEdges,
+            check(command.image_paint().image_rendering == ImageRendering::CrispEdges,
                   "image command carries image-rendering");
-            check(has_corner_radius(command.border_radius),
+            check(has_corner_radius(command.image_paint().border_radius),
                   "image command carries the declared rounded paint clip");
         }
     }
@@ -1887,12 +1924,12 @@ void canvas_element_emits_image_display_command_when_surface_resolves() {
 
     bool found_canvas = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type == DisplayCommandType::Image) {
+        if (command.type() == DisplayCommandType::Image) {
             found_canvas = true;
-            check(command.image_handle == handle, "canvas image command carries resolved handle");
+            check(command.image_paint().image_handle == handle, "canvas image command carries resolved handle");
             check(command.rect.width == 32 && command.rect.height == 24, "canvas command uses content rect");
-            check(command.object_fit == ObjectFit::Contain, "canvas command carries object-fit");
-            check(command.image_rendering == ImageRendering::Pixelated, "canvas command carries image-rendering");
+            check(command.image_paint().object_fit == ObjectFit::Contain, "canvas command carries object-fit");
+            check(command.image_paint().image_rendering == ImageRendering::Pixelated, "canvas command carries image-rendering");
         }
     }
     check(found_canvas, "resolved canvas emits image command");
@@ -1911,6 +1948,7 @@ int main() {
         flatten_clip_metadata_preserves_unclipped_commands();
         flatten_clip_metadata_exports_rounded_clip_geometry();
         flatten_clip_metadata_preserves_nested_parent_and_translation();
+        flatten_translates_prepared_text_bounds_and_origin();
         flatten_clip_metadata_skips_empty_clips();
         visibility_preserves_layout_and_suppresses_hidden_paint_and_hit_testing();
         text_spacing_and_anywhere_wrap_emit_only_declared_extra_commands();

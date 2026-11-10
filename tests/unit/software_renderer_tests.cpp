@@ -309,7 +309,7 @@ void fill_rect_rasterizes_pixels() {
     FrameBuffer frame_buffer(8, 8, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::FillRect;
+    command.set_type(DisplayCommandType::FillRect);
     command.rect = Rect{2, 2, 3, 3};
     command.color = Color{0, 0, 0, 255};
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 8, 8});
@@ -324,10 +324,10 @@ void rounded_image_clip_preserves_corner_underpaint() {
     probe.expected_handle = 17;
     SoftwareRasterizer rasterizer({}, ImagePainter{probe_image_painter, &probe});
     DisplayCommand command;
-    command.type = DisplayCommandType::Image;
+    command.set_type(DisplayCommandType::Image);
     command.rect = Rect{2, 2, 10, 10};
-    command.image_handle = 17;
-    command.border_radius = encode_corner_radii(CornerRadii{5, 5, 5, 5});
+    command.image_paint().image_handle = 17;
+    command.image_paint().border_radius = encode_corner_radii(CornerRadii{5, 5, 5, 5});
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 16, 16});
     check(frame_buffer.pixel(2, 2).r == 255, "rounded image leaves the outer corner underpaint visible");
     check(frame_buffer.pixel(7, 2).r < 255, "rounded image paints the antialiased top edge");
@@ -339,7 +339,7 @@ void linear_gradient_rasterizes_top_and_bottom_colors() {
     FrameBuffer frame_buffer(3, 4, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::LinearGradient;
+    command.set_type(DisplayCommandType::LinearGradient);
     command.rect = Rect{0, 0, 3, 4};
     command.color = Color{0, 0, 0, 255};
     command.color2 = Color{120, 60, 30, 255};
@@ -363,11 +363,11 @@ void horizontal_linear_gradient_rasterizes_left_and_right_colors() {
     FrameBuffer frame_buffer(4, 3, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::LinearGradient;
+    command.set_type(DisplayCommandType::LinearGradient);
     command.rect = Rect{0, 0, 4, 3};
     command.color = Color{0, 0, 0, 255};
     command.color2 = Color{90, 45, 15, 255};
-    command.gradient_axis = GradientAxis::Horizontal;
+    command.basic_paint().gradient_axis = GradientAxis::Horizontal;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 4, 3});
 
     check(frame_buffer.pixel(0, 1).r == 0, "horizontal gradient left column uses first color");
@@ -382,11 +382,11 @@ void diagonal_linear_gradient_rasterizes_corner_colors() {
     FrameBuffer frame_buffer(5, 5, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::LinearGradient;
+    command.set_type(DisplayCommandType::LinearGradient);
     command.rect = Rect{0, 0, 5, 5};
     command.color = Color{0, 0, 0, 255};
     command.color2 = Color{200, 100, 40, 255};
-    command.gradient_axis = GradientAxis::DiagonalDownRight;
+    command.basic_paint().gradient_axis = GradientAxis::DiagonalDownRight;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 5, 5});
 
     check(frame_buffer.pixel(0, 0).r == 0, "diagonal gradient starts with first corner color");
@@ -402,7 +402,7 @@ void opaque_linear_gradient_fast_path_preserves_dirty_clip() {
     FrameBuffer frame_buffer(5, 5, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::LinearGradient;
+    command.set_type(DisplayCommandType::LinearGradient);
     command.rect = Rect{0, 0, 5, 5};
     command.color = Color{0, 0, 0, 255};
     command.color2 = Color{200, 100, 50, 255};
@@ -425,11 +425,11 @@ void opaque_linear_gradient_fast_path_preserves_all_axis_interpolation() {
     SoftwareRasterizer rasterizer;
 
     DisplayCommand horizontal;
-    horizontal.type = DisplayCommandType::LinearGradient;
+    horizontal.set_type(DisplayCommandType::LinearGradient);
     horizontal.rect = Rect{1, 1, 5, 5};
     horizontal.color = first;
     horizontal.color2 = second;
-    horizontal.gradient_axis = GradientAxis::Horizontal;
+    horizontal.basic_paint().gradient_axis = GradientAxis::Horizontal;
     FrameBuffer horizontal_target(7, 7, Color{255, 255, 255, 255});
     rasterizer.rasterize(horizontal, horizontal_target, Rect{2, 2, 3, 3});
     check(horizontal_target.pixel(2, 2).r == 61 && horizontal_target.pixel(2, 2).g == 59 &&
@@ -455,7 +455,7 @@ void opaque_linear_gradient_fast_path_preserves_all_axis_interpolation() {
     }
 
     DisplayCommand diagonal = horizontal;
-    diagonal.gradient_axis = GradientAxis::DiagonalDownRight;
+    diagonal.basic_paint().gradient_axis = GradientAxis::DiagonalDownRight;
     FrameBuffer diagonal_target(7, 7, Color{255, 255, 255, 255});
     rasterizer.rasterize(diagonal, diagonal_target, Rect{2, 2, 3, 3});
     check(diagonal_target.pixel(2, 2).r == 61 && diagonal_target.pixel(2, 2).g == 59 &&
@@ -465,7 +465,7 @@ void opaque_linear_gradient_fast_path_preserves_all_axis_interpolation() {
               diagonal_target.pixel(4, 4).b == 19,
           "opaque diagonal-down-right gradient keeps its final dirty sample");
 
-    diagonal.gradient_axis = GradientAxis::DiagonalDownLeft;
+    diagonal.basic_paint().gradient_axis = GradientAxis::DiagonalDownLeft;
     FrameBuffer reverse_diagonal_target(7, 7, Color{255, 255, 255, 255});
     rasterizer.rasterize(diagonal, reverse_diagonal_target, Rect{2, 2, 3, 3});
     check(reverse_diagonal_target.pixel(2, 2).r == 112 && reverse_diagonal_target.pixel(2, 2).g == 84 &&
@@ -483,11 +483,11 @@ void conic_gradient_rasterizes_clockwise_progress() {
     FrameBuffer frame_buffer(9, 9, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::ConicGradient;
+    command.set_type(DisplayCommandType::ConicGradient);
     command.rect = Rect{0, 0, 9, 9};
     command.color = Color{220, 20, 20, 255};
     command.color2 = Color{20, 40, 220, 255};
-    command.gradient_stop_percent = 50;
+    command.basic_paint().gradient_stop_percent = 50;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 9, 9});
 
     check(frame_buffer.pixel(4, 0).r == 220, "conic gradient starts at top with first color");
@@ -503,7 +503,7 @@ void radial_gradient_rasterizes_center_to_edge() {
     FrameBuffer frame_buffer(9, 9, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::RadialGradient;
+    command.set_type(DisplayCommandType::RadialGradient);
     command.rect = Rect{0, 0, 9, 9};
     command.color = Color{240, 250, 255, 255};
     command.color2 = Color{20, 80, 140, 255};
@@ -522,7 +522,7 @@ void radial_gradient_keeps_diagonal_falloff_close_to_axis() {
     FrameBuffer frame_buffer(129, 129, Color{0, 0, 0, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::RadialGradient;
+    command.set_type(DisplayCommandType::RadialGradient);
     command.rect = Rect{0, 0, 129, 129};
     command.color = Color{255, 255, 255, 255};
     command.color2 = Color{0, 0, 0, 255};
@@ -541,12 +541,12 @@ void positioned_radial_gradient_moves_highlight_center() {
     FrameBuffer frame_buffer(11, 11, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::RadialGradient;
+    command.set_type(DisplayCommandType::RadialGradient);
     command.rect = Rect{0, 0, 11, 11};
     command.color = Color{240, 250, 255, 255};
     command.color2 = Color{20, 80, 140, 255};
-    command.gradient_axis = GradientAxis::RadialPosition;
-    command.gradient_stop_percent = 80 * 101 + 20;
+    command.basic_paint().gradient_axis = GradientAxis::RadialPosition;
+    command.basic_paint().gradient_stop_percent = 80 * 101 + 20;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 11, 11});
 
     check(frame_buffer.pixel(8, 2).r > frame_buffer.pixel(5, 5).r,
@@ -560,12 +560,12 @@ void soft_box_shadow_fades_outside_rounded_card() {
     FrameBuffer frame_buffer(20, 20, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::BoxShadow;
+    command.set_type(DisplayCommandType::BoxShadow);
     command.rect = Rect{2, 2, 16, 16};
     command.color = Color{0, 0, 0, 96};
-    command.border_radius = 7;
-    command.stroke_width = 3;
-    command.gradient_stop_percent = 3;
+    command.basic_paint().border_radius = 7;
+    command.basic_paint().stroke_width = 3;
+    command.basic_paint().gradient_stop_percent = 3;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 20, 20});
 
     check(frame_buffer.pixel(10, 17).r < 255, "soft shadow paints within its bounded outer extent");
@@ -581,12 +581,12 @@ void circular_box_shadow_keeps_diagonal_falloff_close_to_axis() {
     FrameBuffer frame_buffer(52, 52, Color{0, 0, 0, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::BoxShadow;
+    command.set_type(DisplayCommandType::BoxShadow);
     command.rect = Rect{0, 0, 52, 52};
     command.color = Color{255, 255, 255, 255};
-    command.border_radius = 26;
-    command.stroke_width = 6;
-    command.gradient_stop_percent = 8;
+    command.basic_paint().border_radius = 26;
+    command.basic_paint().stroke_width = 6;
+    command.basic_paint().gradient_stop_percent = 8;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 52, 52});
 
     const int axis = frame_buffer.pixel(26, 2).r;
@@ -643,11 +643,11 @@ void rounded_stroke_keeps_corner_pixels_clear() {
     FrameBuffer frame_buffer(12, 12, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::StrokeRect;
+    command.set_type(DisplayCommandType::StrokeRect);
     command.rect = Rect{1, 1, 10, 10};
     command.color = Color{0, 0, 0, 255};
-    command.border_radius = 5;
-    command.stroke_width = 2;
+    command.basic_paint().border_radius = 5;
+    command.basic_paint().stroke_width = 2;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 12, 12});
 
     check(frame_buffer.pixel(1, 1).r == 255, "rounded stroke leaves outer corner clear");
@@ -658,10 +658,10 @@ void square_stroke_paints_all_four_edges() {
     FrameBuffer frame_buffer(14, 14, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::StrokeRect;
+    command.set_type(DisplayCommandType::StrokeRect);
     command.rect = Rect{2, 2, 10, 10};
     command.color = Color{0, 0, 0, 255};
-    command.stroke_width = 2;
+    command.basic_paint().stroke_width = 2;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 14, 14});
 
     check(frame_buffer.pixel(6, 2).r == 0, "square stroke paints the top edge");
@@ -675,11 +675,11 @@ void rounded_stroke_keeps_straight_edges_visible() {
     FrameBuffer frame_buffer(24, 16, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::StrokeRect;
+    command.set_type(DisplayCommandType::StrokeRect);
     command.rect = Rect{2, 2, 20, 10};
     command.color = Color{0, 0, 0, 255};
-    command.border_radius = 4;
-    command.stroke_width = 2;
+    command.basic_paint().border_radius = 4;
+    command.basic_paint().stroke_width = 2;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 24, 16});
 
     check(frame_buffer.pixel(12, 2).r == 0, "rounded stroke paints the top edge center");
@@ -691,10 +691,10 @@ void rounded_fill_antialiases_edge_pixels() {
     FrameBuffer frame_buffer(12, 12, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::FillRect;
+    command.set_type(DisplayCommandType::FillRect);
     command.rect = Rect{1, 1, 10, 10};
     command.color = Color{0, 0, 0, 255};
-    command.border_radius = 5;
+    command.basic_paint().border_radius = 5;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 12, 12});
 
     const Color edge = frame_buffer.pixel(3, 1);
@@ -706,10 +706,10 @@ void rounded_fill_antialiases_edge_pixels() {
 void per_corner_rounded_rect_keeps_square_bottom_left() {
     FrameBuffer frame_buffer(24, 24, Color{0, 0, 0, 255});
     DisplayCommand command;
-    command.type = DisplayCommandType::FillRect;
+    command.set_type(DisplayCommandType::FillRect);
     command.rect = Rect{2, 2, 18, 18};
     command.color = Color{255, 255, 255, 255};
-    command.border_radius = encode_corner_radii(CornerRadii{8, 4, 2, 0});
+    command.basic_paint().border_radius = encode_corner_radii(CornerRadii{8, 4, 2, 0});
     SoftwareRasterizer rasterizer;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 24, 24});
     check(frame_buffer.pixel(2, 19).r == 255, "square bottom-left corner remains filled");
@@ -720,7 +720,7 @@ void source_over_alpha_composites() {
     FrameBuffer frame_buffer(1, 1, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::FillRect;
+    command.set_type(DisplayCommandType::FillRect);
     command.rect = Rect{0, 0, 1, 1};
     command.color = Color{0, 0, 0, 128};
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 1, 1});
@@ -736,7 +736,7 @@ void clipping_limits_rasterization() {
     FrameBuffer frame_buffer(4, 4, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer;
     DisplayCommand command;
-    command.type = DisplayCommandType::FillRect;
+    command.set_type(DisplayCommandType::FillRect);
     command.rect = Rect{0, 0, 4, 4};
     command.color = Color{0, 0, 0, 255};
     rasterizer.rasterize(command, frame_buffer, Rect{1, 1, 2, 2});
@@ -752,12 +752,12 @@ void image_command_uses_injected_painter() {
     ImagePaintProbe probe{42, ObjectFit::Fill, {}, ImageRendering::Auto, 0};
     SoftwareRasterizer rasterizer({}, ImagePainter{probe_image_painter, &probe});
     DisplayCommand command;
-    command.type = DisplayCommandType::Image;
+    command.set_type(DisplayCommandType::Image);
     command.rect = Rect{1, 2, 3, 2};
-    command.image_handle = 42;
-    command.object_fit = ObjectFit::Contain;
-    command.object_position = ObjectPosition{100, 0};
-    command.image_rendering = ImageRendering::Pixelated;
+    command.image_paint().image_handle = 42;
+    command.image_paint().object_fit = ObjectFit::Contain;
+    command.image_paint().object_position = ObjectPosition{100, 0};
+    command.image_paint().image_rendering = ImageRendering::Pixelated;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 8, 8});
 
     check(probe.calls == 1, "image painter called once");
@@ -775,9 +775,9 @@ void image_command_falls_back_without_painter() {
     FrameBuffer frame_buffer(4, 4, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer({}, &diagnostics);
     DisplayCommand command;
-    command.type = DisplayCommandType::Image;
+    command.set_type(DisplayCommandType::Image);
     command.rect = Rect{1, 1, 2, 2};
-    command.image_handle = 9;
+    command.image_paint().image_handle = 9;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 4, 4});
 
     check(frame_buffer.pixel(1, 1).r == 226 && frame_buffer.pixel(1, 1).g == 232,
@@ -874,7 +874,7 @@ void dirty_render_only_updates_requested_clip() {
 
 DisplayCommand black_fill(Rect rect) {
     DisplayCommand command;
-    command.type = DisplayCommandType::FillRect;
+    command.set_type(DisplayCommandType::FillRect);
     command.rect = rect;
     command.color = Color{0, 0, 0, 255};
     return command;
@@ -885,7 +885,7 @@ void dirty_render_preserves_original_rounded_geometry() {
     root.type = LayerType::Root;
     root.bounds = Rect{0, 0, 80, 40};
     root.display_list.push_back(black_fill(Rect{10, 4, 60, 28}));
-    root.display_list.back().border_radius = 12;
+    root.display_list.back().basic_paint().border_radius = 12;
 
     FrameBuffer frame_buffer(80, 40, Color{255, 255, 255, 255});
     SoftwareCompositor compositor;
@@ -950,12 +950,12 @@ void built_in_text_fallback_preserves_clipped_pixel_output() {
     VectorDiagnosticSink diagnostics;
     SoftwareRasterizer rasterizer(TextPainter{rejecting_text_painter, nullptr}, &diagnostics);
     DisplayCommand command;
-    command.type = DisplayCommandType::Text;
+    command.set_type(DisplayCommandType::Text);
     command.rect = Rect{2, 2, 5, 7};
     command.color = Color{20, 30, 40, 255};
     command.text = "A";
-    command.font_size = 8;
-    command.text_single_line = true;
+    command.text_paint().font_size = 8;
+    command.text_paint().text_single_line = true;
 
     const Color background{231, 236, 244, 255};
     FrameBuffer frame(8, 8, background);
@@ -1045,7 +1045,7 @@ void rasterizer_tracks_opaque_rounded_clip_compositing_without_changing_alpha() 
     DisplayCommand opaque = black_fill(Rect{0, 0, 40, 40});
     opaque.color = Color{20, 120, 240, 255};
     DisplayCommand translucent = black_fill(Rect{16, 16, 8, 8});
-    translucent.type = DisplayCommandType::LinearGradient;
+    translucent.set_type(DisplayCommandType::LinearGradient);
     translucent.color = Color{240, 80, 70, 128};
     translucent.color2 = Color{220, 60, 120, 128};
     const DisplayCommand commands[] = {opaque, translucent};
@@ -1107,7 +1107,7 @@ void rasterizer_tracks_nested_rounded_clip_coverage_work() {
     DisplayCommand opaque = black_fill(Rect{0, 0, 40, 40});
     opaque.color = Color{20, 120, 240, 255};
     DisplayCommand translucent = black_fill(Rect{15, 13, 12, 14});
-    translucent.type = DisplayCommandType::LinearGradient;
+    translucent.set_type(DisplayCommandType::LinearGradient);
     translucent.color = Color{240, 80, 70, 128};
     translucent.color2 = Color{220, 60, 120, 128};
     const DisplayCommand commands[] = {opaque, translucent};
@@ -1161,7 +1161,7 @@ void rasterizer_rounded_composite_span_matches_pixel_reference() {
     DisplayCommand opaque = black_fill(Rect{0, 0, 40, 40});
     opaque.color = Color{20, 120, 240, 255};
     DisplayCommand translucent = black_fill(Rect{12, 15, 16, 10});
-    translucent.type = DisplayCommandType::LinearGradient;
+    translucent.set_type(DisplayCommandType::LinearGradient);
     translucent.color = Color{240, 80, 70, 128};
     translucent.color2 = Color{220, 60, 120, 128};
     const DisplayCommand commands[] = {opaque, translucent};
@@ -1191,7 +1191,7 @@ void rasterizer_records_opt_in_rounded_clip_replay_timing() {
     DisplayCommand fill = black_fill(Rect{0, 0, 40, 40});
     fill.color = Color{20, 120, 240, 255};
     DisplayCommand gradient = fill;
-    gradient.type = DisplayCommandType::LinearGradient;
+    gradient.set_type(DisplayCommandType::LinearGradient);
     gradient.color2 = Color{70, 180, 255, 255};
     const DisplayCommand commands[] = {fill, gradient};
     const RasterClip clips[] = {{{8, 8, 24, 24}, 8}};
@@ -1368,12 +1368,12 @@ void dirty_render_skips_contained_dirty_rects() {
     root.type = LayerType::Root;
     root.bounds = Rect{0, 0, 80, 40};
     DisplayCommand command;
-    command.type = DisplayCommandType::Text;
+    command.set_type(DisplayCommandType::Text);
     command.rect = Rect{10, 10, 20, 10};
     command.color = Color{0, 0, 0, 255};
     command.text = "once";
-    command.font_size = 10;
-    command.text_single_line = true;
+    command.text_paint().font_size = 10;
+    command.text_paint().text_single_line = true;
     root.display_list.push_back(std::move(command));
 
     FrameBuffer frame_buffer(80, 40, Color{255, 255, 255, 255});
@@ -1419,7 +1419,7 @@ void compositor_keeps_non_fill_prefix_side_effects() {
     root.type = LayerType::Root;
     root.bounds = Rect{0, 0, 8, 8};
     DisplayCommand text;
-    text.type = DisplayCommandType::Text;
+    text.set_type(DisplayCommandType::Text);
     text.rect = Rect{1, 1, 4, 4};
     text.color = Color{0, 0, 0, 255};
     text.text = "x";
@@ -1445,7 +1445,7 @@ void compositor_keeps_rounded_fill_underpaint() {
     red.color = Color{220, 38, 38, 255};
     DisplayCommand blue = black_fill(Rect{0, 0, 8, 8});
     blue.color = Color{37, 99, 235, 255};
-    blue.border_radius = 3;
+    blue.basic_paint().border_radius = 3;
     root.display_list = {red, blue};
 
     FrameBuffer frame_buffer(8, 8, Color{0, 0, 0, 255});
@@ -1457,7 +1457,7 @@ void compositor_keeps_rounded_fill_underpaint() {
 
 DisplayCommand white_fill(Rect rect) {
     DisplayCommand command;
-    command.type = DisplayCommandType::FillRect;
+    command.set_type(DisplayCommandType::FillRect);
     command.rect = rect;
     command.color = Color{255, 255, 255, 255};
     return command;
@@ -1501,7 +1501,7 @@ void compositor_applies_opacity_to_radial_gradient_pixels() {
     child->opacity = 0.5F;
     child->bounds = Rect{0, 0, 9, 9};
     DisplayCommand radial;
-    radial.type = DisplayCommandType::RadialGradient;
+    radial.set_type(DisplayCommandType::RadialGradient);
     radial.rect = child->bounds;
     radial.color = Color{0, 0, 0, 255};
     radial.color2 = Color{255, 0, 0, 255};
@@ -1529,7 +1529,7 @@ void opacity_fallback_preserves_text_without_copying_command() {
     child->opacity = 0.5F;
     child->bounds = Rect{0, 0, 2, 1};
     DisplayCommand text;
-    text.type = DisplayCommandType::Text;
+    text.set_type(DisplayCommandType::Text);
     text.rect = child->bounds;
     text.color = Color{20, 30, 40, 255};
     text.text = "text with preserved fields";
@@ -1760,12 +1760,12 @@ void rasterizer_reports_text_fallback() {
     VectorDiagnosticSink diagnostics;
     SoftwareRasterizer rasterizer({}, &diagnostics);
     DisplayCommand command;
-    command.type = DisplayCommandType::Text;
+    command.set_type(DisplayCommandType::Text);
     command.rect = Rect{0, 0, 80, 20};
     command.color = Color{0, 0, 0, 255};
     command.text = "\xe4\xb8\xad\xe6\x96\x87";
-    command.font_size = 14;
-    command.text_single_line = true;
+    command.text_paint().font_size = 14;
+    command.text_paint().text_single_line = true;
     FrameBuffer frame(80, 20, Color{255, 255, 255, 255});
 
     rasterizer.rasterize(command, frame, Rect{0, 0, 80, 20});
@@ -1784,12 +1784,12 @@ void dirty_text_clip_preserves_original_text_geometry() {
     FrameBuffer frame_buffer(40, 10, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer(TextPainter{center_pixel_text_painter, nullptr});
     DisplayCommand command;
-    command.type = DisplayCommandType::Text;
+    command.set_type(DisplayCommandType::Text);
     command.rect = Rect{0, 0, 40, 10};
     command.color = Color{0, 0, 0, 255};
     command.text = "center";
-    command.font_size = 10;
-    command.text_single_line = true;
+    command.text_paint().font_size = 10;
+    command.text_paint().text_single_line = true;
 
     rasterizer.rasterize(command, frame_buffer, Rect{20, 0, 5, 10});
 
@@ -1802,12 +1802,12 @@ void rasterizer_scratch_reuses_clipped_command_storage() {
     SoftwareRasterizer rasterizer(TextPainter{center_pixel_text_painter, nullptr});
     SoftwareRasterizerScratch scratch;
     DisplayCommand command;
-    command.type = DisplayCommandType::Text;
+    command.set_type(DisplayCommandType::Text);
     command.rect = Rect{0, 0, 40, 10};
     command.color = Color{0, 0, 0, 255};
     command.text = "center";
-    command.font_size = 10;
-    command.text_single_line = true;
+    command.text_paint().font_size = 10;
+    command.text_paint().text_single_line = true;
     const Rect dirty{20, 0, 5, 10};
 
     rasterizer.rasterize(command, frame_buffer, dirty, 0, 0, &scratch);
@@ -1831,12 +1831,12 @@ void rasterizer_bounds_clipped_temporary_surfaces() {
                                   &diagnostics,
                                   SoftwareRasterizerOptions{16, nullptr, {}});
     DisplayCommand command;
-    command.type = DisplayCommandType::Text;
+    command.set_type(DisplayCommandType::Text);
     command.rect = Rect{0, 0, 40, 10};
     command.color = Color{0, 0, 0, 255};
     command.text = "center";
-    command.font_size = 10;
-    command.text_single_line = true;
+    command.text_paint().font_size = 10;
+    command.text_paint().text_single_line = true;
 
     rasterizer.rasterize(command, frame_buffer, Rect{20, 0, 5, 10});
 
@@ -1863,12 +1863,12 @@ void compositor_scratch_reuses_clipped_command_storage() {
     root.type = LayerType::Root;
     root.bounds = Rect{0, 0, 40, 10};
     DisplayCommand command;
-    command.type = DisplayCommandType::Text;
+    command.set_type(DisplayCommandType::Text);
     command.rect = Rect{0, 0, 40, 10};
     command.color = Color{0, 0, 0, 255};
     command.text = "center";
-    command.font_size = 10;
-    command.text_single_line = true;
+    command.text_paint().font_size = 10;
+    command.text_paint().text_single_line = true;
     root.display_list.push_back(command);
 
     FrameBuffer frame_buffer(40, 10, Color{255, 255, 255, 255});
@@ -1891,9 +1891,9 @@ void rasterizer_scratch_reuses_clipped_image_storage() {
     SoftwareRasterizer rasterizer({}, ImagePainter{probe_image_painter, &probe});
     SoftwareRasterizerScratch scratch;
     DisplayCommand command;
-    command.type = DisplayCommandType::Image;
+    command.set_type(DisplayCommandType::Image);
     command.rect = Rect{0, 0, 40, 10};
-    command.image_handle = probe.expected_handle;
+    command.image_paint().image_handle = probe.expected_handle;
     const Rect dirty{20, 0, 5, 10};
 
     rasterizer.rasterize(command, frame_buffer, dirty, 0, 0, &scratch);
@@ -1967,13 +1967,13 @@ void bitmap_font_backend_measures_and_paints() {
     FrameBuffer frame_buffer(32, 16, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer(TextPainter{bitmap_font_paint_callback, &context});
     DisplayCommand command;
-    command.type = DisplayCommandType::Text;
+    command.set_type(DisplayCommandType::Text);
     command.rect = Rect{0, 0, 32, 16};
     command.color = Color{0, 0, 0, 255};
     command.text = "A";
-    command.font_size = 12;
-    command.text_align = TextCommandAlign::Center;
-    command.text_single_line = true;
+    command.text_paint().font_size = 12;
+    command.text_paint().text_align = TextCommandAlign::Center;
+    command.text_paint().text_single_line = true;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 32, 16});
 
     check(count_non_background_pixels(frame_buffer, Color{255, 255, 255, 255}) > 0,
@@ -1982,12 +1982,12 @@ void bitmap_font_backend_measures_and_paints() {
 
     FrameBuffer utf8_frame_buffer(40, 16, Color{255, 255, 255, 255});
     DisplayCommand utf8_command;
-    utf8_command.type = DisplayCommandType::Text;
+    utf8_command.set_type(DisplayCommandType::Text);
     utf8_command.rect = Rect{0, 0, 40, 16};
     utf8_command.color = Color{0, 0, 0, 255};
     utf8_command.text = "\xe4\xb8\xad?";
-    utf8_command.font_size = 12;
-    utf8_command.text_single_line = true;
+    utf8_command.text_paint().font_size = 12;
+    utf8_command.text_paint().text_single_line = true;
     rasterizer.rasterize(utf8_command, utf8_frame_buffer, Rect{0, 0, 40, 16});
 
     check(count_non_background_pixels(utf8_frame_buffer, Color{255, 255, 255, 255}) > 20,
@@ -2038,16 +2038,16 @@ void bitmap_font_scaling_bold_and_missing_glyphs_are_stable() {
 
     SoftwareRasterizer rasterizer(TextPainter{bitmap_font_paint_callback, &context});
     DisplayCommand normal;
-    normal.type = DisplayCommandType::Text;
+    normal.set_type(DisplayCommandType::Text);
     normal.rect = Rect{0, 0, 64, 24};
     normal.color = Color{0, 0, 0, 255};
     normal.text = "A";
-    normal.font_size = 18;
-    normal.font_weight = 400;
-    normal.text_single_line = true;
+    normal.text_paint().font_size = 18;
+    normal.text_paint().font_weight = 400;
+    normal.text_paint().text_single_line = true;
 
     DisplayCommand bold = normal;
-    bold.font_weight = 700;
+    bold.text_paint().font_weight = 700;
 
     FrameBuffer normal_frame(64, 24, Color{255, 255, 255, 255});
     FrameBuffer bold_frame(64, 24, Color{255, 255, 255, 255});
@@ -2086,13 +2086,13 @@ void bitmap_font_bold_metrics_include_extra_stroke() {
 
     SoftwareRasterizer rasterizer(TextPainter{bitmap_font_paint_callback, &context});
     DisplayCommand command;
-    command.type = DisplayCommandType::Text;
+    command.set_type(DisplayCommandType::Text);
     command.rect = Rect{0, 0, bold.width, 10};
     command.color = Color{0, 0, 0, 255};
     command.text = "W";
-    command.font_size = 12;
-    command.font_weight = 700;
-    command.text_single_line = true;
+    command.text_paint().font_size = 12;
+    command.text_paint().font_weight = 700;
+    command.text_paint().text_single_line = true;
 
     FrameBuffer frame_buffer(bold.width, 10, Color{255, 255, 255, 255});
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, bold.width, 10});
@@ -2188,12 +2188,12 @@ void jffont_resource_loads_bitmap_font_view() {
     FrameBuffer frame_buffer(32, 12, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer(TextPainter{bitmap_font_paint_callback, &context});
     DisplayCommand command;
-    command.type = DisplayCommandType::Text;
+    command.set_type(DisplayCommandType::Text);
     command.rect = Rect{0, 0, 32, 12};
     command.color = Color{0, 0, 0, 255};
     command.text = "A\xe4\xb8\xad";
-    command.font_size = 8;
-    command.text_single_line = true;
+    command.text_paint().font_size = 8;
+    command.text_paint().text_single_line = true;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 32, 12});
     check(count_non_background_pixels(frame_buffer, Color{255, 255, 255, 255}) > 10,
           "jffont glyphs paint through bitmap backend");
@@ -2236,12 +2236,12 @@ void jffont_v1_coverage_glyphs_antialias_text_edges() {
     FrameBuffer frame_buffer(8, 6, Color{255, 255, 255, 255});
     SoftwareRasterizer rasterizer(TextPainter{bitmap_font_paint_callback, &context});
     DisplayCommand command;
-    command.type = DisplayCommandType::Text;
+    command.set_type(DisplayCommandType::Text);
     command.rect = Rect{0, 0, 8, 6};
     command.color = Color{0, 0, 0, 255};
     command.text = "A";
-    command.font_size = 3;
-    command.text_single_line = true;
+    command.text_paint().font_size = 3;
+    command.text_paint().text_single_line = true;
     rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 8, 6});
 
     bool has_gray_edge = false;

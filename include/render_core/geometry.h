@@ -4,6 +4,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <new>
+#include <stdexcept>
+#include <tuple>
+#include <utility>
 #include <limits>
 #include <string>
 #include <vector>
@@ -247,12 +252,16 @@ struct DisplayCommandTransform {
     std::uint16_t source_clip_index = 0xffffU;
 };
 
-struct DisplayCommand {
-    DisplayCommandType type = DisplayCommandType::FillRect;
-    Rect rect;
-    Color color;
-    Color color2;
-    std::string text;
+// Each command owns exactly one active trivial paint payload. The string and
+// transform remain common values, so copying never depends on a Style owner.
+struct BasicPaint {
+    int border_radius = 0;
+    int stroke_width = 1;
+    GradientAxis gradient_axis = GradientAxis::Vertical;
+    int gradient_stop_percent = 100;
+};
+
+struct TextPaint {
     int border_radius = 0;
     int stroke_width = 1;
     int font_size = 14;
@@ -260,31 +269,155 @@ struct DisplayCommand {
     std::uint32_t font_family_hash = 0;
     TextCommandAlign text_align = TextCommandAlign::Start;
     bool text_single_line = true;
-    GradientAxis gradient_axis = GradientAxis::Vertical;
-    int gradient_stop_percent = 100;
+    int origin_x = 0;
+    int baseline_y = 0;
+};
+
+struct ImagePaint {
     std::uint32_t image_handle = 0;
     ObjectFit object_fit = ObjectFit::Fill;
     ObjectPosition object_position;
     ImageRendering image_rendering = ImageRendering::Auto;
-    DisplayCommandTransform transform;
-    // Optional, frame-local profiling attribution. Zero means no reliable
-    // owner. It is a pure value so command copies stay task-safe; frame codecs
-    // intentionally do not serialize it and normal rendering never reads it.
-    std::uint32_t trace_owner_token = 0;
+    int border_radius = 0;
 };
 
-// PreparedText reuses the existing position payload as its baseline origin,
-// keeping the common DisplayCommand footprint unchanged. Other command types
-// continue to interpret these values as object-position percentages.
+class DisplayCommand {
+    DisplayCommandType type_ = DisplayCommandType::FillRect;
+
+public:
+    Rect rect;
+    Color color;
+    Color color2;
+    // Frame-local attribution; codecs intentionally do not serialize it.
+    std::uint32_t trace_owner_token = 0;
+    std::string text;
+    DisplayCommandTransform transform;
+
+private:
+    union Paint {
+        BasicPaint basic;
+        TextPaint text;
+        ImagePaint image;
+        Paint() {
+            std::memset(static_cast<void*>(this), 0, sizeof(*this));
+            new (&basic) BasicPaint{};
+        }
+    } paint_;
+
+    static bool basic_type(DisplayCommandType type) noexcept {
+        return type >= DisplayCommandType::FillRect && type <= DisplayCommandType::BoxShadow;
+    }
+    void require(bool valid) const {
+        if (!valid) throw std::logic_error("DisplayCommand paint payload does not match its type");
+    }
+
+public:
+    DisplayCommand() = default;
+    explicit DisplayCommand(DisplayCommandType type) { set_type(type); }
+    DisplayCommand(const DisplayCommand&) = default;
+    DisplayCommand(DisplayCommand&&) noexcept = default;
+    DisplayCommand& operator=(DisplayCommand&&) noexcept = default;
+    DisplayCommand& operator=(const DisplayCommand& other) {
+        if (this != &other) {
+            DisplayCommand copy(other);
+            *this = std::move(copy);
+        }
+        return *this;
+    }
+    DisplayCommandType type() const noexcept { return type_; }
+    // Re-selecting the same type preserves its payload. Changing types resets
+    // the newly active value to its documented defaults, including reserved bits.
+    void set_type(DisplayCommandType type) {
+        if (type == type_) return;
+        if (!basic_type(type) && type != DisplayCommandType::Text && type != DisplayCommandType::PreparedText &&
+            type != DisplayCommandType::Image)
+            throw std::invalid_argument("Unknown DisplayCommand type");
+        // Canonicalize unused storage before activating a trivial alternative.
+        // Equality and transport still must inspect semantic fields only.
+        std::memset(static_cast<void*>(&paint_), 0, sizeof(paint_));
+        if (basic_type(type)) new (&paint_.basic) BasicPaint{};
+        else if (type == DisplayCommandType::Text || type == DisplayCommandType::PreparedText)
+            new (&paint_.text) TextPaint{};
+        else if (type == DisplayCommandType::Image) new (&paint_.image) ImagePaint{};
+        type_ = type;
+    }
+    BasicPaint& basic_paint() { require(basic_type(type_)); return paint_.basic; }
+    const BasicPaint& basic_paint() const { require(basic_type(type_)); return paint_.basic; }
+    TextPaint& text_paint() {
+        require(type_ == DisplayCommandType::Text || type_ == DisplayCommandType::PreparedText);
+        return paint_.text;
+    }
+    const TextPaint& text_paint() const {
+        require(type_ == DisplayCommandType::Text || type_ == DisplayCommandType::PreparedText);
+        return paint_.text;
+    }
+    ImagePaint& image_paint() { require(type_ == DisplayCommandType::Image); return paint_.image; }
+    const ImagePaint& image_paint() const { require(type_ == DisplayCommandType::Image); return paint_.image; }
+
+};
+
 inline void set_prepared_text_origin(DisplayCommand& command, int x, int baseline_y) {
-    command.object_position.x_percent = x;
-    command.object_position.y_percent = baseline_y;
+    if (command.type() != DisplayCommandType::PreparedText)
+        throw std::logic_error("Prepared text origin requires a PreparedText command");
+    command.text_paint().origin_x = x;
+    command.text_paint().baseline_y = baseline_y;
 }
 inline int prepared_text_origin_x(const DisplayCommand& command) {
-    return command.object_position.x_percent;
+    if (command.type() != DisplayCommandType::PreparedText)
+        throw std::logic_error("Prepared text origin requires a PreparedText command");
+    return command.text_paint().origin_x;
 }
 inline int prepared_text_baseline_y(const DisplayCommand& command) {
-    return command.object_position.y_percent;
+    if (command.type() != DisplayCommandType::PreparedText)
+        throw std::logic_error("Prepared text origin requires a PreparedText command");
+    return command.text_paint().baseline_y;
+}
+
+// Translate bounds together with the explicit prepared-text origin.
+inline bool translate_display_command(DisplayCommand& command, int dx, int dy) {
+    command.rect.x = safe_add(command.rect.x, dx);
+    command.rect.y = safe_add(command.rect.y, dy);
+    if (command.type() == DisplayCommandType::PreparedText) {
+        auto& paint = command.text_paint();
+        paint.origin_x = safe_add(paint.origin_x, dx);
+        paint.baseline_y = safe_add(paint.baseline_y, dy);
+    }
+    return true;
+}
+
+inline bool display_commands_equal(const DisplayCommand& a, const DisplayCommand& b) {
+    const auto rect = [](const Rect& r) { return std::tie(r.x, r.y, r.width, r.height); };
+    const auto color = [](const Color& c) { return std::tie(c.r, c.g, c.b, c.a); };
+    const auto transform = [](const DisplayCommandTransform& t) {
+        return std::tie(t.enabled, t.xx_1024, t.xy_1024, t.yx_1024, t.yy_1024,
+                        t.tx_1024, t.ty_1024, t.source_clip_index);
+    };
+    if (a.type() != b.type() || rect(a.rect) != rect(b.rect) || color(a.color) != color(b.color) ||
+        color(a.color2) != color(b.color2) || a.text != b.text ||
+        a.trace_owner_token != b.trace_owner_token || transform(a.transform) != transform(b.transform)) return false;
+    switch (a.type()) {
+    case DisplayCommandType::Text:
+    case DisplayCommandType::PreparedText: {
+        const auto fields = [](const TextPaint& p) {
+            return std::tie(p.border_radius, p.stroke_width, p.font_size, p.font_weight, p.font_family_hash,
+                            p.text_align, p.text_single_line, p.origin_x, p.baseline_y);
+        };
+        return fields(a.text_paint()) == fields(b.text_paint());
+    }
+    case DisplayCommandType::Image: {
+        const auto fields = [](const ImagePaint& p) {
+            return std::tie(p.image_handle, p.object_fit,
+                            p.object_position.x_percent, p.object_position.y_percent, p.image_rendering, p.border_radius);
+        };
+        return fields(a.image_paint()) == fields(b.image_paint());
+    }
+    default: {
+        const auto fields = [](const BasicPaint& p) {
+            return std::tie(p.border_radius, p.stroke_width, p.gradient_axis, p.gradient_stop_percent);
+        };
+        return fields(a.basic_paint()) == fields(b.basic_paint());
+    }
+    }
 }
 
 using DisplayList = std::vector<DisplayCommand>;

@@ -396,7 +396,7 @@ void append_dirty_paint_bounds_from_layer(const LayerNode& root,
         const LayerNode* current = pending.back();
         pending.pop_back();
         for (const DisplayCommand& command : current->display_list) {
-            if (command.type != DisplayCommandType::BoxShadow) {
+            if (command.type() != DisplayCommandType::BoxShadow) {
                 continue;
             }
             const std::size_t dirty_count = output.size();

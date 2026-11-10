@@ -1258,9 +1258,9 @@ OpaqueFillPrefix opaque_fill_prefix(const DisplayList& display_list,
     OpaqueFillPrefix prefix;
     for (std::size_t index = 0; index < display_list.size(); ++index) {
         const DisplayCommand& command = display_list[index];
-        if (command.type != DisplayCommandType::FillRect ||
+        if (command.type() != DisplayCommandType::FillRect ||
             command.color.a != 255 ||
-            command.border_radius != 0) {
+            command.basic_paint().border_radius != 0) {
             break;
         }
         Rect rect = command.rect;
@@ -1523,12 +1523,12 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         ? opacity_color_override.color2
         : command.color2;
 
-    switch (command.type) {
+    switch (command.type()) {
     case DisplayCommandType::FillRect:
         if (contains_rect(clip, rect)) {
-            fill_rect(target, rect, effective_color, command.border_radius);
+            fill_rect(target, rect, effective_color, command.basic_paint().border_radius);
         } else {
-            fill_rect_clipped(target, rect, clip, effective_color, command.border_radius);
+            fill_rect_clipped(target, rect, clip, effective_color, command.basic_paint().border_radius);
         }
         break;
     case DisplayCommandType::LinearGradient:
@@ -1538,20 +1538,20 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                                  rect,
                                  effective_color,
                                  effective_color2,
-                                 command.gradient_axis,
-                                 command.border_radius);
+                                 command.basic_paint().gradient_axis,
+                                 command.basic_paint().border_radius);
         } else {
             fill_linear_gradient_clipped(target,
                                          rect,
                                          clip,
                                          effective_color,
                                          effective_color2,
-                                         command.gradient_axis,
-                                         command.border_radius);
+                                         command.basic_paint().gradient_axis,
+                                         command.basic_paint().border_radius);
         }
         break;
 #else
-        fill_rect_clipped(target, rect, clip, effective_color, command.border_radius);
+        fill_rect_clipped(target, rect, clip, effective_color, command.basic_paint().border_radius);
         break;
 #endif
     case DisplayCommandType::ConicGradient:
@@ -1561,20 +1561,20 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                                 rect,
                                 effective_color,
                                 effective_color2,
-                                command.gradient_stop_percent,
-                                command.border_radius);
+                                command.basic_paint().gradient_stop_percent,
+                                command.basic_paint().border_radius);
         } else {
             fill_conic_gradient_clipped(target,
                                         rect,
                                         clip,
                                         effective_color,
                                         effective_color2,
-                                        command.gradient_stop_percent,
-                                        command.border_radius);
+                                        command.basic_paint().gradient_stop_percent,
+                                        command.basic_paint().border_radius);
         }
         break;
 #else
-        fill_rect_clipped(target, rect, clip, effective_color, command.border_radius);
+        fill_rect_clipped(target, rect, clip, effective_color, command.basic_paint().border_radius);
         break;
 #endif
     case DisplayCommandType::RadialGradient:
@@ -1584,22 +1584,22 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                                  rect,
                                  effective_color,
                                  effective_color2,
-                                 command.gradient_axis,
-                                 command.gradient_stop_percent,
-                                 command.border_radius);
+                                 command.basic_paint().gradient_axis,
+                                 command.basic_paint().gradient_stop_percent,
+                                 command.basic_paint().border_radius);
         } else {
             fill_radial_gradient_clipped(target,
                                          rect,
                                          clip,
                                          effective_color,
                                          effective_color2,
-                                         command.gradient_axis,
-                                         command.gradient_stop_percent,
-                                         command.border_radius);
+                                         command.basic_paint().gradient_axis,
+                                         command.basic_paint().gradient_stop_percent,
+                                         command.basic_paint().border_radius);
         }
         break;
 #else
-        fill_rect_clipped(target, rect, clip, effective_color, command.border_radius);
+        fill_rect_clipped(target, rect, clip, effective_color, command.basic_paint().border_radius);
         break;
 #endif
     case DisplayCommandType::BoxShadow:
@@ -1608,18 +1608,18 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                              rect,
                              clip,
                              effective_color,
-                             command.border_radius,
-                             command.stroke_width,
-                             command.gradient_stop_percent);
+                             command.basic_paint().border_radius,
+                             command.basic_paint().stroke_width,
+                             command.basic_paint().gradient_stop_percent);
         break;
 #else
         break;
 #endif
     case DisplayCommandType::StrokeRect:
         if (contains_rect(clip, rect)) {
-            stroke_rect(target, rect, effective_color, command.stroke_width, command.border_radius);
+            stroke_rect(target, rect, effective_color, command.basic_paint().stroke_width, command.basic_paint().border_radius);
         } else {
-            stroke_rect_clipped(target, rect, clip, effective_color, command.stroke_width, command.border_radius);
+            stroke_rect_clipped(target, rect, clip, effective_color, command.basic_paint().stroke_width, command.basic_paint().border_radius);
         }
         break;
     case DisplayCommandType::PreparedText: {
@@ -1656,11 +1656,11 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                       rect,
                       effective_color,
                       command.text,
-                      command.font_size,
-                      command.font_weight,
-                      command.font_family_hash,
-                      command.text_align,
-                      command.text_single_line,
+                      command.text_paint().font_size,
+                      command.text_paint().font_weight,
+                      command.text_paint().font_family_hash,
+                      command.text_paint().text_align,
+                      command.text_paint().text_single_line,
                       text_painter_,
                       diagnostics_);
             break;
@@ -1678,11 +1678,11 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                   Rect{rect.x - visible.x, rect.y - visible.y, rect.width, rect.height},
                   effective_color,
                   command.text,
-                  command.font_size,
-                  command.font_weight,
-                  command.font_family_hash,
-                  command.text_align,
-                  command.text_single_line,
+                  command.text_paint().font_size,
+                  command.text_paint().font_weight,
+                  command.text_paint().font_family_hash,
+                  command.text_paint().text_align,
+                  command.text_paint().text_single_line,
                   text_painter_,
                   diagnostics_);
         composite_buffer_clipped(target, text_buffer, visible.x, visible.y, clip, 1.0F);
@@ -1697,11 +1697,11 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                               DiagnosticSeverity::Warning,
                               "paint-image-fallback",
                               "Image command could not be painted; placeholder was used",
-                              std::to_string(command.image_handle));
+                              std::to_string(command.image_paint().image_handle));
             fill_rect_clipped(target, rect, clip, Color{226, 232, 240, 255});
             break;
         }
-        if (has_corner_radius(command.border_radius)) {
+        if (has_corner_radius(command.image_paint().border_radius)) {
             const Rect visible = intersect_rect(rect, clip);
             if (empty_rect(visible)) {
                 break;
@@ -1714,22 +1714,22 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
             }
             if (!image_painter_.paint(image_buffer,
                                       Rect{rect.x - visible.x, rect.y - visible.y, rect.width, rect.height},
-                                      command.image_handle,
-                                      command.object_fit,
-                                      command.object_position,
-                                      command.image_rendering,
+                                      command.image_paint().image_handle,
+                                      command.image_paint().object_fit,
+                                      command.image_paint().object_position,
+                                      command.image_paint().image_rendering,
                                       image_painter_.context)) {
                 report_diagnostic(diagnostics_,
                                   DiagnosticStage::Paint,
                                   DiagnosticSeverity::Warning,
                                   "paint-image-fallback",
                                   "Image command could not be painted; placeholder was used",
-                                  std::to_string(command.image_handle));
+                                  std::to_string(command.image_paint().image_handle));
                 fill_rect(image_buffer,
                           Rect{rect.x - visible.x, rect.y - visible.y, rect.width, rect.height},
                           Color{226, 232, 240, 255});
             }
-            const RasterRoundedRect rounded = prepare_rounded_rect(rect, command.border_radius);
+            const RasterRoundedRect rounded = prepare_rounded_rect(rect, command.image_paint().border_radius);
             const int y_end = safe_edge(visible.y, visible.height);
             const int x_end = safe_edge(visible.x, visible.width);
             for (int y = visible.y; y < y_end; ++y) {
@@ -1746,17 +1746,17 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         if (contains_rect(clip, rect)) {
             if (!image_painter_.paint(target,
                                       rect,
-                                      command.image_handle,
-                                      command.object_fit,
-                                      command.object_position,
-                                      command.image_rendering,
+                                      command.image_paint().image_handle,
+                                      command.image_paint().object_fit,
+                                      command.image_paint().object_position,
+                                      command.image_paint().image_rendering,
                                       image_painter_.context)) {
                 report_diagnostic(diagnostics_,
                                   DiagnosticStage::Paint,
                                   DiagnosticSeverity::Warning,
                                   "paint-image-fallback",
                                   "Image command could not be painted; placeholder was used",
-                                  std::to_string(command.image_handle));
+                                  std::to_string(command.image_paint().image_handle));
                 fill_rect(target, rect, Color{226, 232, 240, 255});
             }
             break;
@@ -1773,17 +1773,17 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         }
         if (!image_painter_.paint(image_buffer,
                                   Rect{rect.x - visible.x, rect.y - visible.y, rect.width, rect.height},
-                                  command.image_handle,
-                                  command.object_fit,
-                                  command.object_position,
-                                  command.image_rendering,
+                                  command.image_paint().image_handle,
+                                  command.image_paint().object_fit,
+                                  command.image_paint().object_position,
+                                  command.image_paint().image_rendering,
                                   image_painter_.context)) {
             report_diagnostic(diagnostics_,
                               DiagnosticStage::Paint,
                               DiagnosticSeverity::Warning,
                               "paint-image-fallback",
                               "Image command could not be painted; placeholder was used",
-                              std::to_string(command.image_handle));
+                              std::to_string(command.image_paint().image_handle));
             fill_rect(image_buffer,
                       Rect{rect.x - visible.x, rect.y - visible.y, rect.width, rect.height},
                       Color{226, 232, 240, 255});
@@ -1794,7 +1794,7 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
     }
     if (observe_command) {
         SoftwareRasterizerCommandSample sample;
-        sample.type = command.type;
+        sample.type = command.type();
         sample.trace_owner_token = command.trace_owner_token;
         sample.clip = clipped;
         sample.candidate_pixels = clipped_rect_pixels(clipped);
@@ -1910,9 +1910,9 @@ void SoftwareRasterizer::rasterize_clipped(const DisplayCommand& command,
         options_.statistics->rounded_clip_mask_pixels += temporary_pixels;
         options_.statistics->rounded_clip_temporary_pixels += temporary_pixels;
     }
-    record_rounded_clip_replayed_command(options_.statistics, command.type);
+    record_rounded_clip_replayed_command(options_.statistics, command.type());
     record_rounded_clip_replay_candidate_pixels(options_.statistics,
-                                                command.type,
+                                                command.type(),
                                                 command_rect,
                                                 visible);
     const bool time_replay = time_rounded_run;
@@ -1927,7 +1927,7 @@ void SoftwareRasterizer::rasterize_clipped(const DisplayCommand& command,
               nullptr);
     if (time_replay) {
         record_rounded_clip_replay_duration(options_.statistics,
-                                            command.type,
+                                            command.type(),
                                             begin_microseconds,
                                             options_.timing.now_microseconds(options_.timing.context));
     }
@@ -2044,12 +2044,12 @@ void SoftwareRasterizer::rasterize_clipped(const DisplayCommand* commands,
     const int local_offset_y = safe_add(offset_y, safe_negate(effective_clip.y));
     for (std::size_t index = 0; index < command_count; ++index) {
         // Do not reuse the group surface for nested text/image clipping.
-        record_rounded_clip_replayed_command(options_.statistics, commands[index].type);
+        record_rounded_clip_replayed_command(options_.statistics, commands[index].type());
         Rect command_rect = commands[index].rect;
         command_rect.x = safe_add(command_rect.x, offset_x);
         command_rect.y = safe_add(command_rect.y, offset_y);
         record_rounded_clip_replay_candidate_pixels(options_.statistics,
-                                                    commands[index].type,
+                                                    commands[index].type(),
                                                     command_rect,
                                                     effective_clip);
         const bool time_replay = time_rounded_run;
@@ -2059,7 +2059,7 @@ void SoftwareRasterizer::rasterize_clipped(const DisplayCommand* commands,
         rasterize(commands[index], surface, local_clip, local_offset_x, local_offset_y, nullptr);
         if (time_replay) {
             record_rounded_clip_replay_duration(options_.statistics,
-                                                commands[index].type,
+                                                commands[index].type(),
                                                 begin_microseconds,
                                                 options_.timing.now_microseconds(options_.timing.context));
         }

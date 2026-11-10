@@ -249,7 +249,7 @@ void prepared_packet_paint() {
     assert(system.paint(preserved,unchanged,{0,0,32,20},7000,12000,ink)==TextSystemStatus::Ok);
 
     DisplayCommand command;
-    command.type=DisplayCommandType::PreparedText;command.rect={0,0,32,20};
+    command.set_type(DisplayCommandType::PreparedText);command.rect={0,0,32,20};
     command.text=packet;command.color=ink;
     set_prepared_text_origin(command,0,0);
     SoftwareRasterizerOptions raster_options;raster_options.text_system=&system;
@@ -297,7 +297,7 @@ void html_layout_to_core_paint() {
     auto layers=LayerTreeBuilder(layer_options).build(*layout);
     bool found_prepared=false;
     for (const auto& command:layers->display_list)
-        found_prepared|=command.type==DisplayCommandType::PreparedText;
+        found_prepared|=command.type()==DisplayCommandType::PreparedText;
     assert(found_prepared);
     SoftwareCompositor::Options compositor_options;compositor_options.text_system=&system;
     const auto frame=SoftwareCompositor({},compositor_options).render(*layers,80,40,Color{255,255,255,255});
@@ -318,7 +318,7 @@ void html_layout_to_core_paint() {
     bool found_positioned_text=false;
     const auto check_positioned_commands=[&](const auto& self,const LayerNode& layer)->void {
         for (const auto& command:layer.display_list) {
-            if (command.type!=DisplayCommandType::PreparedText) continue;
+            if (command.type()!=DisplayCommandType::PreparedText) continue;
             found_positioned_text=true;
             assert(prepared_text_origin_x(command)==positioned_text->rect.x);
             assert(prepared_text_baseline_y(command)==positioned_text->text_layout_cache.prepared_baseline_y);
@@ -340,7 +340,7 @@ void html_layout_to_core_paint() {
     std::size_t wrapped_commands=0;
     const auto count_wrapped_commands=[&](const auto& self,const LayerNode& layer)->void {
         for (const auto& command:layer.display_list)
-            wrapped_commands+=command.type==DisplayCommandType::PreparedText;
+            wrapped_commands+=command.type()==DisplayCommandType::PreparedText;
         for (const auto& child:layer.children) self(self,*child);
     };
     count_wrapped_commands(count_wrapped_commands,*wrapped_layers);
@@ -361,7 +361,7 @@ void html_layout_to_core_paint() {
     std::size_t stale_prepared_commands=0;
     const auto count_stale_commands=[&](const auto& self,const LayerNode& layer)->void {
         for (const auto& command:layer.display_list)
-            stale_prepared_commands+=command.type==DisplayCommandType::PreparedText;
+            stale_prepared_commands+=command.type()==DisplayCommandType::PreparedText;
         for (const auto& child:layer.children) self(self,*child);
     };
     count_stale_commands(count_stale_commands,*stale_layers);
@@ -401,7 +401,7 @@ void core_layout_refusals_do_not_fall_back_to_host_text() {
         LayerTreeBuilderOptions layer_options;layer_options.text_system=&system;
         auto layers=LayerTreeBuilder(layer_options).build(*layout);
         for (const auto& command:layers->display_list)
-            assert(command.type!=DisplayCommandType::Text && command.type!=DisplayCommandType::PreparedText);
+            assert(command.type()!=DisplayCommandType::Text && command.type()!=DisplayCommandType::PreparedText);
     };
 
     run_refusal("<body><div>AB</div></body>",

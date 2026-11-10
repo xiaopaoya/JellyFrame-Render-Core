@@ -324,7 +324,7 @@ void software_compositor_applies_rotate_transform_origin() {
     child->transform_origin_x_percent = 50;
     child->transform_origin_y_percent = 100;
     DisplayCommand fill;
-    fill.type = DisplayCommandType::FillRect;
+    fill.set_type(DisplayCommandType::FillRect);
     fill.rect = Rect{20, 10, 4, 20};
     fill.color = Color{255, 0, 0, 255};
     child->display_list.push_back(fill);

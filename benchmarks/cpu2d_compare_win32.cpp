@@ -320,13 +320,13 @@ int main(int argc, char** argv) {
 
         FrameBuffer jellyframe_surface(kWidth, kHeight, Color{0, 0, 0, 255});
         DisplayCommand command;
-        command.type = workload == Workload::OpaqueFill
+        command.set_type(workload == Workload::OpaqueFill
             ? DisplayCommandType::FillRect
-            : DisplayCommandType::LinearGradient;
+            : DisplayCommandType::LinearGradient);
         command.rect = Rect{0, 0, kWidth, kHeight};
         command.color = workload == Workload::OpaqueFill ? kFillColor : kGradientFirst;
         command.color2 = kGradientSecond;
-        command.gradient_axis = workload == Workload::VerticalGradient
+        command.basic_paint().gradient_axis = workload == Workload::VerticalGradient
             ? GradientAxis::Vertical
             : GradientAxis::Horizontal;
         SoftwareRasterizer rasterizer;
