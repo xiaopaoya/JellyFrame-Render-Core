@@ -1,8 +1,9 @@
-﻿#include "render_core/dom.h"
+#include "render_core/dom.h"
 
 #include "render_core/form_control.h"
 
 #include <algorithm>
+#include <new>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -11,6 +12,44 @@ namespace jellyframe {
 namespace {
 
 const std::string kEmpty;
+
+// Collect before publishing observer changes. One vector retains every node,
+// using O(n) temporary pointers and O(n) time without recursive stack growth.
+std::vector<Node*> collect_subtree(Node& root) {
+    std::vector<Node*> nodes;
+    nodes.push_back(&root);
+    for (std::size_t index = 0; index < nodes.size(); ++index) {
+        for (auto& child : nodes[index]->children) nodes.push_back(child.get());
+    }
+    return nodes;
+}
+
+// Allocation-free cleanup fallback. Parent links delimit the borrowed subtree.
+// Sibling lookup makes a wide tree O(n^2) under allocation failure, but uses
+// constant memory and completes even for an arbitrarily deep valid tree.
+template <typename Visitor>
+void visit_subtree_without_allocation(Node& root, Visitor&& visit) noexcept {
+    Node* current = &root;
+    while (current) {
+        visit(*current);
+        if (!current->children.empty()) {
+            current = current->children.front().get();
+            continue;
+        }
+        while (current != &root) {
+            Node* parent = current->parent;
+            auto sibling = std::find_if(parent->children.begin(), parent->children.end(),
+                [current](const auto& child) { return child.get() == current; });
+            ++sibling;
+            if (sibling != parent->children.end()) {
+                current = sibling->get();
+                break;
+            }
+            current = parent;
+        }
+        if (current == &root) return;
+    }
+}
 
 bool attribute_affects_form_control_state(const std::string& name) {
     return name == "type" || name == "value" || name == "checked" || name == "selected" ||
@@ -159,11 +198,27 @@ Node& Node::insert_child(std::unique_ptr<Node> child, std::size_t index) {
     if (child->parent != nullptr) {
         throw std::invalid_argument("only detached DOM nodes can be inserted");
     }
+    // Preflight all observer storage before committing the attachment. A null
+    // observer needs no allocation and clears any previous subtree overrides.
+    std::vector<Node*> inherited;
+    if (mutation_observer_) inherited = collect_subtree(*child);
     index = std::min(index, children.size());
     auto inserted = children.insert(children.begin() + static_cast<std::ptrdiff_t>(index), std::move(child));
     (*inserted)->parent = this;
+    if (mutation_observer_) {
+        for (Node* node : inherited) {
+            node->mutation_observer_ = mutation_observer_;
+            node->mutation_observer_context_ = mutation_observer_context_;
+        }
+    } else {
+        visit_subtree_without_allocation(**inserted, [](Node& node) {
+            node.mutation_observer_ = nullptr;
+            node.mutation_observer_context_ = nullptr;
+        });
+    }
+    Node* const attached = inserted->get();
     mark_dirty(*this, DomDirtyTree | DomDirtyLayout);
-    return **inserted;
+    return *attached;
 }
 
 std::unique_ptr<Node> Node::detach_child(const Node& child) {
@@ -172,6 +227,7 @@ std::unique_ptr<Node> Node::detach_child(const Node& child) {
             continue;
         }
         std::unique_ptr<Node> detached = std::move(*it);
+        detached->clear_mutation_observer(mutation_observer_, mutation_observer_context_);
         detached->parent = nullptr;
         children.erase(it);
         mark_dirty(*this, DomDirtyTree | DomDirtyLayout);
@@ -248,6 +304,8 @@ void Node::set_text_content(std::string value) {
     children.swap(replacement_children);
     if (!children.empty()) {
         children.front()->parent = this;
+        children.front()->mutation_observer_ = mutation_observer_;
+        children.front()->mutation_observer_context_ = mutation_observer_context_;
     }
     form_control_state.reset();
     mark_dirty(*this, DomDirtyTree | DomDirtyText | DomDirtyLayout);
@@ -343,6 +401,31 @@ void Node::remove_destroy_observer(DestroyObserver observer, void* context) {
         destroy_observers_.end());
 }
 
+void Node::set_mutation_observer(MutationObserver observer, void* context) {
+    const auto nodes = collect_subtree(*this);
+    for (Node* node : nodes) {
+        node->mutation_observer_ = observer;
+        node->mutation_observer_context_ = observer ? context : nullptr;
+    }
+}
+
+void Node::clear_mutation_observer(MutationObserver observer, void* context) noexcept {
+    const auto clear_matching = [observer, context](Node& node) {
+        if (node.mutation_observer_ == observer && node.mutation_observer_context_ == context) {
+            node.mutation_observer_ = nullptr;
+            node.mutation_observer_context_ = nullptr;
+        }
+    };
+    try {
+        const auto nodes = collect_subtree(*this);
+        for (Node* node : nodes) clear_matching(*node);
+    } catch (const std::bad_alloc&) {
+        visit_subtree_without_allocation(*this, clear_matching);
+    } catch (const std::length_error&) {
+        visit_subtree_without_allocation(*this, clear_matching);
+    }
+}
+
 std::unique_ptr<Node> make_element(std::string tag_name) {
     auto node = std::make_unique<Node>(NodeType::Element);
     node->tag_name = std::move(tag_name);
@@ -366,6 +449,10 @@ void mark_dirty(Node& node, DomDirtyFlags flags) {
         root = current;
     }
     ++root->mutation_generation;
+    // Snapshot the registration so reentrant changes affect subsequent writes.
+    const auto observer = node.mutation_observer_;
+    void* const context = node.mutation_observer_context_;
+    if (observer) observer(node, flags, root->mutation_generation, context);
 }
 
 DomDirtyFlags subtree_dirty_flags(const Node& node) {

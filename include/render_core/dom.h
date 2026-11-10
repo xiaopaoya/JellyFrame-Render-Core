@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#define JELLYFRAME_RENDER_CORE_DOM_MUTATION_OBSERVER_API_VERSION 1
+
 namespace jellyframe {
 
 struct FormControlState;
@@ -75,6 +77,8 @@ private:
 
 struct Node : public EventTarget {
     using DestroyObserver = void (*)(Node& node, void* context);
+    using MutationObserver = void (*)(Node& node, DomDirtyFlags flags,
+                                     std::uint64_t mutation_generation, void* context);
 
     explicit Node(NodeType node_type);
     ~Node();
@@ -109,12 +113,25 @@ struct Node : public EventTarget {
     void add_destroy_observer(DestroyObserver observer, void* context);
     void remove_destroy_observer(DestroyObserver observer, void* context);
 
+    // Synchronous values after dirty propagation and root generation increment.
+    // Registration replaces this subtree's observer and may allocate. Failure
+    // preserves every previous registration. Callbacks may change observers or
+    // mutate other nodes. They must preserve the active mutation owner's lifetime.
+    // A callback exception propagates after the mutation has committed.
+    void set_mutation_observer(MutationObserver observer, void* context);
+    // Clears only matching registrations, including inherited descendants.
+    // Stack-safe and allocation-failure-safe. Neither registration API calls observers.
+    void clear_mutation_observer(MutationObserver observer, void* context) noexcept;
+
 private:
+    friend void mark_dirty(Node& node, DomDirtyFlags flags);
     struct DestroyObserverEntry {
         DestroyObserver observer = nullptr;
         void* context = nullptr;
     };
     std::vector<DestroyObserverEntry> destroy_observers_;
+    MutationObserver mutation_observer_ = nullptr;
+    void* mutation_observer_context_ = nullptr;
 };
 
 std::unique_ptr<Node> make_element(std::string tag_name);
