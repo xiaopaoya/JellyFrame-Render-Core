@@ -103,7 +103,10 @@ HitTestResult HitTester::hit_test_layer(const LayerNode& layer,
         translated_clip.x = safe_add(translated_clip.x, layer_offset_x);
         translated_clip.y = safe_add(translated_clip.y, layer_offset_y);
         if (has_corner_radius(layer.clip_border_radius) &&
-            rounded_rect_coverage(translated_clip, layer.clip_border_radius, x, y) == 0) {
+            rounded_rect_coverage(translated_clip, layer.clip_border_radius,
+                                  effective_vertical_radius(layer.clip_border_radius,
+                                                            layer.clip_border_radius_y),
+                                  x, y) == 0) {
             return {};
         }
         clip = has_clip ? intersect_rect(clip, translated_clip) : translated_clip;
@@ -135,7 +138,10 @@ HitTestResult HitTester::hit_test_layer(const LayerNode& layer,
         translated_clip.y = safe_add(translated_clip.y, layer_offset_y);
         if (contains(translated_clip, x, y) &&
             has_corner_radius(child->clip_border_radius) &&
-            rounded_rect_coverage(translated_clip, child->clip_border_radius, x, y) == 0) {
+            rounded_rect_coverage(translated_clip, child->clip_border_radius,
+                                  effective_vertical_radius(child->clip_border_radius,
+                                                            child->clip_border_radius_y),
+                                  x, y) == 0) {
             blocked_by_rounded_child = true;
             break;
         }

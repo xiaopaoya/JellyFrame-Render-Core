@@ -56,6 +56,7 @@ BackgroundGradientGeometryStatus resolve_background_gradient_geometry(
     if (planned != BackgroundRepeatStatus::Ready) return repeat_status(planned);
     candidate.painting_area = boxes.painting_area;
     candidate.painting_radius = boxes.painting_radius;
+    candidate.painting_radius_y = boxes.painting_radius_y;
     result = candidate;
     return BackgroundGradientGeometryStatus::Ready;
 }

@@ -30,6 +30,7 @@ struct BackgroundGradientGeometry {
     // sampling rectangle. A tile must not acquire rounded tile corners.
     Rect painting_area;
     int painting_radius = 0;
+    int painting_radius_y = -1;
 };
 
 // Private geometry foundation only: no production caller or new CSS admission.

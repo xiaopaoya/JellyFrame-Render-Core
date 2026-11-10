@@ -129,15 +129,22 @@ struct CornerRadii {
     int bottom_left = 0;
 };
 
+// Horizontal and vertical corner radii are encoded independently so legacy
+// circular commands retain their compact, byte-for-byte value representation.
+struct EllipticalCornerRadii {
+    CornerRadii horizontal{};
+    CornerRadii vertical{};
+};
+
 inline int encode_corner_radii(CornerRadii radii) {
+    if (radii.top_left == radii.top_right && radii.top_left == radii.bottom_right &&
+        radii.top_left == radii.bottom_left && radii.top_left >= 0) {
+        return radii.top_left;
+    }
     radii.top_left = std::max(0, std::min(127, radii.top_left));
     radii.top_right = std::max(0, std::min(127, radii.top_right));
     radii.bottom_right = std::max(0, std::min(127, radii.bottom_right));
     radii.bottom_left = std::max(0, std::min(127, radii.bottom_left));
-    if (radii.top_left == radii.top_right && radii.top_left == radii.bottom_right &&
-        radii.top_left == radii.bottom_left) {
-        return radii.top_left;
-    }
     return static_cast<int>(kCornerRadiusMarker |
                             static_cast<std::uint32_t>(radii.top_left) |
                             (static_cast<std::uint32_t>(radii.top_right) << 7U) |
@@ -160,11 +167,36 @@ inline bool has_corner_radius(int encoded) {
     return radii.top_left > 0 || radii.top_right > 0 || radii.bottom_right > 0 || radii.bottom_left > 0;
 }
 
+inline bool is_valid_corner_radius_encoding(int encoded) {
+    return encoded >= 0 || (static_cast<std::uint32_t>(encoded) & 0xf0000000U) == kCornerRadiusMarker;
+}
+
+inline int effective_vertical_radius(int horizontal, int vertical) {
+    // Nonuniform corner values carry the high-bit marker and are negative
+    // as signed ints. Only -1 denotes an omitted legacy vertical axis.
+    return vertical == -1 ? horizontal : vertical;
+}
+
+inline bool has_corner_radius(const EllipticalCornerRadii& radii) {
+    return has_corner_radius(encode_corner_radii(radii.horizontal)) ||
+        has_corner_radius(encode_corner_radii(radii.vertical));
+}
+
+inline bool has_elliptical_difference(const EllipticalCornerRadii& radii) {
+    return std::tie(radii.horizontal.top_left, radii.horizontal.top_right,
+                    radii.horizontal.bottom_right, radii.horizontal.bottom_left) !=
+        std::tie(radii.vertical.top_left, radii.vertical.top_right,
+                 radii.vertical.bottom_right, radii.vertical.bottom_left);
+}
+
 inline int expand_corner_radii(int encoded, int amount) {
     CornerRadii radii = decode_corner_radii(encoded);
-    const auto expand = [amount](int radius) {
+    const bool uniform = radii.top_left == radii.top_right && radii.top_left == radii.bottom_right &&
+        radii.top_left == radii.bottom_left;
+    const auto expand = [amount, uniform](int radius) {
         const std::int64_t value = static_cast<std::int64_t>(radius) + amount;
-        return static_cast<int>(std::clamp(value, static_cast<std::int64_t>(0), static_cast<std::int64_t>(127)));
+        return static_cast<int>(std::clamp(value, static_cast<std::int64_t>(0),
+            static_cast<std::int64_t>(uniform ? std::numeric_limits<int>::max() : 127)));
     };
     radii.top_left = expand(radii.top_left);
     radii.top_right = expand(radii.top_right);
@@ -269,6 +301,7 @@ struct DisplayCommandTransform {
 // transform remain common values, so copying never depends on a Style owner.
 struct BasicPaint {
     int border_radius = 0;
+    int border_radius_y = -1;
     int stroke_width = 1;
     GradientAxis gradient_axis = GradientAxis::Vertical;
     int gradient_stop_percent = 100;
@@ -278,6 +311,7 @@ struct BasicPaint {
 
 struct TextPaint {
     int border_radius = 0;
+    int border_radius_y = -1;
     int stroke_width = 1;
     int font_size = 14;
     int font_weight = 400;
@@ -296,6 +330,7 @@ struct ImagePaint {
     ObjectPosition object_position;
     ImageRendering image_rendering = ImageRendering::Auto;
     int border_radius = 0;
+    int border_radius_y = -1;
 };
 
 class DisplayCommand {
@@ -419,15 +454,20 @@ inline bool display_commands_equal(const DisplayCommand& a, const DisplayCommand
             return std::tie(p.border_radius, p.stroke_width, p.font_size, p.font_weight, p.font_family_hash,
                             p.text_align, p.text_single_line, p.origin_x, p.baseline_y);
         };
-        return fields(a.text_paint()) == fields(b.text_paint());
+        return fields(a.text_paint()) == fields(b.text_paint()) &&
+            effective_vertical_radius(a.text_paint().border_radius, a.text_paint().border_radius_y) ==
+            effective_vertical_radius(b.text_paint().border_radius, b.text_paint().border_radius_y);
     }
     case DisplayCommandType::Image: {
         const auto fields = [](const ImagePaint& p) {
             return std::tie(p.image_handle, p.background_paint_clip.dx, p.background_paint_clip.dy,
                             p.background_paint_clip.width, p.background_paint_clip.height, p.object_fit,
-                            p.object_position.x_percent, p.object_position.y_percent, p.image_rendering, p.border_radius);
+                            p.object_position.x_percent, p.object_position.y_percent, p.image_rendering,
+                            p.border_radius);
         };
-        return fields(a.image_paint()) == fields(b.image_paint());
+        return fields(a.image_paint()) == fields(b.image_paint()) &&
+            effective_vertical_radius(a.image_paint().border_radius, a.image_paint().border_radius_y) ==
+            effective_vertical_radius(b.image_paint().border_radius, b.image_paint().border_radius_y);
     }
     default: {
         const auto fields = [](const BasicPaint& p) {
@@ -435,7 +475,9 @@ inline bool display_commands_equal(const DisplayCommand& a, const DisplayCommand
                             p.background_paint_clip.dx, p.background_paint_clip.dy,
                             p.background_paint_clip.width, p.background_paint_clip.height);
         };
-        return fields(a.basic_paint()) == fields(b.basic_paint());
+        return fields(a.basic_paint()) == fields(b.basic_paint()) &&
+            effective_vertical_radius(a.basic_paint().border_radius, a.basic_paint().border_radius_y) ==
+            effective_vertical_radius(b.basic_paint().border_radius, b.basic_paint().border_radius_y);
     }
     }
 }

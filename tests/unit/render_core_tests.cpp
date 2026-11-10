@@ -1,3 +1,6 @@
+#include "render_core/feature_config.h"
+
+#include <exception>
 #include <iostream>
 
 #if defined(JELLYFRAME_TEST_ASSERTS_ENABLED) && defined(NDEBUG)
@@ -13,6 +16,10 @@ int dom_mutation_tests_main();
 int dom_owner_tests_main();
 int document_script_tests_main();
 int dirty_region_tests_main();
+int display_invalidation_tests_main();
+#if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
+int modern_paint_tests_main();
+#endif
 int embedded_framebuffer_tests_main();
 int css_parser_tests_main();
 int event_tests_main();
@@ -37,8 +44,17 @@ int text_scan_tests_main();
 namespace {
 
 int run_test(const char* name, int (*test_main)()) {
-    std::cout << "[ RUN      ] " << name << '\n';
-    const int result = test_main();
+    std::cout << "[ RUN      ] " << name << std::endl;
+    int result = 1;
+    try {
+        result = test_main();
+    } catch (const std::exception& error) {
+        std::cerr << "[  FAILED  ] " << name << ": " << error.what() << '\n';
+        return 1;
+    } catch (...) {
+        std::cerr << "[  FAILED  ] " << name << ": unknown exception\n";
+        return 1;
+    }
     if (result == 0) {
         std::cout << "[       OK ] " << name << '\n';
     } else {
@@ -60,6 +76,10 @@ int main() {
     failed += run_test("dom_owner", dom_owner_tests_main);
     failed += run_test("document_script", document_script_tests_main);
     failed += run_test("dirty_region", dirty_region_tests_main);
+    failed += run_test("display_invalidation", display_invalidation_tests_main);
+#if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
+    failed += run_test("modern_paint", modern_paint_tests_main);
+#endif
     failed += run_test("embedded_framebuffer", embedded_framebuffer_tests_main);
     failed += run_test("css_parser", css_parser_tests_main);
     failed += run_test("event", event_tests_main);

@@ -1,3 +1,7 @@
+# Only executables registered by this module receive the test CRT bootstrap.
+if(MSVC)
+    get_property(_jellyframe_targets_before_tests DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+endif()
 add_executable(jellyframe_dom_mutation_observer_tests
     "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/dom_mutation_observer_tests.cpp")
 target_link_libraries(jellyframe_dom_mutation_observer_tests PRIVATE jellyframe_render_core)
@@ -193,4 +197,24 @@ target_include_directories(jellyframe_background_multilayer_style_tests PRIVATE 
 add_test(NAME jellyframe_background_multilayer_style_tests COMMAND jellyframe_background_multilayer_style_tests)
 if(COMMAND jellyframe_stage_sanitizer_runtime)
     jellyframe_stage_sanitizer_runtime(jellyframe_background_multilayer_style_tests)
+endif()
+
+# Keep failed CTest processes noninteractive on MSVC, with diagnostics on stderr.
+# This source belongs to test executables only, never the product library.
+if(MSVC)
+    get_property(_jellyframe_targets_after_tests DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_jellyframe_test_target IN LISTS _jellyframe_targets_after_tests)
+        if(_jellyframe_test_target IN_LIST _jellyframe_targets_before_tests)
+            continue()
+        endif()
+        get_target_property(_jellyframe_test_target_type ${_jellyframe_test_target} TYPE)
+        if(_jellyframe_test_target_type STREQUAL "EXECUTABLE")
+            target_sources(${_jellyframe_test_target} PRIVATE
+                "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/test_crt_diagnostics.cpp")
+        endif()
+    endforeach()
+    unset(_jellyframe_targets_before_tests)
+    unset(_jellyframe_targets_after_tests)
+    unset(_jellyframe_test_target)
+    unset(_jellyframe_test_target_type)
 endif()

@@ -139,23 +139,94 @@ bool has_text_shadow(const Style& style) {
 #endif
 }
 
-int resolved_border_radius(const LayoutBox& box) {
+EllipticalCornerRadii resolve_border_radii(const LayoutBox& box) {
+    if (box.style.border_radius_axes_specified) {
+        const auto resolve_axis = [&](const std::array<int, 4>& values, std::uint8_t percent_mask,
+                                      bool horizontal) {
+            const int basis = std::max(0, horizontal ? box.rect.width : box.rect.height);
+            const auto used = [&](std::size_t index) {
+                const std::int64_t value = (percent_mask & (1U << index)) != 0U
+                    ? (static_cast<std::int64_t>(basis) * values[index] + 50) / 100
+                    : values[index];
+                return static_cast<int>(std::clamp<std::int64_t>(value, 0, std::numeric_limits<int>::max()));
+            };
+            return CornerRadii{used(0), used(1), used(2), used(3)};
+        };
+        CornerRadii x = resolve_axis(box.style.border_radius_x_values,
+                                     box.style.border_radius_x_percent_mask, true);
+        CornerRadii y = resolve_axis(box.style.border_radius_y_values,
+                                     box.style.border_radius_y_percent_mask, false);
+        const double scale = std::min({
+            1.0,
+            static_cast<double>(x.top_left) + x.top_right == 0 ? 1.0 : static_cast<double>(box.rect.width) / (static_cast<double>(x.top_left) + x.top_right),
+            static_cast<double>(x.bottom_left) + x.bottom_right == 0 ? 1.0 : static_cast<double>(box.rect.width) / (static_cast<double>(x.bottom_left) + x.bottom_right),
+            static_cast<double>(y.top_left) + y.bottom_left == 0 ? 1.0 : static_cast<double>(box.rect.height) / (static_cast<double>(y.top_left) + y.bottom_left),
+            static_cast<double>(y.top_right) + y.bottom_right == 0 ? 1.0 : static_cast<double>(box.rect.height) / (static_cast<double>(y.top_right) + y.bottom_right),
+        });
+        const auto scaled = [scale](int value) { return std::max(0, static_cast<int>(value * scale)); };
+        x = {scaled(x.top_left), scaled(x.top_right), scaled(x.bottom_right), scaled(x.bottom_left)};
+        y = {scaled(y.top_left), scaled(y.top_right), scaled(y.bottom_right), scaled(y.bottom_left)};
+        return {x, y};
+    }
     const int max_radius = std::max(0, std::min(box.rect.width, box.rect.height) / 2);
     if (box.style.border_radius_percent >= 0) {
         const std::int64_t min_dimension = std::max(0, std::min(box.rect.width, box.rect.height));
         const std::int64_t percent = box.style.border_radius_percent;
         const std::int64_t radius = (min_dimension * percent + 50) / 100;
-        return static_cast<int>(std::min<std::int64_t>(max_radius, std::max<std::int64_t>(0, radius)));
+        const int resolved = static_cast<int>(std::min<std::int64_t>(max_radius, std::max<std::int64_t>(0, radius)));
+        const CornerRadii same{resolved, resolved, resolved, resolved};
+        return {same, same};
     }
     CornerRadii radii = decode_corner_radii(box.style.border_radius);
-    radii.top_left = std::min(max_radius, radii.top_left);
-    radii.top_right = std::min(max_radius, radii.top_right);
-    radii.bottom_right = std::min(max_radius, radii.bottom_right);
-    radii.bottom_left = std::min(max_radius, radii.bottom_left);
+    const auto edge_scale = [](int dimension, int first, int second) {
+        const std::int64_t sum = static_cast<std::int64_t>(first) + second;
+        return sum == 0 ? 1.0 : static_cast<double>(std::max(0, dimension)) / sum;
+    };
+    const double scale = std::min({1.0,
+        edge_scale(box.rect.width, radii.top_left, radii.top_right),
+        edge_scale(box.rect.width, radii.bottom_left, radii.bottom_right),
+        edge_scale(box.rect.height, radii.top_left, radii.bottom_left),
+        edge_scale(box.rect.height, radii.top_right, radii.bottom_right)});
+    const auto scaled = [scale](int value) { return static_cast<int>(value * scale); };
+    radii = {scaled(radii.top_left), scaled(radii.top_right),
+             scaled(radii.bottom_right), scaled(radii.bottom_left)};
+    return {radii, radii};
+}
+
+int resolved_border_radius(const LayoutBox& box) {
+    if (!box.style.border_radius_axes_specified && box.style.border_radius_percent >= 0) {
+        const std::int64_t min_dimension = std::max(0, std::min(box.rect.width, box.rect.height));
+        const std::int64_t percent = box.style.border_radius_percent;
+        const std::int64_t radius = (min_dimension * percent + 50) / 100;
+        const int max_radius = std::max(0, std::min(box.rect.width, box.rect.height) / 2);
+        return static_cast<int>(std::min<std::int64_t>(max_radius, std::max<std::int64_t>(0, radius)));
+    }
+    const CornerRadii radii = resolve_border_radii(box).horizontal;
+    const auto pair = resolve_border_radii(box);
+    const auto representable = [](const CornerRadii& axis) {
+        return std::max({axis.top_left, axis.top_right, axis.bottom_right, axis.bottom_left}) <= 127 ||
+            (axis.top_left == axis.top_right && axis.top_left == axis.bottom_right &&
+             axis.top_left == axis.bottom_left);
+    };
+    if (!representable(pair.horizontal) || !representable(pair.vertical)) return 0;
     return encode_corner_radii(radii);
 }
 
-void push_fill_rect(DisplayList& display_list, Rect rect, Color color, int border_radius = 0) {
+int resolved_border_radius_y(const LayoutBox& box) {
+    if (!box.style.border_radius_axes_specified && box.style.border_radius_percent >= 0)
+        return resolved_border_radius(box);
+    const auto pair = resolve_border_radii(box);
+    const auto representable = [](const CornerRadii& axis) {
+        return std::max({axis.top_left, axis.top_right, axis.bottom_right, axis.bottom_left}) <= 127 ||
+            (axis.top_left == axis.top_right && axis.top_left == axis.bottom_right &&
+             axis.top_left == axis.bottom_left);
+    };
+    if (!representable(pair.horizontal) || !representable(pair.vertical)) return 0;
+    return encode_corner_radii(pair.vertical);
+}
+
+void push_fill_rect(DisplayList& display_list, Rect rect, Color color, int border_radius = 0,
+                    int border_radius_y = -1) {
     if (rect.width <= 0 || rect.height <= 0 || color.a == 0) {
         return;
     }
@@ -165,6 +236,7 @@ void push_fill_rect(DisplayList& display_list, Rect rect, Color color, int borde
     command.color = color;
     command.color2 = color;
     command.basic_paint().border_radius = border_radius;
+    command.basic_paint().border_radius_y = border_radius_y;
     display_list.push_back(std::move(command));
 }
 
@@ -174,7 +246,7 @@ void push_linear_gradient(DisplayList& display_list,
                           Color first,
                           Color second,
                           GradientAxis axis,
-                          int border_radius = 0) {
+                          int border_radius = 0, int border_radius_y = -1) {
     if (rect.width <= 0 || rect.height <= 0 || (first.a == 0 && second.a == 0)) {
         return;
     }
@@ -185,6 +257,7 @@ void push_linear_gradient(DisplayList& display_list,
     command.color2 = second;
     command.basic_paint().gradient_axis = axis;
     command.basic_paint().border_radius = border_radius;
+    command.basic_paint().border_radius_y = border_radius_y;
     display_list.push_back(std::move(command));
 }
 
@@ -193,7 +266,7 @@ void push_conic_gradient(DisplayList& display_list,
                          Color first,
                          Color second,
                          int stop_percent,
-                         int border_radius = 0) {
+                         int border_radius = 0, int border_radius_y = -1) {
     if (rect.width <= 0 || rect.height <= 0 || (first.a == 0 && second.a == 0)) {
         return;
     }
@@ -204,6 +277,7 @@ void push_conic_gradient(DisplayList& display_list,
     command.color2 = second;
     command.basic_paint().gradient_stop_percent = std::max(0, std::min(100, stop_percent));
     command.basic_paint().border_radius = border_radius;
+    command.basic_paint().border_radius_y = border_radius_y;
     display_list.push_back(std::move(command));
 }
 
@@ -243,7 +317,7 @@ void push_radial_gradient(DisplayList& display_list,
                           Color edge,
                           GradientAxis axis,
                           int packed_position,
-                          int border_radius = 0) {
+                          int border_radius = 0, int border_radius_y = -1) {
     if (rect.width <= 0 || rect.height <= 0 || (center.a == 0 && edge.a == 0)) {
         return;
     }
@@ -255,6 +329,7 @@ void push_radial_gradient(DisplayList& display_list,
     command.basic_paint().gradient_axis = axis;
     command.basic_paint().gradient_stop_percent = packed_position;
     command.basic_paint().border_radius = border_radius;
+    command.basic_paint().border_radius_y = border_radius_y;
     display_list.push_back(std::move(command));
 }
 #endif
@@ -263,15 +338,16 @@ void paint_background_paint(const BackgroundPaint& paint,
                             Rect rect,
                             int border_radius,
                             DisplayList& display_list,
-                            const LayerTreeBuilderOptions& options) {
+                            const LayerTreeBuilderOptions& options,
+                            int border_radius_y = -1) {
 #if !JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
     (void)options;
 #endif
     if (paint.kind == BackgroundPaintKind::LinearGradient) {
 #if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
-        push_linear_gradient(display_list, rect, paint.color, paint.color2, paint.axis, border_radius);
+        push_linear_gradient(display_list, rect, paint.color, paint.color2, paint.axis, border_radius, border_radius_y);
 #else
-        push_fill_rect(display_list, rect, paint.color, border_radius);
+        push_fill_rect(display_list, rect, paint.color, border_radius, border_radius_y);
 #endif
     } else if (paint.kind == BackgroundPaintKind::ConicGradient) {
 #if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
@@ -281,9 +357,9 @@ void paint_background_paint(const BackgroundPaint& paint,
                               "layer-conic-gradient-area-budget", "conic-gradient() area is above the embedded progress-ring budget",
                               "area=" + std::to_string(area) + "px limit=" + std::to_string(kConicGradientAreaWarningPixels) + "px");
         }
-        push_conic_gradient(display_list, rect, paint.color, paint.color2, paint.stop_percent, border_radius);
+        push_conic_gradient(display_list, rect, paint.color, paint.color2, paint.stop_percent, border_radius, border_radius_y);
 #else
-        push_fill_rect(display_list, rect, paint.color, border_radius);
+        push_fill_rect(display_list, rect, paint.color, border_radius, border_radius_y);
 #endif
     } else if (paint.kind == BackgroundPaintKind::RadialGradient) {
 #if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
@@ -293,12 +369,12 @@ void paint_background_paint(const BackgroundPaint& paint,
                               "layer-radial-gradient-area-budget", "radial-gradient() area is above the embedded highlight budget",
                               "area=" + std::to_string(area) + "px limit=" + std::to_string(kRadialGradientAreaWarningPixels) + "px");
         }
-        push_radial_gradient(display_list, rect, paint.color, paint.color2, paint.axis, paint.stop_percent, border_radius);
+        push_radial_gradient(display_list, rect, paint.color, paint.color2, paint.axis, paint.stop_percent, border_radius, border_radius_y);
 #else
-        push_fill_rect(display_list, rect, paint.color, border_radius);
+        push_fill_rect(display_list, rect, paint.color, border_radius, border_radius_y);
 #endif
     } else if (is_visible_background(paint.color)) {
-        push_fill_rect(display_list, rect, paint.color, border_radius);
+        push_fill_rect(display_list, rect, paint.color, border_radius, border_radius_y);
     }
 }
 
@@ -317,11 +393,12 @@ detail::BackgroundBoxAreasRequest background_box_request(
     request.origin = static_cast<detail::BackgroundBoxArea>(style.origin);
     request.clip = static_cast<detail::BackgroundBoxArea>(style.clip);
     request.border_radius = resolved_border_radius(box);
+    request.border_radius_y = resolved_border_radius_y(box);
     return request;
 }
 
 bool background_color_clip(const LayoutBox& box, BackgroundBox clip,
-                           Rect& area, int& radius) {
+                           Rect& area, int& radius, int& radius_y) {
     const auto inset = [](BackgroundBox selected, const EdgeSizes& border,
                           const EdgeSizes& padding, int& top, int& right,
                           int& bottom, int& left) {
@@ -364,8 +441,9 @@ bool background_color_clip(const LayoutBox& box, BackgroundBox clip,
         return false;
     area = {static_cast<int>(x), static_cast<int>(y),
             static_cast<int>(width), static_cast<int>(height)};
-    radius = std::max(0, resolved_border_radius(box) - std::max({top, right, bottom, left}));
-    return width > 0 && height > 0;
+    return width > 0 && height > 0 && detail::inset_background_radii(
+        resolved_border_radius(box), resolved_border_radius_y(box), {top, right, bottom, left},
+        radius, radius_y);
 }
 
 bool paint_background_gradient(const BackgroundPaint& paint, const LayoutBox& box,
@@ -439,16 +517,17 @@ bool paint_background_gradient(const BackgroundPaint& paint, const LayoutBox& bo
             detail::make_background_paint_clip(tile, geometry.painting_area, clip);
             if (paint.kind == BackgroundPaintKind::LinearGradient) {
                 push_linear_gradient(display_list, tile, paint.color, paint.color2, paint.axis,
-                                     geometry.painting_radius);
+                                     geometry.painting_radius, geometry.painting_radius_y);
             } else if (paint.kind == BackgroundPaintKind::ConicGradient) {
                 push_conic_gradient(display_list, tile, paint.color, paint.color2, paint.stop_percent,
-                                    geometry.painting_radius);
+                                    geometry.painting_radius, geometry.painting_radius_y);
             } else {
                 push_radial_gradient(display_list, tile, paint.color, paint.color2, paint.axis,
-                                     paint.stop_percent, geometry.painting_radius);
+                                     paint.stop_percent, geometry.painting_radius, geometry.painting_radius_y);
             }
-            if (display_list.size() > begin + i)
+            if (display_list.size() > begin + i) {
                 display_list.back().basic_paint().background_paint_clip = clip;
+            }
         }
     } catch (const std::bad_alloc&) {
         display_list.resize(begin);
@@ -460,7 +539,8 @@ bool paint_background_gradient(const BackgroundPaint& paint, const LayoutBox& bo
 #endif
 }
 
-void push_stroke_rect(DisplayList& display_list, Rect rect, Color color, int stroke_width, int border_radius) {
+void push_stroke_rect(DisplayList& display_list, Rect rect, Color color, int stroke_width, int border_radius,
+                      int border_radius_y = -1) {
     if (rect.width <= 0 || rect.height <= 0 || stroke_width <= 0 || color.a == 0) {
         return;
     }
@@ -471,15 +551,17 @@ void push_stroke_rect(DisplayList& display_list, Rect rect, Color color, int str
     command.color2 = color;
     command.basic_paint().stroke_width = stroke_width;
     command.basic_paint().border_radius = border_radius;
+    command.basic_paint().border_radius_y = border_radius_y;
     display_list.push_back(std::move(command));
 }
 
-void push_border_rects(DisplayList& display_list, Rect rect, const EdgeSizes& border, Color color, int border_radius) {
+void push_border_rects(DisplayList& display_list, Rect rect, const EdgeSizes& border, Color color, int border_radius,
+                       int border_radius_y = -1) {
     if (!has_border(border) || rect.width <= 0 || rect.height <= 0 || color.a == 0) {
         return;
     }
     if (has_corner_radius(border_radius) && equal_border_widths(border)) {
-        push_stroke_rect(display_list, rect, color, border.top, border_radius);
+        push_stroke_rect(display_list, rect, color, border.top, border_radius, border_radius_y);
         return;
     }
     push_fill_rect(display_list, Rect{rect.x, rect.y, rect.width, border.top}, color);
@@ -745,7 +827,7 @@ void push_image(DisplayList& display_list,
                 ObjectFit object_fit,
                 ObjectPosition object_position,
                 ImageRendering image_rendering,
-                int border_radius = 0) {
+                int border_radius = 0, int border_radius_y = -1) {
     if (rect.width <= 0 || rect.height <= 0 || image_handle == 0) {
         return;
     }
@@ -757,6 +839,7 @@ void push_image(DisplayList& display_list,
     command.image_paint().object_position = object_position;
     command.image_paint().image_rendering = image_rendering;
     command.image_paint().border_radius = border_radius;
+    command.image_paint().border_radius_y = border_radius_y;
     command.color = Color{255, 255, 255, 255};
     command.color2 = command.color;
     display_list.push_back(std::move(command));
@@ -974,6 +1057,12 @@ void paint_box_shadow(const LayoutBox& box,
     if (!has_shadow(box.style)) {
         return;
     }
+    if (has_elliptical_difference(resolve_border_radii(box))) {
+        report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree,
+                          DiagnosticSeverity::Warning, "layer-box-shadow-ellipse-unsupported",
+                          "box-shadow was refused for elliptical border-radius because this profile supports circular shadow geometry only.");
+        return;
+    }
     const BoxShadowStyle& shadow = box.style.box_shadow;
     const Color shadow_color = shadow.uses_current_color ? box.style.color : shadow.color;
     int blur = shadow.blur;
@@ -1035,7 +1124,9 @@ void paint_outline(const LayoutBox& box, DisplayList& display_list) {
                      outline_rect,
                      box.style.outline_color,
                      width,
-                     has_corner_radius(border_radius) ? expand_corner_radii(border_radius, extent) : 0);
+                     has_corner_radius(border_radius) ? expand_corner_radii(border_radius, extent) : 0,
+                     has_corner_radius(resolved_border_radius_y(box))
+                         ? expand_corner_radii(resolved_border_radius_y(box), extent) : 0);
 }
 
 void paint_meter_bar(const LayoutBox& box, DisplayList& display_list) {
@@ -1077,7 +1168,8 @@ void paint_meter_bar(const LayoutBox& box, DisplayList& display_list) {
     };
     inner.width = static_cast<int>(static_cast<float>(inner.width) * ratio + 0.5F);
     const Color fill = is_progress ? Color{37, 99, 235, 255} : Color{22, 163, 74, 255};
-    push_fill_rect(display_list, inner, fill, expand_corner_radii(resolved_border_radius(box), -1));
+    push_fill_rect(display_list, inner, fill, expand_corner_radii(resolved_border_radius(box), -1),
+                   expand_corner_radii(resolved_border_radius_y(box), -1));
 }
 
 int range_state_value(const FormControlState& state) {
@@ -1452,7 +1544,8 @@ void paint_background_image(const LayoutBox& box, const BackgroundImageStyleValu
                     BackgroundPaintClip clip;
                     detail::make_background_paint_clip(plan.tiles[i], background_areas.painting_area, clip);
                     push_image(display_list, plan.tiles[i], background_resource.image_handle,
-                               ObjectFit::Fill, {}, box.style.image_rendering, background_areas.painting_radius);
+                               ObjectFit::Fill, {}, box.style.image_rendering, background_areas.painting_radius,
+                               background_areas.painting_radius_y);
                     display_list.back().image_paint().background_paint_clip = clip;
                 }
             } catch (const std::bad_alloc&) {
@@ -1489,14 +1582,16 @@ void paint_canonical_background(const LayoutBox& box, DisplayList& display_list,
         ? BackgroundImageStyleValues{} : box.style.background_layers[count - 1].image;
     Rect color_area;
     int color_radius = 0;
-    bool color_clip_ready = background_color_clip(box, color_style.clip, color_area, color_radius);
+    int color_radius_y = 0;
+    bool color_clip_ready = background_color_clip(box, color_style.clip, color_area, color_radius, color_radius_y);
     if (!color_clip_ready && color_style.clip == BackgroundBox::BorderBox) {
         color_area = paint_rect_for(box);
         color_radius = resolved_border_radius(box);
+        color_radius_y = resolved_border_radius_y(box);
         color_clip_ready = color_area.width > 0 && color_area.height > 0;
     }
     if (color_clip_ready) {
-        push_fill_rect(display_list, color_area, box.style.background_color, color_radius);
+        push_fill_rect(display_list, color_area, box.style.background_color, color_radius, color_radius_y);
     } else {
         report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
                           "layer-background-color-clip-geometry",
@@ -1517,7 +1612,7 @@ void paint_canonical_background(const LayoutBox& box, DisplayList& display_list,
                 // Cropped modern-paint profiles retain their existing solid fallback.
                 if (status == detail::BackgroundBoxAreasStatus::Ready)
                     paint_background_paint(layer.paint, areas.painting_area, areas.painting_radius,
-                                           display_list, options);
+                                           display_list, options, areas.painting_radius_y);
             }
         }
     }
@@ -1528,6 +1623,24 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
     const std::size_t box_command_begin = display_list.size();
     const Rect paint_rect = paint_rect_for(box);
     const int border_radius = resolved_border_radius(box);
+    const auto radii = resolve_border_radii(box);
+    if (box.style.border_radius_axes_specified) {
+        const bool has_authored_radius = std::any_of(
+            box.style.border_radius_x_values.begin(), box.style.border_radius_x_values.end(),
+            [](int value) { return value != 0; }) ||
+            std::any_of(box.style.border_radius_y_values.begin(), box.style.border_radius_y_values.end(),
+                        [](int value) { return value != 0; });
+        const auto representable = [](const CornerRadii& axis) {
+            return std::max({axis.top_left, axis.top_right, axis.bottom_right, axis.bottom_left}) <= 127 ||
+                (axis.top_left == axis.top_right && axis.top_left == axis.bottom_right &&
+                 axis.top_left == axis.bottom_left);
+        };
+        if (has_authored_radius && (!representable(radii.horizontal) || !representable(radii.vertical))) {
+            report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                              "layer-border-radius-range",
+                              "Elliptical border-radius was refused because a used corner radius exceeds the supported 127px axis limit.");
+        }
+    }
     paint_box_shadow(box, display_list, options);
     paint_canonical_background(box, display_list, options, remaining_commands, box_command_begin);
 
@@ -1536,7 +1649,7 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
                           paint_rect,
                           box.style.border_width,
                           box.style.border_color,
-                          border_radius);
+                          border_radius, resolved_border_radius_y(box));
     }
     paint_outline(box, display_list);
 
@@ -1553,7 +1666,7 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
                    box.style.object_fit,
                    box.style.object_position,
                    box.style.image_rendering,
-                   resolved_border_radius(box));
+                   resolved_border_radius(box), resolved_border_radius_y(box));
     }
 
     if (box.node != nullptr && box.node->type == NodeType::Text) {
@@ -1623,7 +1736,8 @@ LayerReasons layer_reasons_for(const LayoutBox& box, bool root) {
     if (has_shadow(box.style)) {
         reasons |= LayerReasonShadow;
     }
-    if ((has_corner_radius(box.style.border_radius) || box.style.border_radius_percent >= 0) && has_overflow_clip(box.style)) {
+    if ((has_corner_radius(box.style.border_radius) || box.style.border_radius_percent >= 0 ||
+         box.style.border_radius_axes_specified) && has_overflow_clip(box.style)) {
         reasons |= LayerReasonRoundedClip;
     }
     return reasons;
@@ -1856,14 +1970,18 @@ void flatten_layer(const LayerNode& layer,
                     metadata->clips.push_back(FlattenedClip{
                         translated_layer_clip,
                         current_layer.clip_border_radius,
-                        current.clip_index});
+                        current.clip_index,
+                        effective_vertical_radius(current_layer.clip_border_radius,
+                                                  current_layer.clip_border_radius_y)});
                 }
                 if (!identity_transform(layer_transform)) {
                     transform_source_clip_index = static_cast<std::uint32_t>(metadata->clips.size());
                     metadata->clips.push_back(FlattenedClip{
                         translated_layer_clip,
                         current_layer.clip_border_radius,
-                        current.transform_source_clip_index});
+                        current.transform_source_clip_index,
+                        effective_vertical_radius(current_layer.clip_border_radius,
+                                                  current_layer.clip_border_radius_y)});
                 }
             }
         }
@@ -1956,6 +2074,7 @@ LayerNodePtr LayerTreeBuilder::build_with_arena(const LayoutBox& root, Monotonic
     root_layer->clip_rect = root.rect;
     root_layer->has_clip = has_overflow_clip(root.style);
     root_layer->clip_border_radius = root_layer->has_clip ? resolved_border_radius(root) : 0;
+    root_layer->clip_border_radius_y = root_layer->has_clip ? resolved_border_radius_y(root) : 0;
     root_layer->opacity = root.style.opacity;
     root_layer->transform = parsed_transform_or_identity(root.style, options_.diagnostics);
     root_layer->transform_origin_x_percent = root.style.transform_origin_x_percent;
@@ -2185,6 +2304,9 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
             child_layer->has_clip = (reasons & LayerReasonOverflowClip) != 0U;
             child_layer->clip_border_radius = (reasons & LayerReasonRoundedClip) != 0U
                 ? resolved_border_radius(*current_box)
+                : 0;
+            child_layer->clip_border_radius_y = (reasons & LayerReasonRoundedClip) != 0U
+                ? resolved_border_radius_y(*current_box)
                 : 0;
             child_layer->opacity = current_box->style.opacity;
             child_layer->transform = parsed_transform_or_identity(current_box->style, options_.diagnostics);

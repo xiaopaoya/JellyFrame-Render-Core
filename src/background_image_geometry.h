@@ -75,18 +75,25 @@ struct BackgroundBoxAreasRequest {
     BackgroundBoxArea origin = BackgroundBoxArea::PaddingBox;
     BackgroundBoxArea clip = BackgroundBoxArea::BorderBox;
     int border_radius = 0;
+    int border_radius_y = -1;
 };
 
 struct BackgroundBoxAreas {
     Rect positioning_area;
     Rect painting_area;
     int painting_radius = 0;
+    int painting_radius_y = -1;
 };
 
 // Derives independent CSS background origin/clip rectangles for the initial
-// uniform-edge, circular-radius slice. Nonuniform or negative insets are
+// uniform-edge slice. Nonuniform or negative insets are
 // rejected. Radius is reduced by the inset to the selected clip box and
 // clamped at zero. Output is atomic; failures leave `result` unchanged.
+// Insets decoded corner axes by their corresponding physical side. Refuses
+// results outside the compact packed-corner contract; outputs remain atomic.
+bool inset_background_radii(int radius_x, int radius_y, BackgroundImageInsets insets,
+                            int& result_x, int& result_y) noexcept;
+
 BackgroundBoxAreasStatus resolve_background_box_areas(
     const BackgroundBoxAreasRequest& request,
     BackgroundBoxAreas& result) noexcept;

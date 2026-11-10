@@ -28,6 +28,13 @@ bool layout_fields_equal(const Style& left, const Style& right) {
         left.margin_right_auto == right.margin_right_auto &&
         edge_sizes_equal(left.padding, right.padding) &&
         edge_sizes_equal(left.border_width, right.border_width) &&
+        left.border_radius == right.border_radius &&
+        left.border_radius_percent == right.border_radius_percent &&
+        left.border_radius_x_values == right.border_radius_x_values &&
+        left.border_radius_y_values == right.border_radius_y_values &&
+        left.border_radius_x_percent_mask == right.border_radius_x_percent_mask &&
+        left.border_radius_y_percent_mask == right.border_radius_y_percent_mask &&
+        left.border_radius_axes_specified == right.border_radius_axes_specified &&
         detail::computed_background_images_equal(left, right) &&
         left.width == right.width &&
         left.height == right.height &&

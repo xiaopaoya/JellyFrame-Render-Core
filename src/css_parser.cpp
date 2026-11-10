@@ -949,6 +949,8 @@ bool is_supported_declaration_feature(std::string_view feature) {
         property == "border-width" || property == "border-top-width" ||
         property == "border-right-width" || property == "border-bottom-width" ||
         property == "border-left-width" || property == "border-radius") {
+        if (property == "border-radius" &&
+            (value.find('/') != std::string::npos || value.find('%') != std::string::npos)) return true;
         return is_supported_length_value(value);
     }
     if (property == "padding-inline" || property == "padding-block") {

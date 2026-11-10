@@ -4,10 +4,66 @@
 #include <cassert>
 #include <iostream>
 #include <limits>
+#include <stdexcept>
+#include <string>
 
 using namespace jellyframe;
 
+namespace {
+void elliptical_gradient_rows_match_fill_pixels() {
+    const int axes[][2] = {
+        {encode_corner_radii({4, 8, 6, 3}), encode_corner_radii({32, 25, 28, 30})},
+        {encode_corner_radii({32, 25, 28, 30}), encode_corner_radii({4, 8, 6, 3})},
+        {encode_corner_radii({80, 0, 0, 0}), encode_corner_radii({80, 0, 0, 0})},
+        {encode_corner_radii({80, 0, 80, 0}), encode_corner_radii({80, 0, 80, 0})},
+    };
+    const Rect rect{4, 4, 100, 100};
+    const Rect clips[] = {{0, 0, 112, 112}, {4, 12, 25, 24}};
+    for (const auto& axis : axes) {
+        for (const Rect clip : clips) {
+            for (const int alpha : {180, 255}) {
+                const Color color{23, 103, 203, static_cast<std::uint8_t>(alpha)};
+                FrameBuffer expected(112, 112, {225, 232, 240, 255});
+                DisplayCommand fill(DisplayCommandType::FillRect);
+                fill.rect = rect;
+                fill.color = color;
+                fill.basic_paint().border_radius = axis[0];
+                fill.basic_paint().border_radius_y = axis[1];
+                SoftwareRasterizer().rasterize(fill, expected, clip);
+                const GradientAxis linear_axes[] = {GradientAxis::Vertical, GradientAxis::Horizontal,
+                    GradientAxis::DiagonalDownRight, GradientAxis::DiagonalDownLeft};
+                for (int kind = 0; kind < 6; ++kind) {
+                    FrameBuffer actual(112, 112, {225, 232, 240, 255});
+                    if (kind < 4) {
+                        modern_paint_fill_linear_gradient(actual, rect, clip, color, color,
+                                                           linear_axes[kind], axis[0], axis[1]);
+                    } else if (kind == 4) {
+                        modern_paint_fill_conic_gradient_region(actual, rect,
+                            raster_clip_rect(actual, rect, clip), color, color, 50, axis[0], axis[1]);
+                    } else {
+                        modern_paint_fill_radial_gradient_region(actual, rect,
+                            raster_clip_rect(actual, rect, clip), color, color,
+                            GradientAxis::Vertical, 0, axis[0], axis[1]);
+                    }
+                    for (std::size_t i = 0; i < actual.pixels.size(); ++i) {
+                        const Color a = actual.pixels[i], b = expected.pixels[i];
+                        if (a.r != b.r || a.g != b.g || a.b != b.b || a.a != b.a) {
+                            throw std::runtime_error("ellipse gradient mismatch kind=" + std::to_string(kind) +
+                                " rx=" + std::to_string(axis[0]) + " ry=" + std::to_string(axis[1]) +
+                                " alpha=" + std::to_string(alpha) + " x=" + std::to_string(i % 112) +
+                                " y=" + std::to_string(i / 112) + " actual=" + std::to_string(a.r) +
+                                " expected=" + std::to_string(b.r));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+} // namespace
+
 int modern_paint_tests_main() {
+    elliptical_gradient_rows_match_fill_pixels();
     const Color midpoint = modern_paint_lerp_color_255(Color{0, 10, 20, 255},
                                                         Color{100, 110, 120, 255},
                                                         128);
@@ -35,7 +91,7 @@ int modern_paint_tests_main() {
     assert(safe_negate(std::numeric_limits<int>::min()) == std::numeric_limits<int>::max());
     assert(safe_span(std::numeric_limits<int>::min(), std::numeric_limits<int>::max()) ==
            std::numeric_limits<int>::max());
-    assert(expand_corner_radii(127, std::numeric_limits<int>::max()) == 127);
+    assert(expand_corner_radii(127, std::numeric_limits<int>::max()) == std::numeric_limits<int>::max());
     assert(expand_corner_radii(1, std::numeric_limits<int>::min()) == 0);
     const RasterRoundedRect extreme = prepare_rounded_rect(
         Rect{std::numeric_limits<int>::min(), std::numeric_limits<int>::min(),

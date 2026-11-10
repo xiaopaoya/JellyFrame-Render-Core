@@ -74,6 +74,15 @@ Prepared text stores its explicit origin and baseline in the text payload.
 The public installed-consumer regression covers the source API replacement.
 Hosts qualify and pin the new source manifest before adopting this candidate.
 
+The unpublished ABI4 radius contract also carries horizontal and vertical
+corner values in paint commands and clips. Only `border_radius_y == -1` means
+inherit the horizontal value; a negative packed four-corner value is valid
+geometry. `FlattenedClip` appends Y after its existing parent index. The x64
+Release layout is now Style 920B and DisplayCommand 136B; hosts must rebuild
+and qualify the exact package identity. Runtime canonical v9 can only encode
+equal axes without loss; unequal axes require its explicit v10 consumer.
+See the CSS scope for bounded grammar, integer projection and refusal limits.
+
 ABI4 `Style` stores four value-semantic background image layer slots in CSS
 paint order (slot zero is topmost), plus one shared `background_color` painted
 beneath the layers. The default style has one `none` image slot. This is a

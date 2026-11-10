@@ -116,14 +116,37 @@ bool make_background_paint_clip(Rect destination, Rect painting_area,
     return true;
 }
 
+bool inset_background_radii(int radius_x, int radius_y, BackgroundImageInsets insets,
+                            int& result_x, int& result_y) noexcept {
+    if (std::min({insets.top, insets.right, insets.bottom, insets.left}) < 0) return false;
+    const CornerRadii x = decode_corner_radii(radius_x);
+    const CornerRadii y = decode_corner_radii(effective_vertical_radius(radius_x, radius_y));
+    const auto reduced = [](int value, int inset) { return std::max(0, value - inset); };
+    const CornerRadii inner_x{reduced(x.top_left, insets.left), reduced(x.top_right, insets.right),
+                              reduced(x.bottom_right, insets.right), reduced(x.bottom_left, insets.left)};
+    const CornerRadii inner_y{reduced(y.top_left, insets.top), reduced(y.top_right, insets.top),
+                              reduced(y.bottom_right, insets.bottom), reduced(y.bottom_left, insets.bottom)};
+    const auto representable = [](CornerRadii axis) {
+        return std::max({axis.top_left, axis.top_right, axis.bottom_right, axis.bottom_left}) <= 127 ||
+            (axis.top_left == axis.top_right && axis.top_left == axis.bottom_right &&
+             axis.top_left == axis.bottom_left);
+    };
+    if (!representable(inner_x) || !representable(inner_y)) return false;
+    result_x = encode_corner_radii(inner_x);
+    result_y = encode_corner_radii(inner_y);
+    return true;
+}
+
 BackgroundBoxAreasStatus resolve_background_box_areas(
     const BackgroundBoxAreasRequest& request,
     BackgroundBoxAreas& result) noexcept {
+    const int radius_y = effective_vertical_radius(request.border_radius, request.border_radius_y);
     if (!valid_area_kind(request.origin) || !valid_area_kind(request.clip) ||
-        request.border_radius < 0) return BackgroundBoxAreasStatus::InvalidInput;
+        !is_valid_corner_radius_encoding(request.border_radius) || !is_valid_corner_radius_encoding(radius_y))
+        return BackgroundBoxAreasStatus::InvalidInput;
     if (!uniform_nonnegative(request.border) || !uniform_nonnegative(request.padding))
         return BackgroundBoxAreasStatus::InvalidInput;
-    if (request.border_radius > kMaxDimension)
+    if (request.border_radius > kMaxDimension || radius_y > kMaxDimension)
         return BackgroundBoxAreasStatus::DimensionLimit;
     if (request.border_box.width <= 0 || request.border_box.height <= 0)
         return BackgroundBoxAreasStatus::Empty;
@@ -141,9 +164,9 @@ BackgroundBoxAreasStatus resolve_background_box_areas(
     if (status != BackgroundBoxAreasStatus::Ready) return status;
     status = inset_area(request.border_box, clip_insets, candidate.painting_area);
     if (status != BackgroundBoxAreasStatus::Ready) return status;
-    const auto radius_inset = static_cast<std::int64_t>(clip_insets.top);
-    candidate.painting_radius = static_cast<int>(std::max<std::int64_t>(
-        0, static_cast<std::int64_t>(request.border_radius) - radius_inset));
+    if (!inset_background_radii(request.border_radius, radius_y, clip_insets,
+                                candidate.painting_radius, candidate.painting_radius_y))
+        return BackgroundBoxAreasStatus::DimensionLimit;
     result = candidate;
     return BackgroundBoxAreasStatus::Ready;
 }

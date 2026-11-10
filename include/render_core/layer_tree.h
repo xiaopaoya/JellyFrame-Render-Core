@@ -94,6 +94,7 @@ struct LayerNode {
     Rect bounds;
     Rect clip_rect;
     int clip_border_radius = 0;
+    int clip_border_radius_y = -1;
     bool has_clip = false;
     float opacity = 1.0F;
     Transform2D transform;
@@ -114,6 +115,7 @@ struct FlattenedClip {
     Rect rect;
     int border_radius = 0;
     std::uint32_t parent_clip = kNoFlattenedClip;
+    int border_radius_y = -1;
 };
 
 struct FlattenedLayerTree {

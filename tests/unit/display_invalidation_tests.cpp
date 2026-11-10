@@ -45,10 +45,12 @@ void local_dirty_rect_reports_intersecting_commands_and_layers() {
         "<body><section class='a'>A</section><section class='b'>B</section></body>",
         "body { margin: 0; } section { width: 80px; height: 30px; margin: 0; } "
         ".a { background: #000000; } .b { background: #777777; }");
-    const Rect dirty{0, 0, 90, 35};
+    // The second section starts at y=30. Keep this dirty region wholly in
+    // the first section; height35 would legitimately touch both sections.
+    const Rect dirty{0, 0, 90, 25};
     const DisplayInvalidationResult result = analyze_display_invalidation(*layer_tree, &dirty, 1);
     check(result.dirty_rect_count == 1, "dirty rect count");
-    check(result.dirty_area == 3150, "dirty area is accumulated");
+    check(result.dirty_area == 2250, "dirty area is accumulated");
     check(result.layers_visited >= 1, "layers are visited");
     check(result.layers_intersecting >= 1, "root layer intersects dirty rect");
     check(result.commands_visited >= 2, "display commands are counted");

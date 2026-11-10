@@ -2,7 +2,7 @@
 
 #include <type_traits>
 
-static_assert(sizeof(jellyframe::Style) == 888, "qualified ABI4 candidate Style size");
+static_assert(sizeof(jellyframe::Style) == 920, "qualified ABI4 candidate Style size with radius axes");
 static_assert(alignof(jellyframe::Style) == 8, "qualified ABI4 candidate alignment");
 static_assert(sizeof(jellyframe::BackgroundLayer) == 28, "lossless inline layer");
 static_assert(std::is_trivially_copyable<jellyframe::BackgroundLayer>::value,
