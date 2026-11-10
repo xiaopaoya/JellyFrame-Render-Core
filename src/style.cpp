@@ -65,7 +65,8 @@ using LengthResolutionContext = StyleLengthResolutionContext;
 bool parse_length_px(const std::string& raw_value,
                     int& output,
                     int em_base = kRootFontSizePx,
-                    const LengthResolutionContext& context = {});
+                    const LengthResolutionContext& context = {},
+                    double* precise_pixels = nullptr);
 
 LengthResolutionContext length_context_for(const StyleResolveContext& context) {
     return LengthResolutionContext{
@@ -307,13 +308,15 @@ bool has_top_level_comma(std::string_view value) {
 bool parse_length_px(const std::string& raw_value,
                      int& output,
                      int em_base,
-                     const LengthResolutionContext& context) {
+                     const LengthResolutionContext& context,
+                     double* precise_pixels) {
     const std::string value = trim(raw_value);
     if (value.empty()) {
         return false;
     }
     const std::string lowered = lowercase(value);
     if (parse_length_function(lowered, output, em_base, context)) {
+        if (precise_pixels != nullptr) *precise_pixels = output;
         return true;
     }
 
@@ -357,6 +360,7 @@ bool parse_length_px(const std::string& raw_value,
     if (end == nullptr || *end != '\0') {
         return false;
     }
+    if (precise_pixels != nullptr) *precise_pixels = pixels;
     return round_finite_float_to_int(pixels, output);
 }
 
@@ -2899,6 +2903,11 @@ struct CascadeSlot {
 
 enum class CascadeProperty : std::size_t {
     Display,
+    TableLayout,
+    BorderCollapse,
+    BorderSpacing,
+    CaptionSide,
+    VerticalAlign,
     Visibility,
     Color,
     BackgroundImage,
@@ -3065,14 +3074,17 @@ CascadeSlot* cascade_slot_for_property(CascadeSlots& slots, const std::string& p
         {"background-size", CascadeProperty::BackgroundSize},
         {"border", CascadeProperty::Border},
         {"border-bottom-width", CascadeProperty::BorderBottomWidth},
+        {"border-collapse", CascadeProperty::BorderCollapse},
         {"border-color", CascadeProperty::BorderColor},
         {"border-left-width", CascadeProperty::BorderLeftWidth},
         {"border-radius", CascadeProperty::BorderRadius},
         {"border-right-width", CascadeProperty::BorderRightWidth},
+        {"border-spacing", CascadeProperty::BorderSpacing},
         {"border-top-width", CascadeProperty::BorderTopWidth},
         {"bottom", CascadeProperty::Bottom},
         {"box-shadow", CascadeProperty::BoxShadow},
         {"box-sizing", CascadeProperty::BoxSizing},
+        {"caption-side", CascadeProperty::CaptionSide},
         {"color", CascadeProperty::Color},
         {"column-gap", CascadeProperty::ColumnGap},
         {"display", CascadeProperty::Display},
@@ -3125,6 +3137,7 @@ CascadeSlot* cascade_slot_for_property(CascadeSlots& slots, const std::string& p
         {"position", CascadeProperty::Position},
         {"right", CascadeProperty::Right},
         {"row-gap", CascadeProperty::RowGap},
+        {"table-layout", CascadeProperty::TableLayout},
         {"text-align", CascadeProperty::TextAlign},
         {"text-decoration", CascadeProperty::TextDecoration},
         {"text-decoration-line", CascadeProperty::TextDecoration},
@@ -3141,6 +3154,7 @@ CascadeSlot* cascade_slot_for_property(CascadeSlots& slots, const std::string& p
         {"transition-duration", CascadeProperty::TransitionDuration},
         {"transition-property", CascadeProperty::TransitionProperty},
         {"transition-timing-function", CascadeProperty::TransitionTimingFunction},
+        {"vertical-align", CascadeProperty::VerticalAlign},
         {"visibility", CascadeProperty::Visibility},
         {"white-space", CascadeProperty::WhiteSpace},
         {"width", CascadeProperty::Width},
@@ -3272,6 +3286,17 @@ DeclarationApplyResult apply_sizing_declaration(Style& style,
                                                 const std::string& value,
                                                 const LengthResolutionContext& context) {
     const auto keyword = lowercase(trim(value));
+    const auto apply_length = [&](detail::SizeProperty slot, int& pixels, int& percent) {
+        const auto result = apply_length_or_percent(style, slot, pixels, percent, value, style.font_size, context);
+        if (result == DeclarationApplyResult::Applied) {
+            const std::uint32_t provenance_bit = table_sizing_provenance_bit(slot);
+            if (lowercase(trim(value)).find("calc(") != std::string::npos)
+                style.table_properties |= provenance_bit;
+            else
+                style.table_properties &= ~provenance_bit;
+        }
+        return result;
+    };
     const bool minimum = property == "min-width" || property == "min-height";
     const bool maximum = property == "max-width" || property == "max-height";
     if ((minimum || maximum) && (keyword == "initial" || keyword == "unset" ||
@@ -3279,6 +3304,7 @@ DeclarationApplyResult apply_sizing_declaration(Style& style,
         const auto slot = property == "min-width" ? detail::SizeProperty::MinWidth :
             property == "min-height" ? detail::SizeProperty::MinHeight :
             property == "max-width" ? detail::SizeProperty::MaxWidth : detail::SizeProperty::MaxHeight;
+        style.table_properties &= ~table_sizing_provenance_bit(slot);
         style.computed_sizes.clear(slot);
         if (property == "min-width") { style.min_width = -1; style.min_width_percent = -1; }
         if (property == "min-height") { style.min_height = -1; style.min_height_percent = -1; }
@@ -3289,34 +3315,36 @@ DeclarationApplyResult apply_sizing_declaration(Style& style,
     if (property == "width") {
         const auto keyword = lowercase(trim(value));
         if (keyword == "auto" || keyword == "initial" || keyword == "unset") {
+            style.table_properties &= ~table_sizing_provenance_bit(detail::SizeProperty::Width);
             style.computed_sizes.clear(detail::SizeProperty::Width);
             style.width = -1;
             style.width_percent = -1;
             return DeclarationApplyResult::Applied;
         }
-        return apply_length_or_percent(style, detail::SizeProperty::Width, style.width, style.width_percent, value, style.font_size, context);
+        return apply_length(detail::SizeProperty::Width, style.width, style.width_percent);
     }
     if (property == "height") {
         const auto keyword = lowercase(trim(value));
         if (keyword == "auto" || keyword == "initial" || keyword == "unset") {
+            style.table_properties &= ~table_sizing_provenance_bit(detail::SizeProperty::Height);
             style.computed_sizes.clear(detail::SizeProperty::Height);
             style.height = -1;
             style.height_percent = -1;
             return DeclarationApplyResult::Applied;
         }
-        return apply_length_or_percent(style, detail::SizeProperty::Height, style.height, style.height_percent, value, style.font_size, context);
+        return apply_length(detail::SizeProperty::Height, style.height, style.height_percent);
     }
     if (property == "min-width") {
-        return apply_length_or_percent(style, detail::SizeProperty::MinWidth, style.min_width, style.min_width_percent, value, style.font_size, context);
+        return apply_length(detail::SizeProperty::MinWidth, style.min_width, style.min_width_percent);
     }
     if (property == "min-height") {
-        return apply_length_or_percent(style, detail::SizeProperty::MinHeight, style.min_height, style.min_height_percent, value, style.font_size, context);
+        return apply_length(detail::SizeProperty::MinHeight, style.min_height, style.min_height_percent);
     }
     if (property == "max-width") {
-        return apply_length_or_percent(style, detail::SizeProperty::MaxWidth, style.max_width, style.max_width_percent, value, style.font_size, context);
+        return apply_length(detail::SizeProperty::MaxWidth, style.max_width, style.max_width_percent);
     }
     if (property == "max-height") {
-        return apply_length_or_percent(style, detail::SizeProperty::MaxHeight, style.max_height, style.max_height_percent, value, style.font_size, context);
+        return apply_length(detail::SizeProperty::MaxHeight, style.max_height, style.max_height_percent);
     }
     if (property == "aspect-ratio") {
         detail::CssAspectRatio ratio;
@@ -3505,9 +3533,68 @@ bool apply_declaration(Style& style,
 #else
             return false;
 #endif
+        } else if (value == "table") {
+            style.display = Display::Table;
+        } else if (value == "table-row-group") {
+            style.display = Display::TableRowGroup;
+        } else if (value == "table-row") {
+            style.display = Display::TableRow;
+        } else if (value == "table-cell") {
+            style.display = Display::TableCell;
+        } else if (value == "table-caption") {
+            style.display = Display::TableCaption;
+        } else if (value == "table-column-group") {
+            style.display = Display::TableColumnGroup;
+        } else if (value == "table-column") {
+            style.display = Display::TableColumn;
         } else {
             return false;
         }
+        return true;
+    } else if (property == "table-layout") {
+        if (value == "fixed") style.table_properties |= 1U;
+        else if (value == "auto") style.table_properties &= ~1U;
+        else return false;
+        return true;
+    } else if (property == "border-collapse") {
+        if (value == "separate") style.table_properties &= ~2U;
+        else if (value == "collapse") style.table_properties |= 2U;
+        else return false;
+        style.table_properties |= kTableBorderCollapseSpecified;
+        return true;
+    } else if (property == "border-spacing") {
+        const auto components = split_whitespace_components(value);
+        if (components.empty() || components.size() > 2) return false;
+        // This packed subset accepts integral, nonnegative resolved lengths.
+        // Check the original precision before narrowing (e.g. -0.4px is invalid).
+        int spacing[2]{};
+        for (std::size_t index = 0; index < components.size(); ++index) {
+            double precise = 0;
+            const auto component = lowercase(components[index]);
+            if (component.find('%') != std::string::npos || component.rfind("calc(", 0) == 0 ||
+                !parse_length_px(components[index], spacing[index], style.font_size, context, &precise) ||
+                !std::isfinite(precise) || precise < 0 || precise > 255 || std::floor(precise) != precise)
+                return false;
+        }
+        const int x = spacing[0];
+        const int y = components.size() == 1 ? spacing[0] : spacing[1];
+        style.table_properties = (style.table_properties & ~((0xFFU << 12U) | (0xFFU << 20U))) |
+            (static_cast<std::uint32_t>(x) << 12U) | (static_cast<std::uint32_t>(y) << 20U);
+        style.table_properties |= kTableBorderSpacingSpecified;
+        return true;
+    } else if (property == "caption-side") {
+        if (value == "top") style.table_properties &= ~4U;
+        else if (value == "bottom") style.table_properties |= 4U;
+        else return false;
+        style.table_properties |= kTableCaptionSideSpecified;
+        return true;
+    } else if (property == "vertical-align") {
+        unsigned int align = 0;
+        if (value == "top") align = 0;
+        else if (value == "middle") align = 1;
+        else if (value == "bottom") align = 2;
+        else return false;
+        style.table_properties = (style.table_properties & ~(3U << 3U)) | (align << 3U);
         return true;
     } else if (property == "visibility") {
         if (value == "visible") {
@@ -5036,6 +5123,13 @@ Style default_style_for(const Node& node) {
     if (std::find(block_tags.begin(), block_tags.end(), std::string_view(node.tag_name)) != block_tags.end()) {
         style.display = Display::Block;
     }
+    if (node.tag_name == "table") style.display = Display::Table;
+    else if (node.tag_name == "tbody" || node.tag_name == "thead" || node.tag_name == "tfoot") style.display = Display::TableRowGroup;
+    else if (node.tag_name == "tr") style.display = Display::TableRow;
+    else if (node.tag_name == "td" || node.tag_name == "th") style.display = Display::TableCell;
+    else if (node.tag_name == "caption") style.display = Display::TableCaption;
+    else if (node.tag_name == "colgroup") style.display = Display::TableColumnGroup;
+    else if (node.tag_name == "col") style.display = Display::TableColumn;
     if (node.tag_name == "h1") {
         style.font_size = 24;
         style.font_size_specified = true;

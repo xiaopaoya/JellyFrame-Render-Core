@@ -68,6 +68,15 @@ Style inherit_text_style(Style style, const Style& parent_style) {
 
 Style inherit_element_style(Style style, const Style& parent_style) {
     style = inherit_text_style(style, parent_style);
+    if ((style.table_properties & kTableCaptionSideSpecified) == 0)
+        style.table_properties = (style.table_properties & ~4U) | (parent_style.table_properties & 4U);
+    if ((style.table_properties & kTableBorderCollapseSpecified) == 0)
+        style.table_properties = (style.table_properties & ~2U) | (parent_style.table_properties & 2U);
+    if ((style.table_properties & kTableBorderSpacingSpecified) == 0) {
+        constexpr std::uint32_t spacing_mask = (0xFFU << 12U) | (0xFFU << 20U);
+        style.table_properties = (style.table_properties & ~spacing_mask) |
+            (parent_style.table_properties & spacing_mask);
+    }
     detail::finalize_inherited_aspect_ratio(style, &parent_style);
     if (!style.text_overflow_specified) {
         style.text_overflow_ellipsis = false;

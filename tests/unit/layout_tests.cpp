@@ -53,6 +53,406 @@ bool has_diagnostic_code(const VectorDiagnosticSink& sink, const std::string& co
     return false;
 }
 
+void fixed_separate_table_uses_columns_spacing_and_shared_rows() {
+    const Style initial_style;
+    check(!table_border_is_collapsed(initial_style) && table_border_spacing_x(initial_style) == 2 &&
+          table_border_spacing_y(initial_style) == 2,
+          "default table style matches separate borders with two-pixel spacing");
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse(
+        "<body><table id='grid'><caption id='cap'>Caption</caption><colgroup><col id='col1'><col id='col2'><col id='col3'></colgroup>"
+        "<tbody><tr><td id='a'>Alpha</td><td id='b'>Short</td><td id='c'>Ready</td></tr>"
+        "<tr><td id='d'>Beta</td><td id='wrap'>A longer fixed-width cell wraps onto multiple lines to size the row.</td>"
+        "<td id='f'>Pending</td></tr>"
+        "<tr><td id='g'>Gamma</td><td id='break'>First line<br>Second line</td><td id='i'>Done</td></tr>"
+        "<tr><td id='j'>Delta</td><td id='k'>Stable</td><td id='l'>Ready</td></tr></tbody></table></body>");
+    StyleResolver resolver(css_parser.parse(
+        "body { margin: 0; }"
+        "#grid { width: 420px; table-layout: fixed; border-spacing: 6px 4px; border: 2px solid #243447; }"
+        "#col1 { width: 112px; } #col2 { width: 180px; } #col3 { width: 112px; }"
+        "td { padding: 8px; border: 1px solid #8493a3; vertical-align: top; line-height: 20px; }"
+        "caption { padding: 7px 10px; border: 1px solid #69798a; background-color: #dae9ff; }"));
+    auto render_tree = RenderTreeBuilder(resolver).build(*document);
+    LayoutEngine layout_engine(resolver);
+    auto layout_tree = layout_engine.layout(*render_tree, 1000);
+    const LayoutBox* table = find_first_by_id(*layout_tree, "grid");
+    const LayoutBox* caption = find_first_by_id(*layout_tree, "cap");
+    const LayoutBox* a = find_first_by_id(*layout_tree, "a");
+    const LayoutBox* b = find_first_by_id(*layout_tree, "b");
+    const LayoutBox* c = find_first_by_id(*layout_tree, "c");
+    const LayoutBox* d = find_first_by_id(*layout_tree, "d");
+    const LayoutBox* wrap = find_first_by_id(*layout_tree, "wrap");
+    const LayoutBox* f = find_first_by_id(*layout_tree, "f");
+    const LayoutBox* g = find_first_by_id(*layout_tree, "g");
+    const LayoutBox* br = find_first_by_id(*layout_tree, "break");
+    const LayoutBox* i = find_first_by_id(*layout_tree, "i");
+    const LayoutBox* j = find_first_by_id(*layout_tree, "j");
+    check(table && caption && a && b && c && d && wrap && f && g && br && i && j,
+          "fixed table fixture boxes exist");
+    if (table->rect.width != 432)
+        throw std::runtime_error("fixed table width actual=" + std::to_string(table->rect.width) +
+            " style=" + std::to_string(table->style.width) + " props=" +
+            std::to_string(table->style.table_properties) + " rows=" + std::to_string(table->children.size()) +
+            " columns=" + std::to_string(find_first_by_id(*layout_tree, "col1")->style.width) + "," +
+            std::to_string(find_first_by_id(*layout_tree, "col2")->style.width) + "," +
+            std::to_string(find_first_by_id(*layout_tree, "col3")->style.width));
+    check(table->rect.height > caption->rect.height + a->rect.height + wrap->rect.height,
+          "table outer height includes caption, row spacing and borders");
+    check(caption->rect.width == table->rect.width && caption->rect.y == table->rect.y,
+          "top caption occupies table width before the grid");
+    check(a->rect.x == d->rect.x && b->rect.x == wrap->rect.x && c->rect.x == f->rect.x,
+          "column edges remain aligned between rows");
+    check(a->rect.height == b->rect.height && b->rect.height == c->rect.height,
+          "short row cells share a height");
+    check(d->rect.height == wrap->rect.height && wrap->rect.height == f->rect.height &&
+          wrap->rect.height > b->rect.height, "wrapped content determines shared row height");
+    check(wrap->rect.y > b->rect.y && f->rect.y > c->rect.y, "later row follows the wrapped row height");
+    check(g->rect.y > wrap->rect.y && i->rect.y == g->rect.y && br->rect.height > a->rect.height,
+          "explicit hard break forms a later row with a shared taller cell height");
+    check(j->rect.y > g->rect.y && table->rect.height > j->rect.y - table->rect.y,
+          "fourth row contributes to the table's bounded outer height");
+    check(table_layout_is_fixed(table->style) && !table_border_is_collapsed(table->style) &&
+          table_border_spacing_x(table->style) == 6 && table_border_spacing_y(table->style) == 4,
+          "fixed table defaults to separate borders without a collapse declaration");
+
+    const_cast<Node*>(wrap->node)->set_text_content(
+        "A much longer replacement value that wraps repeatedly and increases this table row height");
+    const_cast<Node*>(wrap->node)->set_attribute("style", "padding-top: 18px; padding-bottom: 18px;");
+    auto mutated_render = RenderTreeBuilder(resolver).build(*document);
+    auto mutated_layout = layout_engine.layout(*mutated_render, 1000);
+    const LayoutBox* mutated_table = find_first_by_id(*mutated_layout, "grid");
+    const LayoutBox* mutated_cell = find_first_by_id(*mutated_layout, "wrap");
+    const LayoutBox* mutated_peer = find_first_by_id(*mutated_layout, "d");
+    const LayoutBox* mutated_next = find_first_by_id(*mutated_layout, "g");
+    check(mutated_table && mutated_cell && mutated_peer && mutated_next, "mutated table boxes exist");
+    check(mutated_table->rect.height > table->rect.height && mutated_cell->rect.height == mutated_peer->rect.height,
+          "text and padding mutation propagates the changed row height to its peer and table");
+    check(mutated_next->rect.y > g->rect.y, "expanded row moves every following row down");
+}
+
+void fixed_table_positions_caption_subtree_and_resolves_auto_margins() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse(
+        "<body><table id='bottom'><caption id='caption'><span id='caption-text'>Bottom</span></caption>"
+        "<colgroup><col style='width:100px'></colgroup><tbody><tr><td id='cell'>Cell</td></tr></tbody></table>"
+        "<table id='center'><colgroup><col style='width:100px'></colgroup><tbody><tr><td>Cell</td></tr></tbody></table>"
+        "<table id='left-auto'><colgroup><col style='width:100px'></colgroup><tbody><tr><td>Cell</td></tr></tbody></table>"
+        "<table id='right-auto'><colgroup><col style='width:100px'></colgroup><tbody><tr><td>Cell</td></tr></tbody></table></body>");
+    StyleResolver resolver(css_parser.parse(
+        "body { margin:0; } table { width:100px; table-layout:fixed; border-spacing:0; }"
+        "#bottom { caption-side:bottom; } #center { margin-left:auto; margin-right:auto; }"
+        "#left-auto { margin-left:auto; margin-right:20px; } #right-auto { margin-left:15px; margin-right:auto; }"));
+    auto render = RenderTreeBuilder(resolver).build(*document);
+    LayoutEngine engine(resolver);
+    auto layout = engine.layout(*render, 400);
+    const LayoutBox* bottom = find_first_by_id(*layout, "bottom");
+    const LayoutBox* caption = find_first_by_id(*layout, "caption");
+    const LayoutBox* text = find_first_by_id(*layout, "caption-text");
+    const LayoutBox* center = find_first_by_id(*layout, "center");
+    const LayoutBox* left_auto = find_first_by_id(*layout, "left-auto");
+    const LayoutBox* right_auto = find_first_by_id(*layout, "right-auto");
+    check(bottom && caption && text && center && left_auto && right_auto,
+          "caption and auto-margin fixed table boxes exist");
+    check(caption->rect.y > bottom->rect.y && text->rect.y >= caption->rect.y &&
+          text->rect.y + text->rect.height <= caption->rect.y + caption->rect.height,
+          "bottom caption repositioning carries its text subtree with it");
+    check(center->rect.x == 150, "two auto margins center fixed table in available width");
+    check(left_auto->rect.x == 280, "left auto margin consumes remaining space beside fixed right margin");
+    check(right_auto->rect.x == 15, "right auto margin preserves fixed left margin");
+}
+
+void fixed_table_refuses_spans_nested_tables_and_percentage_widths() {
+    const char* cases[] = {
+        "<table id='t'><colgroup><col style='width:40px'></colgroup><tbody><tr><td id='cell' colspan='1'>X</td></tr></tbody></table>",
+        "<table id='t'><colgroup><col style='width:40px'></colgroup><tbody><tr><td id='cell'><table><tbody><tr><td>N</td></tr></tbody></table></td></tr></tbody></table>",
+        "<table id='t'><colgroup><col style='width:40px'></colgroup><tbody><tr><td id='cell'>X</td></tr></tbody></table>",
+    };
+    const char* css_cases[] = {
+        "#t { width:100px; table-layout:fixed; }",
+        "#t { width:100px; table-layout:fixed; }",
+        "#t { width:100%; table-layout:fixed; }",
+    };
+    for (std::size_t index = 0; index < 3; ++index) {
+        HtmlParser html_parser;
+        CssParser css_parser;
+        auto document = html_parser.parse(std::string("<body>") + cases[index] + "</body>");
+        StyleResolver resolver(css_parser.parse(css_cases[index]));
+        auto render = RenderTreeBuilder(resolver).build(*document);
+        LayoutEngine engine(resolver);
+        auto layout = engine.layout(*render, 200);
+        const LayoutBox* table = find_first_by_id(*layout, "t");
+        check(table != nullptr, "unsupported table still has a bounded fallback box");
+        if (index < 2) {
+            const LayoutBox* cell = find_first_by_id(*layout, "cell");
+            check(cell != nullptr && cell->rect.width != 40,
+                  "spans and nested tables do not use fixed-track cell sizing");
+        } else {
+            check(table->rect.width == 200, "percentage table width uses the ordinary non-fixed fallback");
+        }
+    }
+}
+
+void check_matching_table_fallback(const LayoutBox& actual, const LayoutBox& expected) {
+    if (actual.rect.x != expected.rect.x || actual.rect.y != expected.rect.y ||
+        actual.rect.width != expected.rect.width || actual.rect.height != expected.rect.height) {
+        throw std::runtime_error("refused table fallback geometry differs: actual=" +
+            std::to_string(actual.rect.x) + "," + std::to_string(actual.rect.y) + "," +
+            std::to_string(actual.rect.width) + "," + std::to_string(actual.rect.height) +
+            " expected=" + std::to_string(expected.rect.x) + "," + std::to_string(expected.rect.y) + "," +
+            std::to_string(expected.rect.width) + "," + std::to_string(expected.rect.height));
+    }
+    check(actual.style.width == expected.style.width &&
+          actual.style.width_percent == expected.style.width_percent &&
+          actual.style.computed_sizes.equals(expected.style.computed_sizes) &&
+          actual.style.box_sizing_border_box == expected.style.box_sizing_border_box &&
+          actual.style.margin.top == expected.style.margin.top &&
+          actual.style.margin.right == expected.style.margin.right &&
+          actual.style.margin.bottom == expected.style.margin.bottom &&
+          actual.style.margin.left == expected.style.margin.left,
+          "refused table restores temporary cell sizing and margins");
+    const auto& a = actual.text_layout_cache;
+    const auto& b = expected.text_layout_cache;
+    check(a.valid == b.valid && a.source_text == b.source_text && a.rendered_text == b.rendered_text &&
+          a.lines == b.lines && a.available_width == b.available_width && a.content_width == b.content_width &&
+          a.rect_x == b.rect_x && a.rect_y == b.rect_y && a.rect_width == b.rect_width &&
+          a.rect_height == b.rect_height && a.prepared_text == b.prepared_text &&
+          a.prepared_packet == b.prepared_packet && a.prepared_lines.size() == b.prepared_lines.size(),
+          "refused table leaves fallback text wrapping and cache geometry consistent");
+    check(actual.children.size() == expected.children.size(), "fallback keeps the same subtree shape");
+    for (std::size_t i = 0; i < actual.children.size(); ++i)
+        check_matching_table_fallback(*actual.children[i], *expected.children[i]);
+}
+
+void fixed_table_refuses_extreme_and_unqualified_inputs_transactionally() {
+    struct Case { const char* html; const char* css; };
+    const Case cases[] = {
+        {"<table><colgroup><col><col></colgroup><tbody><tr><td>A</td><td>B</td></tr></tbody></table>",
+         "col{width:2147483000px}table{border-spacing:2px}"},
+        // The first measured row and caption must roll back when row two exceeds int geometry.
+        {"<table><caption><span>Caption wraps over a narrow track</span></caption>"
+         "<colgroup><col></colgroup><tbody><tr><td><span>First measured row</span></td></tr>"
+         "<tr><td><span>Second measured row</span></td></tr></tbody></table><div>After</div>",
+         "col{width:40px}td{height:1500000000px;margin:3px;box-sizing:content-box}"},
+        {"<table><colgroup><col></colgroup><tbody><tr><td><div style='display:table'>Nested</div>"
+         "</td></tr></tbody></table>", "col{width:40px}"},
+        {"<table><caption><span>Caption</span></caption><colgroup><col></colgroup>"
+         "<tbody><tr><td>Cell</td></tr></tbody></table>", "col{width:40px}caption{margin-left:20px}"},
+    };
+    for (const auto& fixture : cases) {
+        auto document = HtmlParser{}.parse(std::string("<body>") + fixture.html + "</body>");
+        const std::string css = std::string("body{margin:0}table{width:100px;border-spacing:0}") + fixture.css;
+        StyleResolver fixed(CssParser{}.parse(css + "table{table-layout:fixed}"));
+        StyleResolver fallback(CssParser{}.parse(css));
+        auto fixed_tree = LayoutEngine(fixed).layout(*RenderTreeBuilder(fixed).build(*document), 400);
+        auto fallback_tree = LayoutEngine(fallback).layout(*RenderTreeBuilder(fallback).build(*document), 400);
+        check_matching_table_fallback(*fixed_tree, *fallback_tree);
+    }
+}
+
+void table_border_spacing_rejects_extra_components() {
+    auto document = HtmlParser{}.parse("<body><table id='t'></table></body>");
+    StyleResolver resolver(CssParser{}.parse(
+        "table{border-spacing:7px 9px;border-spacing:3px 4px 99px}"));
+    auto tree = LayoutEngine(resolver).layout(*document, 400);
+    const auto* table = find_first_by_id(*tree, "t");
+    check(table && table_border_spacing_x(table->style) == 7 && table_border_spacing_y(table->style) == 9,
+          "invalid three-component border-spacing leaves the prior valid declaration in force");
+}
+
+void fixed_table_refuses_retained_sizing_and_constraints() {
+    const char* declarations[] = {
+        "table{width:100.4px}", "col{width:40.4px}", "td{height:20.6px}",
+        "table{width:calc(100.4px);height:20px}",
+        "td span{width:calc(10.4px);height:20px}",
+        "table{width:50.5%}", "col{width:10.5%}", "td{width:10.5%}",
+        "table{width:calc(100.4px + 0%)}", "col{width:calc(40px + 1%)}",
+        "td{width:calc(10px + 1%)}", "td span{width:calc(10px + 1%)}",
+        "table{min-width:120px}", "table{max-width:90px}", "table{height:50px}",
+        "table{min-height:30px}", "table{max-height:30px}",
+        "col{min-width:50px}", "col{max-width:30px}", "col{min-height:20px}",
+        "td{min-width:70px}", "td{max-width:30px}", "td{min-height:20px}",
+        "td{max-height:20px}", "td{min-width:calc(1px + 1%)}",
+        "caption{width:50px}", "caption{min-width:50px}",
+        "tr{height:100px}", "tbody{height:100px}", "tr{min-height:50px}",
+        "tbody{max-height:50px}", "tr{width:30px}", "tbody{min-width:50px}",
+        "colgroup{width:50px}", "col{height:50px}", "col{min-height:50px}",
+        "tr{position:relative;top:10px}", "tbody{position:absolute;top:10px}",
+        "colgroup{position:relative;left:10px}", "col{position:relative;left:10px}",
+        "caption{position:relative;left:10px}", "table{padding:10px}",
+        "table{position:absolute;left:10px}", "tr{padding:10px}", "tbody{margin:10px}",
+        "col{border:1px solid black}",
+    };
+    for (const char* declaration : declarations) {
+        auto document = HtmlParser{}.parse(
+            "<body><table><caption><span>Caption</span></caption><colgroup><col></colgroup>"
+            "<tbody><tr><td><span>Content wraps over a narrow track</span></td></tr>"
+            "</tbody></table><div>Following</div></body>");
+        const std::string css = std::string("body{margin:0}table{width:100px;border-spacing:0}") +
+            "col{width:40px}" + declaration;
+        StyleResolver fixed(CssParser{}.parse(css + "table{table-layout:fixed}"));
+        StyleResolver fallback(CssParser{}.parse(css));
+        auto actual = LayoutEngine(fixed).layout(*RenderTreeBuilder(fixed).build(*document), 400);
+        auto expected = LayoutEngine(fallback).layout(*RenderTreeBuilder(fallback).build(*document), 400);
+        try {
+            check_matching_table_fallback(*actual, *expected);
+        } catch (const std::exception& error) {
+            throw std::runtime_error(std::string(declaration) + ": " + error.what());
+        }
+    }
+}
+
+void table_inherits_border_state_and_auto_resets_fixed() {
+    const std::string html =
+        "<body><div><table id='t'><colgroup><col style='width:40px'></colgroup>"
+        "<tbody><tr><td id='cell'>Cell</td></tr></tbody></table></div></body>";
+    for (const char* declaration : {"body{border-collapse:collapse}",
+                                   "table{table-layout:auto}"}) {
+        auto document = HtmlParser{}.parse(html);
+        const std::string css = "body{margin:0}table{width:100px}";
+        StyleResolver fixed(CssParser{}.parse(css + "table{table-layout:fixed}" + declaration));
+        StyleResolver fallback(CssParser{}.parse(css + declaration));
+        auto actual = LayoutEngine(fixed).layout(*RenderTreeBuilder(fixed).build(*document), 400);
+        auto expected = LayoutEngine(fallback).layout(*RenderTreeBuilder(fallback).build(*document), 400);
+        check_matching_table_fallback(*actual, *expected);
+        const auto* table = find_first_by_id(*actual, "t");
+        check(table && (table_border_is_collapsed(table->style) || !table_layout_is_fixed(table->style)),
+              "inherited collapse or explicit auto disables the fixed separate path");
+    }
+    for (int local_override = 0; local_override < 2; ++local_override) {
+        auto document = HtmlParser{}.parse(html);
+        const std::string css = std::string(
+            "body{margin:0;border-collapse:collapse;border-spacing:7px 9px}"
+            "table{width:100px;table-layout:fixed;border-collapse:separate}") +
+            (local_override ? "table{border-spacing:2px}" : "");
+        StyleResolver resolver(CssParser{}.parse(css));
+        auto tree = LayoutEngine(resolver).layout(*RenderTreeBuilder(resolver).build(*document), 400);
+        const auto* table = find_first_by_id(*tree, "t");
+        const auto* cell = find_first_by_id(*tree, "cell");
+        const int sx = local_override ? 2 : 7;
+        const int sy = local_override ? 2 : 9;
+        check(table && cell && !table_border_is_collapsed(table->style) &&
+              table_border_spacing_x(table->style) == sx && table_border_spacing_y(table->style) == sy &&
+              cell->rect.x == table->rect.x + sx && cell->rect.y == table->rect.y + sy &&
+              cell->rect.width == 100 - 2 * sx,
+              "border state inherits through ancestors and explicit local values determine fixed grid edges");
+        check(cell->style.width == -1 && !cell->style.box_sizing_border_box &&
+              cell->style.computed_sizes.equals(Style{}.computed_sizes),
+              "successful fixed layout restores temporary cell sizing and retained-size storage");
+    }
+}
+
+void table_spacing_keeps_prior_value_for_unqualified_fractions() {
+    for (const char* invalid : {"-0.4px", "0.4px", "0.6px", "7px -0.4px", "256px",
+                                "calc(-0.4px)", "calc(0.4px)"}) {
+        auto document = HtmlParser{}.parse("<body><table id='t'></table></body>");
+        StyleResolver resolver(CssParser{}.parse(std::string(
+            "table{border-spacing:7px 9px;border-spacing:") + invalid + "}"));
+        auto tree = LayoutEngine(resolver).layout(*document, 400);
+        const auto* table = find_first_by_id(*tree, "t");
+        check(table && table_border_spacing_x(table->style) == 7 && table_border_spacing_y(table->style) == 9,
+              "negative, fractional and out-of-range spacing preserve the prior integral declaration");
+    }
+}
+
+void fixed_table_caption_side_inherits_and_honors_explicit_top() {
+    const char* declarations[] = {
+        "caption{caption-side:bottom}",
+        "body{caption-side:bottom}",
+        "table{caption-side:bottom}",
+        "body{caption-side:bottom}caption{caption-side:top}",
+    };
+    for (std::size_t i = 0; i < 4; ++i) {
+        auto document = HtmlParser{}.parse(
+            "<body><table id='t'><caption id='cap'><span id='label'>Caption</span></caption>"
+            "<colgroup><col style='width:100px'></colgroup><tbody><tr><td id='cell'>Cell</td>"
+            "</tr></tbody></table></body>");
+        StyleResolver resolver(CssParser{}.parse(std::string(
+            "body{margin:0}table{width:100px;table-layout:fixed;border-spacing:0}") + declarations[i]));
+        auto tree = LayoutEngine(resolver).layout(*RenderTreeBuilder(resolver).build(*document), 400);
+        const auto* cap = find_first_by_id(*tree, "cap");
+        const auto* label = find_first_by_id(*tree, "label");
+        const auto* cell = find_first_by_id(*tree, "cell");
+        const auto* table = find_first_by_id(*tree, "t");
+        check(cap && label && cell && table, "caption-side provenance fixture exists");
+        if (i < 3) {
+            check(table_caption_side(cap->style) == TableCaptionSide::Bottom &&
+                  cap->rect.y == cell->rect.y + cell->rect.height,
+                  "local, table and ancestor bottom caption-side all place the caption after the grid");
+        } else {
+            check(table_caption_side(cap->style) == TableCaptionSide::Top && cap->rect.y == table->rect.y &&
+                  cell->rect.y == cap->rect.y + cap->rect.height,
+                  "explicit caption top overrides inherited bottom");
+        }
+        check(label->rect.y == cap->rect.y && !label->children.empty() &&
+              label->children.front()->rect.y == cap->rect.y,
+              "caption-side placement shifts the complete span and text subtree");
+    }
+}
+
+void check_table_subtree_shift(const LayoutBox& shifted, const LayoutBox& baseline) {
+    check(shifted.rect.x == baseline.rect.x + 13 && shifted.rect.y == baseline.rect.y + 17 &&
+          shifted.rect.width == baseline.rect.width && shifted.rect.height == baseline.rect.height,
+          "relative table offsets its whole subtree exactly once");
+    check(shifted.children.size() == baseline.children.size(), "relative table preserves subtree shape");
+    for (std::size_t i = 0; i < shifted.children.size(); ++i)
+        check_table_subtree_shift(*shifted.children[i], *baseline.children[i]);
+}
+
+void fixed_table_relative_position_keeps_following_flow() {
+    auto document = HtmlParser{}.parse(
+        "<body><table id='t'><caption>Caption</caption><colgroup><col style='width:100px'></colgroup>"
+        "<tbody><tr><td>Cell</td></tr></tbody></table><div id='next'>Next</div></body>");
+    const std::string css = "body{margin:0}table{width:100px;table-layout:fixed;border-spacing:0}";
+    StyleResolver base(CssParser{}.parse(css));
+    StyleResolver relative(CssParser{}.parse(css + "table{position:relative;left:13px;top:17px}"));
+    auto baseline = LayoutEngine(base).layout(*RenderTreeBuilder(base).build(*document), 400);
+    auto shifted = LayoutEngine(relative).layout(*RenderTreeBuilder(relative).build(*document), 400);
+    const auto* a = find_first_by_id(*baseline, "t");
+    const auto* b = find_first_by_id(*shifted, "t");
+    check(a && b, "relative table fixture exists");
+    // Columns have no generated visual box; all laid-out grid/caption descendants shift.
+    check(b->rect.x == a->rect.x + 13 && b->rect.y == a->rect.y + 17,
+          "relative table offsets its outer border box");
+    check_table_subtree_shift(*find_first_by_tag(*b, "caption"), *find_first_by_tag(*a, "caption"));
+    check_table_subtree_shift(*find_first_by_tag(*b, "tbody"), *find_first_by_tag(*a, "tbody"));
+    check(find_first_by_id(*baseline, "next")->rect.y == find_first_by_id(*shifted, "next")->rect.y,
+          "relative table displacement leaves following sibling flow unchanged");
+}
+
+void fixed_table_distributes_surplus_proportionally_and_preserves_edges() {
+    struct Case { int table; int first; int second; int spacing; int border; int expected_first; int expected_second; };
+    const Case cases[] = {
+        {300,40,40,0,0,150,150}, {301,40,40,0,0,151,150},
+        {300,40,80,0,0,100,200}, {301,40,80,0,0,100,201}, {302,40,80,0,0,101,201},
+        {313,40,80,3,2,100,200},
+    };
+    for (const auto& fixture : cases) {
+        auto document = HtmlParser{}.parse(
+            "<body><table id='t'><colgroup><col id='one'><col id='two'></colgroup><tbody><tr>"
+            "<td id='a'>Long content that wraps only at the assigned track edge</td><td id='b'>B</td>"
+            "</tr></tbody></table></body>");
+        const std::string css = "body{margin:0}td{padding:0}table{table-layout:fixed;width:" +
+            std::to_string(fixture.table) + "px;border-spacing:" + std::to_string(fixture.spacing) +
+            "px;border:" + std::to_string(fixture.border) + "px solid black}#one{width:" +
+            std::to_string(fixture.first) + "px}#two{width:" + std::to_string(fixture.second) + "px}";
+        StyleResolver resolver(CssParser{}.parse(css));
+        auto tree = LayoutEngine(resolver).layout(*RenderTreeBuilder(resolver).build(*document), 500);
+        const auto* a = find_first_by_id(*tree, "a");
+        const auto* b = find_first_by_id(*tree, "b");
+        const auto* table = find_first_by_id(*tree, "t");
+        check(a && b && table && a->rect.width == fixture.expected_first && b->rect.width == fixture.expected_second,
+              "surplus tracks preserve explicit-column proportions with deterministic integer edges");
+        check(table->rect.width == fixture.table && a->rect.x == table->rect.x + fixture.border + fixture.spacing &&
+              b->rect.x == a->rect.x + a->rect.width + fixture.spacing &&
+              b->rect.x + b->rect.width + fixture.spacing + fixture.border == table->rect.x + table->rect.width,
+              "proportional growth preserves separate spacing and border edges without unused width");
+        check(!a->children.empty() && a->children.front()->text_layout_cache.available_width == a->rect.width,
+              "cell text wrapping uses the distributed track width");
+    }
+}
+
 struct TextMeasureCounter {
     int calls = 0;
 };
@@ -952,6 +1352,17 @@ void layout_saturates_extreme_box_values() {
 int main() {
     try {
         layout_tree_can_use_monotonic_arena();
+        fixed_separate_table_uses_columns_spacing_and_shared_rows();
+        fixed_table_positions_caption_subtree_and_resolves_auto_margins();
+        fixed_table_refuses_spans_nested_tables_and_percentage_widths();
+        fixed_table_refuses_extreme_and_unqualified_inputs_transactionally();
+        table_border_spacing_rejects_extra_components();
+        fixed_table_refuses_retained_sizing_and_constraints();
+        table_inherits_border_state_and_auto_resets_fixed();
+        table_spacing_keeps_prior_value_for_unqualified_fractions();
+        fixed_table_caption_side_inherits_and_honors_explicit_top();
+        fixed_table_relative_position_keeps_following_flow();
+        fixed_table_distributes_surplus_proportionally_and_preserves_edges();
         layout_tree_respects_box_budget();
         layout_tree_reports_box_budget_diagnostic();
         layout_saturates_extreme_box_values();

@@ -2,6 +2,7 @@
 
 #include "render_core/form_control.h"
 #include "computed_size_geometry.h"
+#include "layout_mutation_journal.h"
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
 #include "flex_length_resolution.h"
 #include "flex_auto_min.h"
@@ -1299,6 +1300,224 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
     return project_size_edge(total_units);
 }
 
+int LayoutEngine::layout_fixed_table(LayoutBox& box, int x, int y, int available_width, int height,
+                                    std::size_t depth) const {
+    using detail::SizeKind;
+    using detail::SizeProperty;
+    const auto has_retained = [](const Style& style, SizeProperty property) {
+        SizeKind kind = SizeKind::Pixels;
+        std::int64_t value = 0;
+        return style.computed_sizes.get(property, kind, value);
+    };
+    const auto integral_pixel_sizing = [](const Style& style) {
+        constexpr int Style::* scalars[] = {&Style::width, &Style::height, &Style::min_width,
+            &Style::min_height, &Style::max_width, &Style::max_height};
+        constexpr int Style::* percentages[] = {&Style::width_percent, &Style::height_percent,
+            &Style::min_width_percent, &Style::min_height_percent, &Style::max_width_percent,
+            &Style::max_height_percent};
+        if ((style.table_properties & kTableUnqualifiedSizingMask) != 0) return false;
+        for (unsigned index = 0; index < 6; ++index) {
+            SizeKind kind = SizeKind::Pixels;
+            std::int64_t value = 0;
+            if (style.*percentages[index] >= 0) return false;
+            if (style.computed_sizes.get(static_cast<SizeProperty>(index), kind, value) &&
+                (kind != SizeKind::Pixels || value < 0 || value % 1000 != 0 ||
+                 value != static_cast<std::int64_t>(style.*scalars[index]) * 1000)) return false;
+        }
+        return true;
+    };
+    const auto unconstrained = [&](const Style& style) {
+        return style.min_width < 0 && style.min_height < 0 && style.max_width < 0 && style.max_height < 0 &&
+            !has_retained(style, SizeProperty::MinWidth) && !has_retained(style, SizeProperty::MinHeight) &&
+            !has_retained(style, SizeProperty::MaxWidth) && !has_retained(style, SizeProperty::MaxHeight);
+    };
+    const auto zero_edges = [](const EdgeSizes& edges) {
+        return edges.top == 0 && edges.right == 0 && edges.bottom == 0 && edges.left == 0;
+    };
+    const auto structural_style = [&](const Style& style, bool column) {
+        return style.position_type == PositionType::Static && style.height < 0 &&
+            !has_retained(style, SizeProperty::Height) && unconstrained(style) &&
+            (column || (style.width < 0 && !has_retained(style, SizeProperty::Width))) &&
+            zero_edges(style.margin) && !style.margin_left_auto && !style.margin_right_auto &&
+            zero_edges(style.padding) && zero_edges(style.border_width);
+    };
+    if (!table_layout_is_fixed(box.style) || table_border_is_collapsed(box.style) ||
+        box.style.width < 0 || box.style.width_percent >= 0 ||
+        !integral_pixel_sizing(box.style) || !unconstrained(box.style) ||
+        !zero_edges(box.style.padding) || is_out_of_flow_positioned(box.style) ||
+        box.style.height >= 0 || has_retained(box.style, SizeProperty::Height) ||
+        depth >= options_.max_layout_depth || options_.max_layout_depth - depth < 3) return -1;
+    LayoutBox* group = nullptr;
+    LayoutBox* columns = nullptr;
+    LayoutBox* caption = nullptr;
+    for (auto& child : box.children) {
+        switch (child->style.display) {
+        case Display::TableRowGroup:
+            if (group != nullptr || child->node == nullptr || child->node->tag_name != "tbody") return -1;
+            group = child.get();
+            break;
+        case Display::TableColumnGroup:
+            if (columns != nullptr) return -1;
+            columns = child.get();
+            break;
+        case Display::TableCaption:
+            if (caption != nullptr) return -1;
+            // Caption margins need a separate containing-block qualification;
+            // ordinary layout remains authoritative for those inputs.
+            if (child->style.margin.top != 0 || child->style.margin.right != 0 ||
+                child->style.margin.bottom != 0 || child->style.margin.left != 0 ||
+                child->style.margin_left_auto || child->style.margin_right_auto ||
+                child->style.width >= 0 || child->style.width_percent >= 0 ||
+                has_retained(child->style, SizeProperty::Width) || !unconstrained(child->style) ||
+                child->style.position_type != PositionType::Static) return -1;
+            caption = child.get();
+            break;
+        default:
+            return -1;
+        }
+    }
+    if (group == nullptr || columns == nullptr || columns->children.empty() || group->children.empty()) return -1;
+    std::vector<const LayoutBox*> pending_descendants;
+    for (const auto& child : box.children) pending_descendants.push_back(child.get());
+    while (!pending_descendants.empty()) {
+        const LayoutBox* current = pending_descendants.back();
+        pending_descendants.pop_back();
+        if (current->style.display == Display::Table || !integral_pixel_sizing(current->style)) return -1;
+        if ((current->style.display == Display::TableRowGroup || current->style.display == Display::TableRow ||
+             current->style.display == Display::TableColumnGroup || current->style.display == Display::TableColumn) &&
+            !structural_style(current->style, current->style.display == Display::TableColumn)) return -1;
+        if (current->node != nullptr && current->node->type == NodeType::Element) {
+            if (current->node != box.node && current->node->tag_name == "table") return -1;
+            if (current->node->attributes.find("colspan") != current->node->attributes.end() ||
+                current->node->attributes.find("rowspan") != current->node->attributes.end()) return -1;
+        }
+        for (const auto& child : current->children) pending_descendants.push_back(child.get());
+    }
+    const std::size_t column_count = columns->children.size();
+    std::vector<int> tracks;
+    tracks.reserve(column_count);
+    std::int64_t tracks_total = 0;
+    for (const auto& column : columns->children) {
+        if (column->style.display != Display::TableColumn || column->style.width <= 0 ||
+            column->style.width_percent >= 0 || !unconstrained(column->style) ||
+            !column->children.empty()) return -1;
+        tracks.push_back(column->style.width);
+        tracks_total += column->style.width;
+    }
+    for (const auto& row : group->children) {
+        if (row->style.display != Display::TableRow || row->children.size() != column_count) return -1;
+        for (const auto& cell : row->children) {
+            if (cell->style.display != Display::TableCell || cell->style.width_percent >= 0 ||
+                cell->style.width >= 0 || has_retained(cell->style, SizeProperty::Width) ||
+                !unconstrained(cell->style)) return -1;
+        }
+    }
+    const int spacing_x = table_border_spacing_x(box.style);
+    const int spacing_y = table_border_spacing_y(box.style);
+    const int border_x = horizontal_edges(box.style.border_width);
+    const auto fits = [](std::int64_t value) {
+        return value >= std::numeric_limits<int>::min() && value <= std::numeric_limits<int>::max();
+    };
+    const std::int64_t grid_width = tracks_total + static_cast<std::int64_t>(spacing_x) *
+        static_cast<std::int64_t>(column_count + 1) + border_x;
+    if (!fits(grid_width)) return -1;
+    const int table_width = std::max(box.style.width, static_cast<int>(grid_width));
+    // Explicit columns grow proportionally. Project cumulative edges to the
+    // nearest integer so rounding cannot lose space or separate shared edges.
+    const std::int64_t target_tracks_total = tracks_total + table_width - grid_width;
+    std::int64_t source_edge = 0;
+    std::int64_t assigned_edge = 0;
+    for (std::size_t index = 0; index < column_count; ++index) {
+        source_edge += tracks[index];
+        const auto next_edge = (source_edge * target_tracks_total + tracks_total / 2) / tracks_total;
+        tracks[index] = static_cast<int>(next_edge - assigned_edge);
+        assigned_edge = next_edge;
+    }
+    tracks_total = target_tracks_total;
+    const int margin_left = box.style.margin_left_auto ? 0 : box.style.margin.left;
+    // The caller has already removed fixed horizontal margins from this width.
+    const int auto_space = bounded_non_negative_subtract(available_width, table_width);
+    int auto_left = 0;
+    if (box.style.margin_left_auto && box.style.margin_right_auto) auto_left = auto_space / 2;
+    else if (box.style.margin_left_auto) auto_left = auto_space;
+    const std::int64_t table_x_value = static_cast<std::int64_t>(x) + margin_left + auto_left;
+    if (!fits(table_x_value) || !fits(table_x_value + table_width)) return -1;
+    const int table_x = static_cast<int>(table_x_value);
+    const std::int64_t first_x_value = table_x_value + box.style.border_width.left + spacing_x;
+    if (!fits(first_x_value)) return -1;
+    const int first_x = static_cast<int>(first_x_value);
+    // All failures after this point restore geometry and prepared-text caches
+    // before the caller executes ordinary bounded layout.
+    detail::LayoutMutationJournal transaction;
+    if (transaction.capture(box, options_.max_layout_boxes) != detail::LayoutMutationJournalStatus::Ready)
+        return -1;
+    int caption_height = 0;
+    if (caption != nullptr) {
+        const int measured = layout_box(*caption, table_x, y, table_width, height, depth + 1);
+        caption_height = std::max(0, measured);
+        caption->rect.x = table_x;
+        caption->rect.width = table_width;
+    }
+    const int caption_before = caption != nullptr && table_caption_side(caption->style) == TableCaptionSide::Top
+        ? caption_height : 0;
+    std::int64_t cursor_y = static_cast<std::int64_t>(y) + caption_before + box.style.border_width.top + spacing_y;
+    if (!fits(cursor_y)) return -1;
+    const int grid_start_y = static_cast<int>(cursor_y);
+    for (auto& row : group->children) {
+        int row_height = 0;
+        int cursor_x = first_x;
+        for (std::size_t index = 0; index < column_count; ++index) {
+            LayoutBox& cell = *row->children[index];
+            const Style saved = cell.style;
+            // Width is owned by the qualified track for this call. Keep the
+            // retained representation consistent, then restore the full Style.
+            cell.style.computed_sizes.clear(SizeProperty::Width);
+            cell.style.box_sizing_border_box = true;
+            cell.style.width = tracks[index];
+            cell.style.width_percent = -1;
+            cell.style.margin = EdgeSizes{};
+            const int cell_height = layout_box(cell, cursor_x, static_cast<int>(cursor_y), tracks[index], height, depth + 3);
+            cell.style = saved;
+            row_height = std::max(row_height, cell_height);
+            const auto next_x = static_cast<std::int64_t>(cursor_x) + tracks[index] + spacing_x;
+            if (!fits(next_x)) return -1;
+            cursor_x = static_cast<int>(next_x);
+        }
+        for (auto& cell : row->children) {
+            const int spare = std::max(0, row_height - cell->rect.height);
+            int offset = 0;
+            const TableVerticalAlign align = table_vertical_align(cell->style);
+            if (align == TableVerticalAlign::Middle) offset = spare / 2;
+            else if (align == TableVerticalAlign::Bottom) offset = spare;
+            if (offset != 0) {
+                for (auto& child : cell->children) shift_box(*child, 0, offset);
+            }
+            cell->rect.height = row_height;
+        }
+        row->rect = Rect{first_x, static_cast<int>(cursor_y), static_cast<int>(tracks_total +
+            static_cast<std::int64_t>(column_count - 1) * spacing_x), row_height};
+        cursor_y += static_cast<std::int64_t>(row_height) + spacing_y;
+        if (!fits(cursor_y)) return -1;
+    }
+    if (!fits(cursor_y - grid_start_y)) return -1;
+    group->rect = Rect{first_x, grid_start_y, table_width - border_x,
+                       static_cast<int>(std::max<std::int64_t>(0, cursor_y - grid_start_y))};
+    const auto grid_height = cursor_y - (static_cast<std::int64_t>(y) + caption_before);
+    const auto table_height_value = caption_height + std::max<std::int64_t>(0, grid_height) + box.style.border_width.bottom;
+    const auto flow_height = table_height_value + box.style.margin.top + box.style.margin.bottom;
+    if (!fits(table_height_value) || !fits(flow_height) || flow_height < 0 ||
+        !fits(static_cast<std::int64_t>(y) + table_height_value)) return -1;
+    const int table_height = static_cast<int>(table_height_value);
+    box.rect = Rect{table_x, y, table_width, table_height};
+    if (caption != nullptr && table_caption_side(caption->style) == TableCaptionSide::Bottom) {
+        const auto target_y = static_cast<std::int64_t>(y) + table_height - caption_height;
+        if (!fits(target_y - caption->rect.y)) return -1;
+        shift_box(*caption, 0, static_cast<int>(target_y - caption->rect.y));
+    }
+    transaction.commit();
+    return static_cast<int>(flow_height);
+}
+
 int LayoutEngine::layout_box(LayoutBox& box, int x, int y, int width, int height, std::size_t depth,
                              const PreciseBoxContext* precision, std::int64_t* flow_units) const {
     if (precision && depth <= std::max<std::size_t>(1,options_.max_layout_depth) &&
@@ -1363,6 +1582,15 @@ int LayoutEngine::layout_box(LayoutBox& box, int x, int y, int width, int height
 
     if (box.node != nullptr && box.node->type == NodeType::Text) {
         return layout_text_box(box, border_box_x, border_box_y, content_width, min_width, height);
+    }
+
+    if (box.style.display == Display::Table) {
+        const int table_height = layout_fixed_table(box, x, border_box_y, containing_content_width, height, depth);
+        if (table_height >= 0) {
+            apply_relative_position_offset(box);
+            if (flow_units) *flow_units = static_cast<std::int64_t>(table_height) * 1000;
+            return table_height;
+        }
     }
 
     int max_child_width = 0;

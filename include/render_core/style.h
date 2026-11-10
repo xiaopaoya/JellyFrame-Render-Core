@@ -24,7 +24,17 @@ enum class Display : std::uint8_t {
     Flex,
     Grid,
     None,
+    Table,
+    TableRowGroup,
+    TableRow,
+    TableCell,
+    TableCaption,
+    TableColumnGroup,
+    TableColumn,
 };
+
+enum class TableCaptionSide : std::uint8_t { Top, Bottom };
+enum class TableVerticalAlign : std::uint8_t { Top, Middle, Bottom };
 
 enum class TextAlign : std::uint8_t {
     Start,
@@ -339,9 +349,30 @@ struct Style {
     bool text_align_specified = false;
     JustifyContent justify_content = JustifyContent::Start;
     AlignItems align_items = AlignItems::Stretch;
+    // Bounded separate-table state and local inheritance provenance.
+    std::uint32_t table_properties = (2U << 20U) | (2U << 12U) | (1U << 3U);
     std::vector<StyleTransition> transitions;
     std::vector<StyleAnimation> animations;
 };
+
+inline bool table_layout_is_fixed(const Style& style) { return (style.table_properties & 1U) != 0; }
+inline bool table_border_is_collapsed(const Style& style) { return (style.table_properties & 2U) != 0; }
+inline TableCaptionSide table_caption_side(const Style& style) {
+    return (style.table_properties & 4U) != 0 ? TableCaptionSide::Bottom : TableCaptionSide::Top;
+}
+constexpr std::uint32_t kTableCaptionSideSpecified = 1U << 5U;
+constexpr std::uint32_t kTableBorderCollapseSpecified = 1U << 6U;
+constexpr std::uint32_t kTableBorderSpacingSpecified = 1U << 7U;
+constexpr std::uint32_t kTableUnqualifiedSizingMask = (0x7U << 9U) | (0x7U << 28U);
+inline std::uint32_t table_sizing_provenance_bit(detail::SizeProperty property) {
+    const unsigned index = static_cast<unsigned>(property);
+    return index < 3 ? (1U << (9U + index)) : (1U << (25U + index));
+}
+inline TableVerticalAlign table_vertical_align(const Style& style) {
+    return static_cast<TableVerticalAlign>((style.table_properties >> 3U) & 3U);
+}
+inline int table_border_spacing_x(const Style& style) { return (style.table_properties >> 12U) & 0xFFU; }
+inline int table_border_spacing_y(const Style& style) { return (style.table_properties >> 20U) & 0xFFU; }
 
 struct CssDeclaration {
     std::string property;
