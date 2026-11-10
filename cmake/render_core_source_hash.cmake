@@ -4,6 +4,8 @@
 # local cross-repository overrides must remain identifiable without a VCS
 # checkout. It covers the public Render Core implementation, headers and the
 # CMake files that select feature-family sources and package metadata.
+# This module is also hashed: changing its hashing or dependency logic changes
+# source identity even when the C++ implementation remains unchanged.
 
 function(jellyframe_compute_render_core_source_hash source_root)
     get_filename_component(_jellyframe_render_core_hash_root "${source_root}" ABSOLUTE)
@@ -37,10 +39,16 @@ function(jellyframe_compute_render_core_source_hash source_root)
     set(_jellyframe_render_core_hash_manifest "")
     set(_jellyframe_render_core_hash_manifest_entries)
     foreach(_jellyframe_render_core_hash_relative IN LISTS _jellyframe_render_core_hash_sources)
+        set(_jellyframe_render_core_hash_absolute
+            "${_jellyframe_render_core_hash_root}/${_jellyframe_render_core_hash_relative}")
+        # CONFIGURE_DEPENDS on a glob detects additions/removals. Register the
+        # existing inputs too so an ordinary build refreshes content identity.
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+            "${_jellyframe_render_core_hash_absolute}")
         # Source packages and Git checkouts may use different text line
         # endings on Windows and Unix. Core identity describes source content,
         # not a platform checkout representation, so normalize before hashing.
-        file(READ "${_jellyframe_render_core_hash_root}/${_jellyframe_render_core_hash_relative}"
+        file(READ "${_jellyframe_render_core_hash_absolute}"
             _jellyframe_render_core_hash_content)
         string(REPLACE "\r\n" "\n" _jellyframe_render_core_hash_content
             "${_jellyframe_render_core_hash_content}")
