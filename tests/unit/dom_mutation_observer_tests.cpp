@@ -14,6 +14,8 @@
 
 namespace {
 long allocation_countdown = -1;
+bool count_allocation_requests = false;
+long allocation_requests = 0;
 #if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL != 0
 // MSVC checked containers allocate their iterator proxy in noexcept default
 // constructors. Exhaustion there terminates before the operation under test can
@@ -25,6 +27,7 @@ constexpr long vector_metadata_allocations = 0;
 }
 
 void* operator new(std::size_t bytes) {
+    if (count_allocation_requests) ++allocation_requests;
     if (allocation_countdown == 0) {
 #if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL != 0
         // Unwinding constructs checked-container proxies in Node destruction.
@@ -57,6 +60,7 @@ using Records = std::vector<Record>;
 void observe(Node& node, DomDirtyFlags flags, std::uint64_t generation, void* context) {
     static_cast<Records*>(context)->push_back({&node, flags, generation});
 }
+void ignore_mutation(Node&, DomDirtyFlags, std::uint64_t, void*) {}
 void count_destroyed(Node&, void* context) { ++*static_cast<unsigned*>(context); }
 void report_registration_during_destruction(Node& node, void*) { mark_dirty(node, DomDirtyPaint); }
 
@@ -146,17 +150,32 @@ void registration_allocation_failure_is_atomic_and_clear_is_noexcept() {
           "attachment preflight failure preserves parent and independent child destruction");
     root->clear_mutation_observer(observe, &old_records);
 
+    long append_allocations = 0;
+    {
+        auto measured_parent = make_element("empty");
+        measured_parent->set_mutation_observer(ignore_mutation, nullptr);
+        auto measured_child = make_element("pending");
+        allocation_requests = 0;
+        count_allocation_requests = true;
+        measured_parent->append_child(std::move(measured_child));
+        count_allocation_requests = false;
+        append_allocations = allocation_requests;
+        measured_parent->clear_mutation_observer(ignore_mutation, nullptr);
+    }
+    check(append_allocations > 0, "identical append allocates parent child storage");
     auto empty = make_element("empty");
-    empty->set_mutation_observer(observe, &old_records);
+    empty->set_mutation_observer(ignore_mutation, nullptr);
     auto pending = make_element("pending");
     bool insertion_threw = false;
-    allocation_countdown = 1 + 3 * vector_metadata_allocations; // Includes the returned vector proxy in MSVC Debug.
+    // The no-allocation callback leaves children insertion as the final request.
+    // Measuring the same append accounts for compiler-dependent copy elision.
+    allocation_countdown = append_allocations - 1;
     try { empty->append_child(std::move(pending)); }
     catch (const std::bad_alloc&) { insertion_threw = true; }
     allocation_countdown = -1;
     check(insertion_threw && empty->children.empty() && empty->mutation_generation == 0,
           "parent storage allocation failure cannot commit an attachment");
-    empty->clear_mutation_observer(observe, &old_records);
+    empty->clear_mutation_observer(ignore_mutation, nullptr);
 
     // insert_child owns its argument by value: failed preflight consumes and
     // destroys it. Destroy callbacks inspect the unchanged prior registrations.
@@ -305,6 +324,7 @@ int main() {
         attachment_return_survives_reentrant_sibling_insertions();
         compound_helpers_report_each_core_owned_mutation();
     } catch (const std::exception& error) {
+        count_allocation_requests = false;
         allocation_countdown = -1;
         std::cerr << "DOM mutation observer test failed: " << error.what() << '\n';
         return 1;

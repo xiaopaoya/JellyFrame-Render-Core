@@ -209,15 +209,24 @@ bool TextSystem::resolve_family_hash(std::uint32_t hash, std::uint32_t& family_i
 }
 
 TextSystemStatus TextSystem::process(std::string_view text, const TextFontRequest& font,
-    PreparedTextGlyph* output, std::size_t capacity, bool emit, TextRunMetrics& out) const noexcept {
+    PreparedTextGlyph* output, std::size_t capacity, bool emit, TextRunMetrics& out,
+    std::size_t work_limit, std::size_t* work_used) const noexcept {
     out={};
+    if (work_used) *work_used=0;
     if (!ready()) return Status::NotReady;
     if (font.size_q1000<0 || !font.weight || font.weight>1000 ||
         (font.family_count && !font.families) || (!text.empty() && !text.data())) return Status::InvalidRequest;
     if (font.style!=TextFaceStyle::Normal) return Status::UnsupportedStyle;
     if (font.family_count>max_families || font.family_count>limits_.max_families ||
         text.size()>limits_.max_text_bytes || text.size()>std::numeric_limits<std::uint32_t>::max()) return Status::ResourceLimit;
-    Work work{limits_.max_work};Candidates choices;
+    const auto effective_work=std::min(limits_.max_work,work_limit);
+    Work work{effective_work};Candidates choices;
+    struct WorkUsage {
+        Work& work;
+        std::size_t initial;
+        std::size_t* output;
+        ~WorkUsage() { if (output) *output=initial-work.remaining; }
+    } work_usage{work,effective_work,work_used};
     auto status=candidates(faces_,count_,font,work,choices);
     if (status!=Status::Ok) return status;
     const auto before=work.remaining;
@@ -240,10 +249,10 @@ TextSystemStatus TextSystem::process(std::string_view text, const TextFontReques
 }
 TextSystemStatus TextSystem::measure(std::string_view text,const TextFontRequest& font,
                                     TextRunMetrics& out) const noexcept {
-    return process(text,font,nullptr,0,false,out);
+    return process(text,font,nullptr,0,false,out,limits_.max_work,nullptr);
 }
 TextSystemStatus TextSystem::prepare(std::string_view text,const TextFontRequest& font,
     PreparedTextGlyph* output,std::size_t capacity,TextRunMetrics& metrics) const noexcept {
-    return process(text,font,output,capacity,true,metrics);
+    return process(text,font,output,capacity,true,metrics,limits_.max_work,nullptr);
 }
 } // namespace jellyframe

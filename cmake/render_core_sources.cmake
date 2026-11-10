@@ -28,6 +28,8 @@ set(JELLYFRAME_RENDER_CORE_CORE_DOCUMENT_SOURCES
     src/input.cpp
     src/text_normalization.cpp
     src/text_scan.cpp
+    src/intrinsic_source_query.cpp
+    src/intrinsic_source_query_height.cpp
     src/text_system.cpp
 )
 
