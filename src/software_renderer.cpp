@@ -725,6 +725,11 @@ void fill_linear_gradient_clipped(FrameBuffer& target,
     modern_paint_fill_linear_gradient(target, rect, clip, first, second, axis, border_radius);
 }
 
+void fill_linear_gradient_area_clipped(FrameBuffer& target, Rect rect, Rect paint_area, Rect clip,
+                                       Color first, Color second, GradientAxis axis, int border_radius) {
+    modern_paint_fill_linear_gradient_area(target, rect, paint_area, clip, first, second, axis, border_radius);
+}
+
 void fill_conic_gradient_region(FrameBuffer& target,
                                 Rect rect,
                                 Rect clipped,
@@ -764,6 +769,12 @@ void fill_conic_gradient_clipped(FrameBuffer& target,
                                second,
                                stop_percent,
                                border_radius);
+}
+
+void fill_conic_gradient_area_clipped(FrameBuffer& target, Rect rect, Rect paint_area, Rect clip,
+                                      Color first, Color second, int stop_percent, int border_radius) {
+    modern_paint_fill_conic_gradient_area(target, rect, clipped_target_rect(target, rect, clip), paint_area,
+                                          first, second, stop_percent, border_radius);
 }
 
 void fill_radial_gradient_region(FrameBuffer& target,
@@ -817,6 +828,13 @@ void fill_radial_gradient_clipped(FrameBuffer& target,
                                 axis,
                                 packed_position,
                                 border_radius);
+}
+
+void fill_radial_gradient_area_clipped(FrameBuffer& target, Rect rect, Rect paint_area, Rect clip,
+                                       Color center_color, Color edge_color, GradientAxis axis,
+                                       int packed_position, int border_radius) {
+    modern_paint_fill_radial_gradient_area(target, rect, clipped_target_rect(target, rect, clip), paint_area,
+                                           center_color, edge_color, axis, packed_position, border_radius);
 }
 
 void fill_soft_box_shadow(FrameBuffer& target, Rect rect, Rect clip, Color color, int outer_radius,
@@ -1519,9 +1537,23 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
     const Color& effective_color = opacity_color_override.command == &command
         ? opacity_color_override.color
         : command.color;
+#if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
     const Color& effective_color2 = opacity_color_override.command == &command
         ? opacity_color_override.color2
         : command.color2;
+#endif
+    const bool is_gradient_command = command.type() == DisplayCommandType::LinearGradient ||
+        command.type() == DisplayCommandType::ConicGradient ||
+        command.type() == DisplayCommandType::RadialGradient;
+    const BackgroundPaintClip basic_clip = is_gradient_command
+        ? command.basic_paint().background_paint_clip : BackgroundPaintClip{};
+    const bool has_basic_clip = basic_clip.dx != 0 || basic_clip.dy != 0 ||
+        basic_clip.width != 0 || basic_clip.height != 0;
+    if (has_basic_clip && (basic_clip.width == 0 || basic_clip.height == 0)) return;
+    const Rect basic_paint_area = has_basic_clip
+        ? Rect{safe_add(rect.x, basic_clip.dx), safe_add(rect.y, basic_clip.dy),
+               basic_clip.width, basic_clip.height}
+        : rect;
 
     switch (command.type()) {
     case DisplayCommandType::FillRect:
@@ -1533,6 +1565,12 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         break;
     case DisplayCommandType::LinearGradient:
 #if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
+        if (has_basic_clip) {
+            fill_linear_gradient_area_clipped(target, rect, basic_paint_area, clip, effective_color,
+                                              effective_color2, command.basic_paint().gradient_axis,
+                                              command.basic_paint().border_radius);
+            break;
+        }
         if (contains_rect(clip, rect)) {
             fill_linear_gradient(target,
                                  rect,
@@ -1551,11 +1589,18 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         }
         break;
 #else
-        fill_rect_clipped(target, rect, clip, effective_color, command.basic_paint().border_radius);
+        fill_rect_clipped(target, basic_paint_area, intersect_rect(clip, rect),
+                          effective_color, command.basic_paint().border_radius);
         break;
 #endif
     case DisplayCommandType::ConicGradient:
 #if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
+        if (has_basic_clip) {
+            fill_conic_gradient_area_clipped(target, rect, basic_paint_area, clip, effective_color,
+                                             effective_color2, command.basic_paint().gradient_stop_percent,
+                                             command.basic_paint().border_radius);
+            break;
+        }
         if (contains_rect(clip, rect)) {
             fill_conic_gradient(target,
                                 rect,
@@ -1574,11 +1619,19 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         }
         break;
 #else
-        fill_rect_clipped(target, rect, clip, effective_color, command.basic_paint().border_radius);
+        fill_rect_clipped(target, basic_paint_area, intersect_rect(clip, rect),
+                          effective_color, command.basic_paint().border_radius);
         break;
 #endif
     case DisplayCommandType::RadialGradient:
 #if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
+        if (has_basic_clip) {
+            fill_radial_gradient_area_clipped(target, rect, basic_paint_area, clip, effective_color,
+                                              effective_color2, command.basic_paint().gradient_axis,
+                                              command.basic_paint().gradient_stop_percent,
+                                              command.basic_paint().border_radius);
+            break;
+        }
         if (contains_rect(clip, rect)) {
             fill_radial_gradient(target,
                                  rect,
@@ -1599,7 +1652,8 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         }
         break;
 #else
-        fill_rect_clipped(target, rect, clip, effective_color, command.basic_paint().border_radius);
+        fill_rect_clipped(target, basic_paint_area, intersect_rect(clip, rect),
+                          effective_color, command.basic_paint().border_radius);
         break;
 #endif
     case DisplayCommandType::BoxShadow:
@@ -1689,6 +1743,36 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         break;
     }
     case DisplayCommandType::Image: {
+        Rect image_clip = clip;
+        const bool has_background_clip = command.image_paint().background_paint_clip.dx != 0 ||
+            command.image_paint().background_paint_clip.dy != 0 ||
+            command.image_paint().background_paint_clip.width != 0 ||
+            command.image_paint().background_paint_clip.height != 0;
+        Rect background_painting_rect;
+        if (has_background_clip) {
+            if (command.image_paint().background_paint_clip.width == 0 || command.image_paint().background_paint_clip.height == 0) {
+                report_diagnostic(diagnostics_, DiagnosticStage::Paint, DiagnosticSeverity::Warning,
+                                  "paint-image-clip-invalid",
+                                  "Background image has invalid painting clip metadata; image was skipped");
+                break;
+            }
+            background_painting_rect = {
+                safe_add(rect.x, command.image_paint().background_paint_clip.dx),
+                safe_add(rect.y, command.image_paint().background_paint_clip.dy),
+                command.image_paint().background_paint_clip.width,
+                command.image_paint().background_paint_clip.height};
+            image_clip = intersect_rect(image_clip, background_painting_rect);
+        }
+        ImagePaintRequest request;
+        request.image_handle = command.image_paint().image_handle;
+        request.destination = rect;
+        request.object_fit = command.image_paint().object_fit;
+        request.object_position = command.image_paint().object_position;
+        request.image_rendering = command.image_paint().image_rendering;
+        request.background_painting_rect = background_painting_rect;
+        request.background_painting_radius = has_background_clip
+            ? command.image_paint().border_radius
+            : 0;
         if (image_painter_.paint == nullptr ||
             rect.width <= 0 ||
             rect.height <= 0) {
@@ -1696,99 +1780,114 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                               DiagnosticStage::Paint,
                               DiagnosticSeverity::Warning,
                               "paint-image-fallback",
-                              "Image command could not be painted; placeholder was used",
+                              "Image command could not be painted; content placeholder or background omission was applied",
                               std::to_string(command.image_paint().image_handle));
-            fill_rect_clipped(target, rect, clip, Color{226, 232, 240, 255});
+            if (!has_background_clip) {
+                fill_rect_clipped(target, rect, image_clip, Color{226, 232, 240, 255});
+            }
             break;
         }
-        if (has_corner_radius(command.image_paint().border_radius)) {
-            const Rect visible = intersect_rect(rect, clip);
+        const int image_clip_radius = command.image_paint().border_radius;
+        if (has_corner_radius(image_clip_radius)) {
+            const Rect visible = intersect_rect(rect, image_clip);
             if (empty_rect(visible)) {
                 break;
             }
             FrameBuffer local_buffer;
             FrameBuffer& image_buffer = scratch != nullptr ? scratch->temporary_surface : local_buffer;
             if (!prepare_temporary_surface(image_buffer, visible.width, visible.height)) {
-                fill_rect_clipped(target, rect, clip, Color{226, 232, 240, 255});
+                if (!has_background_clip) {
+                    fill_rect_clipped(target, rect, image_clip, Color{226, 232, 240, 255});
+                }
                 break;
             }
-            if (!image_painter_.paint(image_buffer,
-                                      Rect{rect.x - visible.x, rect.y - visible.y, rect.width, rect.height},
-                                      command.image_paint().image_handle,
-                                      command.image_paint().object_fit,
-                                      command.image_paint().object_position,
-                                      command.image_paint().image_rendering,
-                                      image_painter_.context)) {
+            request.destination = Rect{rect.x - visible.x, rect.y - visible.y, rect.width, rect.height};
+            if (has_background_clip) {
+                request.background_painting_rect.x = safe_add(
+                    request.background_painting_rect.x, safe_negate(visible.x));
+                request.background_painting_rect.y = safe_add(
+                    request.background_painting_rect.y, safe_negate(visible.y));
+            }
+            if (!image_painter_.paint(image_buffer, request, image_painter_.context)) {
                 report_diagnostic(diagnostics_,
                                   DiagnosticStage::Paint,
                                   DiagnosticSeverity::Warning,
                                   "paint-image-fallback",
-                                  "Image command could not be painted; placeholder was used",
+                                  "Image command could not be painted; content placeholder or background omission was applied",
                                   std::to_string(command.image_paint().image_handle));
-                fill_rect(image_buffer,
+                if (has_background_clip) {
+                    break;
+                }
+                fill_rect_clipped(image_buffer,
                           Rect{rect.x - visible.x, rect.y - visible.y, rect.width, rect.height},
+                          Rect{0, 0, visible.width, visible.height},
                           Color{226, 232, 240, 255});
             }
-            const RasterRoundedRect rounded = prepare_rounded_rect(rect, command.image_paint().border_radius);
+            const Rect rounded_rect = has_background_clip ? background_painting_rect : rect;
+            const RasterRoundedRect rounded = prepare_rounded_rect(rounded_rect, image_clip_radius);
             const int y_end = safe_edge(visible.y, visible.height);
             const int x_end = safe_edge(visible.x, visible.width);
             for (int y = visible.y; y < y_end; ++y) {
                 for (int x = visible.x; x < x_end; ++x) {
-                    blend_pixel_unchecked(target,
-                                          x,
-                                          y,
-                                          with_coverage(image_buffer.pixel(x - visible.x, y - visible.y),
-                                                        rounded_rect_coverage(rounded, x, y)));
+                    const int coverage = rounded_rect_coverage(rounded, x, y);
+                    blend_pixel_unchecked(target, x, y,
+                                          with_coverage(image_buffer.pixel(x - visible.x, y - visible.y), coverage));
                 }
             }
             break;
         }
-        if (contains_rect(clip, rect)) {
-            if (!image_painter_.paint(target,
-                                      rect,
-                                      command.image_paint().image_handle,
-                                      command.image_paint().object_fit,
-                                      command.image_paint().object_position,
-                                      command.image_paint().image_rendering,
-                                      image_painter_.context)) {
+        if (empty_rect(image_clip)) {
+            break;
+        }
+        if (contains_rect(image_clip, rect) && !has_background_clip) {
+            if (!image_painter_.paint(target, request, image_painter_.context)) {
                 report_diagnostic(diagnostics_,
                                   DiagnosticStage::Paint,
                                   DiagnosticSeverity::Warning,
                                   "paint-image-fallback",
-                                  "Image command could not be painted; placeholder was used",
+                                  "Image command could not be painted; content placeholder or background omission was applied",
                                   std::to_string(command.image_paint().image_handle));
-                fill_rect(target, rect, Color{226, 232, 240, 255});
+                if (!has_background_clip) {
+                    fill_rect_clipped(target, rect, image_clip, Color{226, 232, 240, 255});
+                }
             }
             break;
         }
-        const Rect visible = intersect_rect(rect, clip);
+        const Rect visible = intersect_rect(rect, image_clip);
         if (empty_rect(visible)) {
             break;
         }
         FrameBuffer local_buffer;
         FrameBuffer& image_buffer = scratch != nullptr ? scratch->temporary_surface : local_buffer;
         if (!prepare_temporary_surface(image_buffer, visible.width, visible.height)) {
-            fill_rect_clipped(target, rect, clip, Color{226, 232, 240, 255});
+            if (!has_background_clip) {
+                fill_rect_clipped(target, rect, image_clip, Color{226, 232, 240, 255});
+            }
             break;
         }
-        if (!image_painter_.paint(image_buffer,
-                                  Rect{rect.x - visible.x, rect.y - visible.y, rect.width, rect.height},
-                                  command.image_paint().image_handle,
-                                  command.image_paint().object_fit,
-                                  command.image_paint().object_position,
-                                  command.image_paint().image_rendering,
-                                  image_painter_.context)) {
+        request.destination = Rect{rect.x - visible.x, rect.y - visible.y, rect.width, rect.height};
+        if (has_background_clip) {
+            request.background_painting_rect.x = safe_add(
+                request.background_painting_rect.x, safe_negate(visible.x));
+            request.background_painting_rect.y = safe_add(
+                request.background_painting_rect.y, safe_negate(visible.y));
+        }
+        if (!image_painter_.paint(image_buffer, request, image_painter_.context)) {
             report_diagnostic(diagnostics_,
                               DiagnosticStage::Paint,
                               DiagnosticSeverity::Warning,
                               "paint-image-fallback",
-                              "Image command could not be painted; placeholder was used",
+                              "Image command could not be painted; content placeholder or background omission was applied",
                               std::to_string(command.image_paint().image_handle));
-            fill_rect(image_buffer,
+            if (has_background_clip) {
+                break;
+            }
+            fill_rect_clipped(image_buffer,
                       Rect{rect.x - visible.x, rect.y - visible.y, rect.width, rect.height},
+                      Rect{0, 0, visible.width, visible.height},
                       Color{226, 232, 240, 255});
         }
-        composite_buffer_clipped(target, image_buffer, visible.x, visible.y, clip, 1.0F);
+        composite_buffer_clipped(target, image_buffer, visible.x, visible.y, image_clip, 1.0F);
         break;
     }
     }

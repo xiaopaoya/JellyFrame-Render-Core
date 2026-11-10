@@ -74,6 +74,30 @@ Prepared text stores its explicit origin and baseline in the text payload.
 The public installed-consumer regression covers the source API replacement.
 Hosts qualify and pin the new source manifest before adopting this candidate.
 
+The same ABI4 candidate replaces image resolver output with
+`ResolvedImageResource` (handle plus Unknown/Known/Invalid natural-size metadata)
+and image paint arguments with `ImagePaintRequest`. Known background dimensions
+must be positive and at most 8191 per axis; invalid background metadata omits
+that image. Content images retain their existing handle-based paint behavior.
+The resolver output begins cleared and failed resolution or a zero handle never
+publishes an image command. Existing URL sizing and object-fit behavior remain.
+
+Image and gradient payloads carry an optional independent `background_paint_clip`.
+All-zero metadata means absent; otherwise both extents must be positive. The
+relative clip and radius bound painting while the command rectangle retains the
+complete sampling tile. `flatten_with_clip_metadata()` preserves that geometry;
+consumers apply indexed external clips separately. Paint requests use coordinates
+of the actual target, including temporary surfaces. Core enforces the painting
+clip even for a painter that writes beyond it.
+
+Image callbacks, their contexts, and provider resource bytes are borrowed. The
+host keeps them alive through the final paint of every display list that uses
+the handles. A callback return value does not transfer provider ownership to
+Core. The installed `image_callback_consumer` regression exercises this public
+contract with full and cropped feature profiles.
+
+
+
 
 The source manifest is an integrity/provenance identity for the source files;
 it is not a signature or release authority. Consumers should lock both package

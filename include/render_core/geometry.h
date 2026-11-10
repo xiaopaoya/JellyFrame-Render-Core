@@ -220,6 +220,16 @@ enum class ImageRendering : std::uint8_t {
     CrispEdges,
 };
 
+// Background natural dimensions are bounded to 1..8191 per axis when Known.
+// Unknown permits legacy handle-only resolution; Invalid omits background paint.
+enum class ImageIntrinsicSizeState : std::uint8_t { Unknown, Known, Invalid };
+
+struct ImageIntrinsicSize {
+    ImageIntrinsicSizeState state = ImageIntrinsicSizeState::Unknown;
+    std::uint16_t width = 0;
+    std::uint16_t height = 0;
+};
+
 // Relative painting bounds preserve the full image/gradient sampling tile.
 struct BackgroundPaintClip {
     std::int16_t dx = 0;
@@ -259,6 +269,8 @@ struct BasicPaint {
     int stroke_width = 1;
     GradientAxis gradient_axis = GradientAxis::Vertical;
     int gradient_stop_percent = 100;
+    // Gradient-only: all zero means absent; otherwise both extents are positive.
+    BackgroundPaintClip background_paint_clip;
 };
 
 struct TextPaint {
@@ -275,6 +287,8 @@ struct TextPaint {
 
 struct ImagePaint {
     std::uint32_t image_handle = 0;
+    // All zero means absent; otherwise both extents must be positive.
+    BackgroundPaintClip background_paint_clip;
     ObjectFit object_fit = ObjectFit::Fill;
     ObjectPosition object_position;
     ImageRendering image_rendering = ImageRendering::Auto;
@@ -406,14 +420,17 @@ inline bool display_commands_equal(const DisplayCommand& a, const DisplayCommand
     }
     case DisplayCommandType::Image: {
         const auto fields = [](const ImagePaint& p) {
-            return std::tie(p.image_handle, p.object_fit,
+            return std::tie(p.image_handle, p.background_paint_clip.dx, p.background_paint_clip.dy,
+                            p.background_paint_clip.width, p.background_paint_clip.height, p.object_fit,
                             p.object_position.x_percent, p.object_position.y_percent, p.image_rendering, p.border_radius);
         };
         return fields(a.image_paint()) == fields(b.image_paint());
     }
     default: {
         const auto fields = [](const BasicPaint& p) {
-            return std::tie(p.border_radius, p.stroke_width, p.gradient_axis, p.gradient_stop_percent);
+            return std::tie(p.border_radius, p.stroke_width, p.gradient_axis, p.gradient_stop_percent,
+                            p.background_paint_clip.dx, p.background_paint_clip.dy,
+                            p.background_paint_clip.width, p.background_paint_clip.height);
         };
         return fields(a.basic_paint()) == fields(b.basic_paint());
     }

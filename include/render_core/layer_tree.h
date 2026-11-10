@@ -49,12 +49,19 @@ enum class ImageResolveKind : std::uint8_t {
     Background,
 };
 
+struct ResolvedImageResource {
+    std::uint32_t image_handle = 0;
+    ImageIntrinsicSize intrinsic_size;
+};
+
 using ImageHandleResolveCallback = bool (*)(const Node& node,
                                             ImageResolveKind kind,
                                             std::uint16_t background_resource_id,
-                                            std::uint32_t& handle,
+                                            ResolvedImageResource& result,
                                             void* context);
 
+// Callback context and resource bytes are borrowed. The host keeps them alive
+// through the last paint of every built display list; Core stores only handles.
 struct ImageHandleResolver {
     ImageHandleResolveCallback resolve = nullptr;
     void* context = nullptr;
@@ -142,8 +149,11 @@ public:
 
     LayerNodePtr build(const LayoutBox& root) const;
     LayerNodePtr build(const LayoutBox& root, MonotonicArena& arena) const;
+    // Legacy flatten approximates overflow by cropping command rectangles.
     DisplayList flatten(const LayerNode& root) const;
     void flatten_into(const LayerNode& root, DisplayList& output) const;
+    // Keeps complete sampling geometry. Consumers apply indexed external clips
+    // and their parent chains separately in destination space.
     FlattenedLayerTree flatten_with_clip_metadata(const LayerNode& root) const;
 
 private:
