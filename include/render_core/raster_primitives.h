@@ -168,15 +168,18 @@ inline RoundedRectCoverage rounded_rect_coverage_detail(const RasterRoundedRect&
     }
 
     constexpr int kSubpixel = 4;
-    const std::int64_t center_x = cx * kSubpixel;
-    const std::int64_t center_y = cy * kSubpixel;
+    // Odd eighths are the centers of the sixteen equal subpixel cells.
+    // Sampling cell edges biases the mask by -1/8 pixel on both axes.
+    constexpr int kCoordinateScale = 2 * kSubpixel;
+    const std::int64_t center_x = cx * kCoordinateScale;
+    const std::int64_t center_y = cy * kCoordinateScale;
     const auto saturated_multiply = [](std::uint64_t left, std::uint64_t right) {
         if (left != 0 && right > std::numeric_limits<std::uint64_t>::max() / left) {
             return std::numeric_limits<std::uint64_t>::max();
         }
         return left * right;
     };
-    const std::uint64_t radius_scaled = saturated_multiply(static_cast<std::uint64_t>(radius), kSubpixel);
+    const std::uint64_t radius_scaled = saturated_multiply(static_cast<std::uint64_t>(radius), kCoordinateScale);
     const std::uint64_t radius_squared = saturated_multiply(radius_scaled, radius_scaled);
     const auto saturated_square = [saturated_multiply](std::int64_t value) {
         const std::uint64_t magnitude = value < 0
@@ -190,18 +193,30 @@ inline RoundedRectCoverage rounded_rect_coverage_detail(const RasterRoundedRect&
         }
         return left + right;
     };
-    int covered = 0;
-    for (int sy = 0; sy < kSubpixel; ++sy) {
-        const std::int64_t sample_y = static_cast<std::int64_t>(y) * kSubpixel + sy;
-        const std::int64_t dy = sample_y - center_y;
-        for (int sx = 0; sx < kSubpixel; ++sx) {
-            const std::int64_t sample_x = static_cast<std::int64_t>(x) * kSubpixel + sx;
-            const std::int64_t dx = sample_x - center_x;
-            if (saturated_add(saturated_square(dx), saturated_square(dy)) <= radius_squared) {
-                ++covered;
+    const auto count_samples = [&](auto inside) {
+        int covered = 0;
+        for (int sy = 0; sy < kSubpixel; ++sy) {
+            const std::int64_t sample_y = static_cast<std::int64_t>(y) * kCoordinateScale + 2 * sy + 1;
+            const std::int64_t dy = sample_y - center_y;
+            for (int sx = 0; sx < kSubpixel; ++sx) {
+                const std::int64_t sample_x = static_cast<std::int64_t>(x) * kCoordinateScale + 2 * sx + 1;
+                const std::int64_t dx = sample_x - center_x;
+                if (inside(dx, dy)) {
+                    ++covered;
+                }
             }
         }
-    }
+        return covered;
+    };
+    // Select once per pixel; ordinary radii retain the bounded integer path.
+    const int covered = radius_scaled <= std::numeric_limits<std::uint32_t>::max()
+        ? count_samples([&](std::int64_t dx, std::int64_t dy) {
+            return saturated_add(saturated_square(dx), saturated_square(dy)) <= radius_squared;
+        })
+        : count_samples([&](std::int64_t dx, std::int64_t dy) {
+            return static_cast<long double>(dx) * dx + static_cast<long double>(dy) * dy <=
+                static_cast<long double>(radius_scaled) * radius_scaled;
+        });
     return {(covered * 255 + 8) / 16, true};
 }
 

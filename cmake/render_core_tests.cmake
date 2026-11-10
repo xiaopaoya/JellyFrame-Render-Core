@@ -131,3 +131,11 @@ if(COMMAND jellyframe_stage_sanitizer_runtime)
     jellyframe_stage_sanitizer_runtime(jellyframe_text_system_tests)
 endif()
 add_test(NAME jellyframe_text_system_tests COMMAND jellyframe_text_system_tests)
+
+add_executable(jellyframe_rounded_coverage_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/rounded_coverage_tests.cpp")
+target_link_libraries(jellyframe_rounded_coverage_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_rounded_coverage_tests COMMAND jellyframe_rounded_coverage_tests)
+if(COMMAND jellyframe_stage_sanitizer_runtime)
+    jellyframe_stage_sanitizer_runtime(jellyframe_rounded_coverage_tests)
+endif()
