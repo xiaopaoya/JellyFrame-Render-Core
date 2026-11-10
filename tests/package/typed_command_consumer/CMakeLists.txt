@@ -1,0 +1,35 @@
+cmake_minimum_required(VERSION 3.20)
+project(TypedCommandConsumer LANGUAGES CXX)
+
+find_package(JellyFrameRenderCore CONFIG REQUIRED)
+if(NOT DEFINED EXPECTED_CORE_SOURCE_HASH OR EXPECTED_CORE_SOURCE_HASH STREQUAL "")
+    message(FATAL_ERROR "EXPECTED_CORE_SOURCE_HASH must identify the intended installed source")
+endif()
+if(NOT DEFINED EXPECTED_PROFILE_ID OR EXPECTED_PROFILE_ID STREQUAL "")
+    message(FATAL_ERROR "EXPECTED_PROFILE_ID must identify the intended installed profile")
+endif()
+if(NOT JellyFrameRenderCore_ENGINE_ABI STREQUAL "4")
+    message(FATAL_ERROR "Typed command consumer requires engine ABI 4")
+endif()
+if(NOT JellyFrameRenderCore_SOURCE_HASH STREQUAL EXPECTED_CORE_SOURCE_HASH)
+    message(FATAL_ERROR "Installed Core source hash differs from EXPECTED_CORE_SOURCE_HASH")
+endif()
+file(READ "${JellyFrameRenderCore_PROFILE_FILE}" installed_profile)
+string(JSON installed_profile_id GET "${installed_profile}" profileId)
+if(NOT installed_profile_id STREQUAL EXPECTED_PROFILE_ID)
+    message(FATAL_ERROR "Installed Core profile differs from EXPECTED_PROFILE_ID")
+endif()
+
+add_executable(typed_command_consumer ../../unit/typed_display_command_tests.cpp)
+target_link_libraries(typed_command_consumer PRIVATE JellyFrame::jellyframe_render_core)
+target_compile_features(typed_command_consumer PRIVATE cxx_std_17)
+
+# This executable deliberately compiles with installed public include paths alone.
+add_executable(typed_command_header_consumer header_only.cpp)
+target_include_directories(typed_command_header_consumer PRIVATE
+    $<TARGET_PROPERTY:JellyFrame::jellyframe_render_core,INTERFACE_INCLUDE_DIRECTORIES>)
+target_compile_features(typed_command_header_consumer PRIVATE cxx_std_17)
+
+enable_testing()
+add_test(NAME installed_typed_command_contract COMMAND typed_command_consumer)
+add_test(NAME installed_typed_command_header_contract COMMAND typed_command_header_consumer)

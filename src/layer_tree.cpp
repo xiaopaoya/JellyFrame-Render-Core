@@ -149,11 +149,11 @@ void push_fill_rect(DisplayList& display_list, Rect rect, Color color, int borde
         return;
     }
     DisplayCommand command;
-    command.type = DisplayCommandType::FillRect;
+    command.set_type(DisplayCommandType::FillRect);
     command.rect = rect;
     command.color = color;
     command.color2 = color;
-    command.border_radius = border_radius;
+    command.basic_paint().border_radius = border_radius;
     display_list.push_back(std::move(command));
 }
 
@@ -168,12 +168,12 @@ void push_linear_gradient(DisplayList& display_list,
         return;
     }
     DisplayCommand command;
-    command.type = DisplayCommandType::LinearGradient;
+    command.set_type(DisplayCommandType::LinearGradient);
     command.rect = rect;
     command.color = first;
     command.color2 = second;
-    command.gradient_axis = axis;
-    command.border_radius = border_radius;
+    command.basic_paint().gradient_axis = axis;
+    command.basic_paint().border_radius = border_radius;
     display_list.push_back(std::move(command));
 }
 
@@ -187,12 +187,12 @@ void push_conic_gradient(DisplayList& display_list,
         return;
     }
     DisplayCommand command;
-    command.type = DisplayCommandType::ConicGradient;
+    command.set_type(DisplayCommandType::ConicGradient);
     command.rect = rect;
     command.color = first;
     command.color2 = second;
-    command.gradient_stop_percent = std::max(0, std::min(100, stop_percent));
-    command.border_radius = border_radius;
+    command.basic_paint().gradient_stop_percent = std::max(0, std::min(100, stop_percent));
+    command.basic_paint().border_radius = border_radius;
     display_list.push_back(std::move(command));
 }
 
@@ -211,7 +211,7 @@ void push_box_shadow(DisplayList& display_list,
                                                          static_cast<std::int64_t>(std::numeric_limits<int>::min()),
                                                          static_cast<std::int64_t>(std::numeric_limits<int>::max())));
     DisplayCommand command;
-    command.type = DisplayCommandType::BoxShadow;
+    command.set_type(DisplayCommandType::BoxShadow);
     command.rect = Rect{
         safe_edge(rect.x, -extent),
         safe_edge(rect.y, -extent),
@@ -220,9 +220,9 @@ void push_box_shadow(DisplayList& display_list,
     };
     command.color = color;
     command.color2 = color;
-    command.border_radius = expand_corner_radii(border_radius, extent);
-    command.stroke_width = extent;
-    command.gradient_stop_percent = blur;
+    command.basic_paint().border_radius = expand_corner_radii(border_radius, extent);
+    command.basic_paint().stroke_width = extent;
+    command.basic_paint().gradient_stop_percent = blur;
     display_list.push_back(std::move(command));
 }
 
@@ -237,13 +237,13 @@ void push_radial_gradient(DisplayList& display_list,
         return;
     }
     DisplayCommand command;
-    command.type = DisplayCommandType::RadialGradient;
+    command.set_type(DisplayCommandType::RadialGradient);
     command.rect = rect;
     command.color = center;
     command.color2 = edge;
-    command.gradient_axis = axis;
-    command.gradient_stop_percent = packed_position;
-    command.border_radius = border_radius;
+    command.basic_paint().gradient_axis = axis;
+    command.basic_paint().gradient_stop_percent = packed_position;
+    command.basic_paint().border_radius = border_radius;
     display_list.push_back(std::move(command));
 }
 #endif
@@ -300,12 +300,12 @@ void push_stroke_rect(DisplayList& display_list, Rect rect, Color color, int str
         return;
     }
     DisplayCommand command;
-    command.type = DisplayCommandType::StrokeRect;
+    command.set_type(DisplayCommandType::StrokeRect);
     command.rect = rect;
     command.color = color;
     command.color2 = color;
-    command.stroke_width = stroke_width;
-    command.border_radius = border_radius;
+    command.basic_paint().stroke_width = stroke_width;
+    command.basic_paint().border_radius = border_radius;
     display_list.push_back(std::move(command));
 }
 
@@ -336,16 +336,16 @@ void push_text(DisplayList& display_list,
         return;
     }
     DisplayCommand command;
-    command.type = DisplayCommandType::Text;
+    command.set_type(DisplayCommandType::Text);
     command.rect = rect;
     command.color = color;
     command.color2 = color;
     command.text = text;
-    command.font_size = font_size;
-    command.font_weight = font_weight;
-    command.font_family_hash = font_family_hash;
-    command.text_align = align;
-    command.text_single_line = single_line;
+    command.text_paint().font_size = font_size;
+    command.text_paint().font_weight = font_weight;
+    command.text_paint().font_family_hash = font_family_hash;
+    command.text_paint().text_align = align;
+    command.text_paint().text_single_line = single_line;
     display_list.push_back(std::move(command));
 }
 
@@ -452,7 +452,7 @@ void push_prepared_text(DisplayList& display_list, Rect rect, Color color,
     const auto push = [&](const std::string& packet, int origin_x, int baseline_y) {
         if (packet.empty()) return;
         DisplayCommand command;
-        command.type = DisplayCommandType::PreparedText;
+        command.set_type(DisplayCommandType::PreparedText);
         command.rect = rect;
         command.color = color;
         command.color2 = color;
@@ -585,13 +585,13 @@ void push_image(DisplayList& display_list,
         return;
     }
     DisplayCommand command;
-    command.type = DisplayCommandType::Image;
+    command.set_type(DisplayCommandType::Image);
     command.rect = rect;
-    command.image_handle = image_handle;
-    command.object_fit = object_fit;
-    command.object_position = object_position;
-    command.image_rendering = image_rendering;
-    command.border_radius = border_radius;
+    command.image_paint().image_handle = image_handle;
+    command.image_paint().object_fit = object_fit;
+    command.image_paint().object_position = object_position;
+    command.image_paint().image_rendering = image_rendering;
+    command.image_paint().border_radius = border_radius;
     command.color = Color{255, 255, 255, 255};
     command.color2 = command.color;
     display_list.push_back(std::move(command));
@@ -1131,8 +1131,7 @@ void translate_display_commands(DisplayList& display_list, std::size_t begin, in
         return;
     }
     for (std::size_t index = begin; index < display_list.size(); ++index) {
-        display_list[index].rect.x = safe_add(display_list[index].rect.x, dx);
-        display_list[index].rect.y = safe_add(display_list[index].rect.y, dy);
+        translate_display_command(display_list[index], dx, dy);
     }
 }
 
@@ -1448,8 +1447,7 @@ void append_flattened_command(DisplayList& output,
         return;
     }
     DisplayCommand flattened = command;
-    flattened.rect.x = safe_add(flattened.rect.x, translate_x);
-    flattened.rect.y = safe_add(flattened.rect.y, translate_y);
+    translate_display_command(flattened, translate_x, translate_y);
     const bool has_affine_transform = !identity_transform(transform);
     // A frame clip is applied in destination space by the value-frame
     // Frame clips are consumed in destination space. A v4 source-clip index
@@ -1475,9 +1473,9 @@ void append_flattened_command(DisplayList& output,
             ? 0xffffU : static_cast<std::uint16_t>(transform_source_clip_index);
     }
     if (flattened.color.a == 0 &&
-        ((flattened.type != DisplayCommandType::LinearGradient &&
-          flattened.type != DisplayCommandType::ConicGradient &&
-          flattened.type != DisplayCommandType::RadialGradient) || flattened.color2.a == 0)) {
+        ((flattened.type() != DisplayCommandType::LinearGradient &&
+          flattened.type() != DisplayCommandType::ConicGradient &&
+          flattened.type() != DisplayCommandType::RadialGradient) || flattened.color2.a == 0)) {
         return;
     }
     output.push_back(std::move(flattened));

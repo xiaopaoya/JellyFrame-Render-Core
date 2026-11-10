@@ -1,6 +1,6 @@
 # JellyFrame Render Core
 
-> Last updated: 2026-11-06; Applies to: 0.8.0 development line
+> Last updated: 2026-11-10; Applies to: 0.9.0 development line
 
 JellyFrame Render Core is a platform-neutral, modular HTML/CSS subset,
 document/layout pipeline and CPU software renderer for bounded embedded and
@@ -53,7 +53,7 @@ directories contain platform-neutral Core maintenance material.
 
 ## C++ Integration Surface
 
-For Core ABI `2`, every installed header below `render_core/` is part of the
+For Core ABI `4`, every installed header below `render_core/` is part of the
 supported C++ integration surface. A host includes those installed paths and
 links `JellyFrame::jellyframe_render_core`; it must not include Core files by
 repository-relative `src/` paths or compile Core source files itself. This is
@@ -64,6 +64,16 @@ The package does not currently define a separate stable C ABI or a hidden
 private-header tier. Before `1.0`, deliberate source API replacement is
 allowed only with an explicit version/ABI decision and a package-consumer
 regression update; it is not silently covered by compatibility aliases.
+
+The unpublished 0.9.0 / ABI4 line replaces flat `DisplayCommand` paint fields
+with active typed payloads. Select a command kind with the constructor or
+`set_type()`, inspect it with `type()`, and use `basic_paint()`, `text_paint()`
+or `image_paint()` for that kind. A changed kind resets its payload. Selecting
+the same kind preserves it. A mismatched accessor throws `std::logic_error`.
+Prepared text stores its explicit origin and baseline in the text payload.
+The public installed-consumer regression covers the source API replacement.
+Hosts qualify and pin the new source manifest before adopting this candidate.
+
 
 The source manifest is an integrity/provenance identity for the source files;
 it is not a signature or release authority. Consumers should lock both package

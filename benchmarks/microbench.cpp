@@ -229,10 +229,10 @@ Style animated_style(float opacity, const char* transform, Color background) {
 
 DisplayCommand fill_command(Rect rect, Color color, int radius = 0) {
     DisplayCommand command;
-    command.type = DisplayCommandType::FillRect;
+    command.set_type(DisplayCommandType::FillRect);
     command.rect = rect;
     command.color = color;
-    command.border_radius = radius;
+    command.basic_paint().border_radius = radius;
     return command;
 }
 
@@ -580,7 +580,7 @@ int run_render_core_microbench(int argc, char** argv) {
     }));
 
     DisplayCommand opaque_screen_gradient;
-    opaque_screen_gradient.type = DisplayCommandType::LinearGradient;
+    opaque_screen_gradient.set_type(DisplayCommandType::LinearGradient);
     opaque_screen_gradient.rect = Rect{0, 0, 172, 320};
     opaque_screen_gradient.color = Color{22, 71, 87, 255};
     opaque_screen_gradient.color2 = Color{6, 22, 31, 255};
@@ -589,13 +589,13 @@ int run_render_core_microbench(int argc, char** argv) {
         SoftwareRasterizer rasterizer;
         rasterizer.rasterize(opaque_screen_gradient, target, Rect{0, 0, 172, 320});
     }));
-    opaque_screen_gradient.gradient_axis = GradientAxis::Horizontal;
+    opaque_screen_gradient.basic_paint().gradient_axis = GradientAxis::Horizontal;
     print_result("opaque_horizontal_linear_gradient_raster", iterations, average_microseconds(iterations, [&] {
         FrameBuffer target(172, 320, Color{0, 0, 0, 255});
         SoftwareRasterizer rasterizer;
         rasterizer.rasterize(opaque_screen_gradient, target, Rect{0, 0, 172, 320});
     }));
-    opaque_screen_gradient.gradient_axis = GradientAxis::DiagonalDownRight;
+    opaque_screen_gradient.basic_paint().gradient_axis = GradientAxis::DiagonalDownRight;
     print_result("opaque_diagonal_linear_gradient_raster", iterations, average_microseconds(iterations, [&] {
         FrameBuffer target(172, 320, Color{0, 0, 0, 255});
         SoftwareRasterizer rasterizer;
@@ -633,12 +633,12 @@ int run_render_core_microbench(int argc, char** argv) {
     for (int row = 0; row < 4; ++row) {
         for (int column = 0; column < 4; ++column) {
             DisplayCommand command;
-            command.type = DisplayCommandType::ConicGradient;
+            command.set_type(DisplayCommandType::ConicGradient);
             command.rect = Rect{column * 72 + 8, row * 62 + 8, 52, 52};
             command.color = Color{34, 204, 136, 255};
             command.color2 = Color{16, 32, 48, 96};
-            command.gradient_stop_percent = 40 + ((row * 4 + column) % 6) * 10;
-            command.border_radius = 26;
+            command.basic_paint().gradient_stop_percent = 40 + ((row * 4 + column) % 6) * 10;
+            command.basic_paint().border_radius = 26;
             conic_commands.push_back(command);
         }
     }
@@ -652,11 +652,11 @@ int run_render_core_microbench(int argc, char** argv) {
     for (int row = 0; row < 4; ++row) {
         for (int column = 0; column < 4; ++column) {
             DisplayCommand command;
-            command.type = DisplayCommandType::RadialGradient;
+            command.set_type(DisplayCommandType::RadialGradient);
             command.rect = Rect{column * 72 + 8, row * 62 + 8, 56, 46};
             command.color = Color{236, 254, 255, 220};
             command.color2 = Color{14, 116, 144, 72};
-            command.border_radius = 18;
+            command.basic_paint().border_radius = 18;
             radial_commands.push_back(command);
         }
     }
@@ -671,21 +671,21 @@ int run_render_core_microbench(int argc, char** argv) {
     for (int row = 0; row < 4; ++row) {
         for (int column = 0; column < 4; ++column) {
             DisplayCommand gradient;
-            gradient.type = DisplayCommandType::LinearGradient;
+            gradient.set_type(DisplayCommandType::LinearGradient);
             gradient.rect = Rect{column * 72 + 8, row * 62 + 8, 56, 46};
             gradient.color = Color{44, 52, 66, 255};
             gradient.color2 = Color{16, 18, 24, 255};
-            gradient.gradient_axis = GradientAxis::DiagonalDownRight;
-            gradient.border_radius = 14;
+            gradient.basic_paint().gradient_axis = GradientAxis::DiagonalDownRight;
+            gradient.basic_paint().border_radius = 14;
             diagonal_gradient_commands.push_back(gradient);
 
             DisplayCommand shadow;
-            shadow.type = DisplayCommandType::BoxShadow;
+            shadow.set_type(DisplayCommandType::BoxShadow);
             shadow.rect = Rect{column * 72 + 3, row * 62 + 5, 66, 56};
             shadow.color = Color{0, 0, 0, 72};
-            shadow.border_radius = 19;
-            shadow.stroke_width = 5;
-            shadow.gradient_stop_percent = 5;
+            shadow.basic_paint().border_radius = 19;
+            shadow.basic_paint().stroke_width = 5;
+            shadow.basic_paint().gradient_stop_percent = 5;
             soft_shadow_commands.push_back(shadow);
         }
     }
@@ -699,8 +699,8 @@ int run_render_core_microbench(int argc, char** argv) {
         DisplayCommand highlight = base;
         highlight.color = Color{236, 254, 255, 44};
         highlight.color2 = Color{0, 0, 0, 0};
-        highlight.gradient_axis = GradientAxis::RadialPosition;
-        highlight.gradient_stop_percent = 80 * 101 + 12;
+        highlight.basic_paint().gradient_axis = GradientAxis::RadialPosition;
+        highlight.basic_paint().gradient_stop_percent = 80 * 101 + 12;
         layered_hydrogel_commands.push_back(highlight);
     }
     print_result("layered_hydrogel_raster", iterations, average_microseconds(iterations, [&] {
@@ -714,12 +714,12 @@ int run_render_core_microbench(int argc, char** argv) {
         rasterizer.rasterize(soft_shadow_commands, target, Rect{0, 0, 320, 260});
     }));
     DisplayCommand circular_shadow;
-    circular_shadow.type = DisplayCommandType::BoxShadow;
+    circular_shadow.set_type(DisplayCommandType::BoxShadow);
     circular_shadow.rect = Rect{26, 98, 120, 120};
     circular_shadow.color = Color{200, 255, 90, 56};
-    circular_shadow.border_radius = 60;
-    circular_shadow.stroke_width = 10;
-    circular_shadow.gradient_stop_percent = 9;
+    circular_shadow.basic_paint().border_radius = 60;
+    circular_shadow.basic_paint().stroke_width = 10;
+    circular_shadow.basic_paint().gradient_stop_percent = 9;
     print_result("circular_box_shadow_exact_raster", iterations, average_microseconds(iterations, [&] {
         FrameBuffer target(172, 320, Color{18, 22, 26, 255});
         SoftwareRasterizer rasterizer;
@@ -793,11 +793,11 @@ int run_render_core_microbench(int argc, char** argv) {
     }));
 
     DisplayCommand clipped_text;
-    clipped_text.type = DisplayCommandType::Text;
+    clipped_text.set_type(DisplayCommandType::Text);
     clipped_text.rect = Rect{0, 0, 240, 24};
     clipped_text.color = Color{15, 23, 42, 255};
     clipped_text.text = "Retained dirty text";
-    clipped_text.font_size = 14;
+    clipped_text.text_paint().font_size = 14;
     const Rect text_dirty{120, 0, 24, 24};
     SoftwareRasterizer text_rasterizer;
     print_result("dirty_text_clip_transient_surface", iterations, average_microseconds(iterations, [&] {

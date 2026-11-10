@@ -150,3 +150,11 @@ foreach(geometry IN ITEMS image repeat gradient)
         jellyframe_stage_sanitizer_runtime(${geometry_target})
     endif()
 endforeach()
+
+add_executable(jellyframe_typed_display_command_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/typed_display_command_tests.cpp")
+target_link_libraries(jellyframe_typed_display_command_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_typed_display_command_tests COMMAND jellyframe_typed_display_command_tests)
+if(COMMAND jellyframe_stage_sanitizer_runtime)
+    jellyframe_stage_sanitizer_runtime(jellyframe_typed_display_command_tests)
+endif()
