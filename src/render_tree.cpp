@@ -10,7 +10,7 @@
 namespace jellyframe {
 namespace {
 
-Style inherit_text_style(Style style, const Style& parent_style) {
+void inherit_text_style(Style& style, const Style& parent_style) {
     if (!style.visibility_specified) {
         style.visibility_hidden = parent_style.visibility_hidden;
     }
@@ -63,11 +63,10 @@ Style inherit_text_style(Style style, const Style& parent_style) {
     if (!style.list_style_type_specified) {
         style.list_style_type = parent_style.list_style_type;
     }
-    return style;
 }
 
-Style inherit_element_style(Style style, const Style& parent_style) {
-    style = inherit_text_style(style, parent_style);
+void inherit_element_style(Style& style, const Style& parent_style) {
+    inherit_text_style(style, parent_style);
     if ((style.table_properties & kTableCaptionSideSpecified) == 0)
         style.table_properties = (style.table_properties & ~4U) | (parent_style.table_properties & 4U);
     if ((style.table_properties & kTableBorderCollapseSpecified) == 0)
@@ -81,7 +80,6 @@ Style inherit_element_style(Style style, const Style& parent_style) {
     if (!style.text_overflow_specified) {
         style.text_overflow_ellipsis = false;
     }
-    return style;
 }
 
 bool creates_render_object(const Node& node, const Style& style) {
@@ -212,10 +210,20 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
             continue;
         }
 
+        // These sources are discarded independently of their computed style.
+        // Keep overrides on the established path and preserve budget diagnostics.
+        if (node.type == NodeType::Text &&
+            (options_.style_overrides == nullptr || options_.style_overrides->empty()) &&
+            (node.text.empty() || is_collapsible_whitespace_text(node))) {
+            continue;
+        }
+
         Style style = style_resolver_.resolve(node, style_context);
-        style = node.type == NodeType::Text
-            ? inherit_text_style(style, parent.style)
-            : inherit_element_style(style, parent.style);
+        if (node.type == NodeType::Text) {
+            inherit_text_style(style, parent.style);
+        } else {
+            inherit_element_style(style, parent.style);
+        }
         apply_style_override(style, node, options_.style_overrides);
 
         if (!creates_render_object(node, style)) {

@@ -308,6 +308,86 @@ void render_tree_respects_object_budget() {
     check(count == 4, "render tree is capped by object budget");
 }
 
+void inheritance_preserves_local_style_and_parent_values() {
+    auto document = HtmlParser{}.parse(
+        "<body><main><span>Inherited</span><b>Specified</b></main></body>");
+    StyleResolver resolver(CssParser{}.parse(
+        "main{visibility:hidden;color:#123456;font-size:23px;font-weight:700;"
+        "line-height:31px;letter-spacing:2px;text-transform:uppercase;"
+        "text-decoration:underline;white-space:nowrap;text-overflow:ellipsis;"
+        "caption-side:bottom;border-collapse:collapse;border-spacing:7px 9px;aspect-ratio:3/2}"
+        "span{aspect-ratio:inherit}"
+        "b{visibility:visible;color:#abcdef;font-size:14px;font-weight:400;"
+        "line-height:20px;letter-spacing:0;text-transform:none;white-space:normal}"));
+    auto tree = RenderTreeBuilder(resolver).build(*document);
+    const auto* parent = find_first_by_tag(*tree, "main");
+    const auto* inherited = find_first_by_tag(*tree, "span");
+    const auto* specified = find_first_by_tag(*tree, "b");
+    check(parent && inherited && specified, "inheritance fixture creates every element");
+    check(inherited->style.visibility_hidden && inherited->style.color.r == 0x12 &&
+              inherited->style.font_size == 23 && inherited->style.font_weight == 700 &&
+              inherited->style.line_height == 31 && inherited->style.letter_spacing == 2 &&
+              inherited->style.text_transform == TextTransform::Uppercase &&
+              inherited->style.text_decoration_underline && inherited->style.white_space_nowrap,
+          "local style receives inherited text fields in place");
+    check(!inherited->style.text_overflow_ellipsis &&
+              inherited->style.aspect_ratio_width == 3 && inherited->style.aspect_ratio_height == 2 &&
+              table_caption_side(inherited->style) == TableCaptionSide::Bottom &&
+              table_border_is_collapsed(inherited->style) &&
+              table_border_spacing_x(inherited->style) == 7 && table_border_spacing_y(inherited->style) == 9,
+          "element finalization preserves ellipsis ratio and table inheritance");
+    check(!specified->style.visibility_hidden && specified->style.color.r == 0xab &&
+              specified->style.font_size == 14 && specified->style.font_weight == 400 &&
+              specified->style.line_height == 20 && specified->style.letter_spacing == 0 &&
+              specified->style.text_transform == TextTransform::None && !specified->style.white_space_nowrap,
+          "explicit child defaults survive inheritance");
+    const auto* text = find_first_text(*inherited);
+    check(text && text->style.font_size == 23 && text->style.visibility_hidden &&
+              parent->style.font_size == 23 && parent->style.text_overflow_ellipsis,
+          "text inheritance preserves the owning parent style");
+}
+
+void separator_filter_preserves_context_overrides_and_budget() {
+    auto document = HtmlParser{}.parse(
+        "<body> \n<main dir='rtl' style='display:contents'>\t"
+        "<span> leading </span> <i style='display:inline-block'> trailing </i>\n"
+        "<wbr> <br><pre><span> \t\n</span></pre></main></body>");
+    StyleResolver resolver(CssParser{}.parse(":root{--fg:#123456}main{color:var(--fg)}"));
+    auto tree = RenderTreeBuilder(resolver).build(*document);
+    const auto fast_statistics = resolver.statistics();
+    std::vector<StyleOverride> overrides(1);
+    RenderTreeOptions fallback_options;
+    fallback_options.style_overrides = &overrides;
+    MonotonicArena arena(256);
+    auto fallback = RenderTreeBuilder(resolver, fallback_options).build(*document, arena);
+    const auto fallback_statistics = resolver.statistics();
+    check(count_render_objects(*tree) == count_render_objects(*fallback),
+          "early separators preserve fallback object count with arena and overrides");
+    check(render_text_exists(*tree, " leading ") && render_text_exists(*tree, " trailing ") &&
+              render_text_exists(*tree, " \t\n") && find_first_by_tag(*tree, "wbr") &&
+              find_first_by_tag(*tree, "br"),
+          "leading trailing preserving and break sources survive early filtering");
+    check(find_first_text(*tree)->style.color.r == 0x12 &&
+              find_first_text(*fallback)->style.color.r == 0x12,
+          "custom properties still reach nonseparator text on both paths");
+    const auto fast_calls = fast_statistics.candidate_cache_hits + fast_statistics.candidate_cache_misses;
+    const auto fallback_calls = fallback_statistics.candidate_cache_hits + fallback_statistics.candidate_cache_misses;
+    check(fallback_calls - fast_calls > fast_calls,
+          "separator shortcut avoids selector preparation while overrides retain the fallback");
+
+    auto budget_document = make_element("document");
+    auto separator = std::make_unique<Node>(NodeType::Text);
+    separator->text = " \t\n\r\f\v";
+    budget_document->append_child(std::move(separator));
+    VectorDiagnosticSink diagnostics;
+    RenderTreeOptions budget_options;
+    budget_options.max_render_objects = 1;
+    budget_options.diagnostics = &diagnostics;
+    auto bounded = RenderTreeBuilder(resolver, budget_options).build(*budget_document);
+    check(count_render_objects(*bounded) == 1 && has_diagnostic_code(diagnostics, "render-object-limit"),
+          "separator filtering preserves exhausted object budget diagnostics");
+}
+
 void render_tree_reports_object_budget_diagnostic() {
     HtmlParser html_parser;
     CssParser css_parser;
@@ -350,6 +430,8 @@ int main() {
         hidden_attribute_skips_rendering();
         closed_details_renders_only_first_summary();
         formatting_whitespace_text_is_skipped();
+        inheritance_preserves_local_style_and_parent_values();
+        separator_filter_preserves_context_overrides_and_budget();
         render_tree_respects_object_budget();
         render_tree_reports_object_budget_diagnostic();
         render_tree_can_use_monotonic_arena();
