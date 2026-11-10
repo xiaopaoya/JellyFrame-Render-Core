@@ -1,6 +1,7 @@
 # F5 elliptical radius candidate checkpoint
 
-Candidate base: Core `b5b1533b`, branch `codex/f5-ellipse-slice`.
+Candidate branch `codex/f5-ellipse-slice` includes Core `cf0ff424` and
+feature commit `9b72adb6` (assembled as `8b2c2f9d`).
 This is not a merged feature or target-resource qualification.
 
 ## Representation and boundaries
@@ -39,23 +40,37 @@ unpublished ABI4 candidate. These sizes do not prove MCU peak heap admission.
 ## Verified host checkpoint
 
 Fresh Release Clang/Ninja build:
-`D:/CodexTemp/migration-followup/builds/f5-ellipse-full`.
-CTest passed 19/19 with individual 45-second timeouts (2.55 seconds total).
+`E:/Builds/f5-core-final`.
+CTest passed 20/20 with individual 45-second timeouts (11.56 seconds total),
+including source-manifest build-refresh, invoked modern-paint and display
+invalidation groups. MSVC Release default and cropped route tests also pass.
 Exact installed profile: `render-core-default`, engine ABI4, `0.9.0-dev`.
-Source manifest: `69926c30f785172ef449e2fbdb798477646d362e9c9ef656b7c6e07559e5d49d`,
+Source manifest: `369973a9b051cdff8af56f5bd11a94cd17c75de6940473d2fa6dcee8b171c33c`,
 139 inputs. Installed linked/header-only typed and multilayer consumers pass
-2/2 each. Cropped, sanitizers and final Runtime consumers are still pending
-at this checkpoint; they must be bound to this exact source or refreshed.
+2/2 each in E:/Builds/f5-{typed_command,background_multilayer}-installed.
+Cropped MSVC full CTest passed19/19. Clang22 ASan passed20/20 and UBSan trap
+passed20/20 in E:/Builds/f5-{asan,ubsan}-final; assertions remain enabled.
+ASan uses detect_leaks=0:halt_on_error=1:abort_on_error=1, so this does not
+claim a leak-sanitizer gate. All four Core manifests match this exact identity.
+Fresh installed Runtime v10 consumers and actual JerryScript workers pass2/2
+per full/cropped profile, including packed axes, old-wire refusal, Y-only JS
+mutation, publish/take, damage and retained replay after worker stop. Logs:
+E:/Temp/runtime-f5-installed-consumer-final-{full,cropped}-ctest.log.
 
 ## Browser comparison
 
 Independent reference fixture: `E:/Temp/f5-radius-oracle/oracle.html`, SHA256
 `654e2eb4e453b1d7f15a10bc8204593d1006a472d7f16a3170c0ee5d9d451cff`.
 Edge156 and Firefox153 reference PNG/JSON are retained there. The installed
-consumer at `D:/CodexTemp/migration-followup/f5-browser-consumer` renders the
+consumer at `E:/Experiments/f5-browser-final` renders the
 same CSS/HTML at 640x420 with a white compositing background. It requires an
-explicit matching installed source hash. Capture: `core.ppm`/`core.png`;
+explicit matching installed source hash. Fresh outputs at
+`E:/Temp/f5-browser-final`; capture: `core.ppm`/`core.png`;
 comparison: `core-browser-comparison.json` and `core-vs-{edge,firefox}.png`.
+Capture PNG SHA256:
+`a084cb1f0e805374b60156c04f2c3ae7ff171c5fd12edd5f18762910188e23f2`;
+comparison JSON SHA256:
+`b374cea5060c811590b59ad9e8278c010f841c6bf28bd112dd72a312a5bb2137`.
 
 | Scene | Edge differing pixels / max channel error | Firefox differing pixels / max channel error |
 | --- | ---: | ---: |
@@ -89,8 +104,10 @@ scaling, odd-edge projection and large uniform insets are exercised.
 
 ## Remaining delivery gates
 
-Refresh cropped and ASan/UBSan suites, exact installed profile consumers,
-Runtime v9/v10 signed-axis round trips and legacy ABI compatibility. Qualify
-remaining paint routes and retained damage/hit behavior, evaluate browser
-edge residuals, document supported grammar, and measure target resource/work
-cost before claiming end-to-end or device admission. No F5 commit/PR exists.
+Final sanitizer/Runtime evidence must match the recorded source. Pixel route
+controls now cover solid, all linear axes, conic/radial, direct/external rounded
+clip/retained full+dirty, opaque/translucent, inset background paint areas and
+feature-off first-color fallback. Raw and styled elliptical shadow paint is
+diagnosed/refused. Evaluate browser edge residuals and measure target resource
+work before device admission. Runtime v10 needs a pin to merged Core and its
+own PR/CI. No F5 PR or target acceptance is implied by this local commit.
