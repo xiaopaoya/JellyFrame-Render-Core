@@ -7,7 +7,32 @@
 
 namespace jellyframe {
 
+#define JELLYFRAME_EVENT_DISPATCH_COMPLETION_API 1
+
 struct Node;
+class Event;
+
+using EventDispatchEndCallback = void (*)(Event&, void*) noexcept;
+
+class EventDispatchCompletion {
+public:
+    EventDispatchCompletion() = default;
+    ~EventDispatchCompletion();
+    EventDispatchCompletion(const EventDispatchCompletion&) = delete;
+    EventDispatchCompletion& operator=(const EventDispatchCompletion&) = delete;
+    EventDispatchCompletion(EventDispatchCompletion&&) = delete;
+    EventDispatchCompletion& operator=(EventDispatchCompletion&&) = delete;
+
+private:
+    friend struct EventDispatchCompletionAccess;
+    friend bool attach_event_dispatch_completion(Event&, EventDispatchCompletion&,
+                                                 EventDispatchEndCallback, void*) noexcept;
+    friend void detach_event_dispatch_completion(EventDispatchCompletion&) noexcept;
+    void* owner_ = nullptr;
+    EventDispatchCompletion* next_ = nullptr;
+    EventDispatchEndCallback callback_ = nullptr;
+    void* context_ = nullptr;
+};
 
 enum class EventPhase {
     None = 0,
@@ -53,6 +78,7 @@ public:
 
 private:
     friend class EventTarget;
+    friend struct EventDispatchScopeAccess;
     friend bool dispatch_event(const Node& target, Event& event);
     friend void event_dispatch_node_destroyed(const Node& node);
 
@@ -127,6 +153,14 @@ private:
 };
 
 bool dispatch_event(const Node& target, Event& event);
+// dispatch_event returns false both for preventDefault() and for same-Event
+// recursive dispatch refusal. Enrollment returns false when no matching
+// dispatch is active or the registration is already armed. Completion callbacks
+// run LIFO after Event transient state is finalized and the scope is unlinked.
+// Same-thread use is required.
+bool attach_event_dispatch_completion(Event& event, EventDispatchCompletion& registration,
+                                      EventDispatchEndCallback callback, void* context) noexcept;
+void detach_event_dispatch_completion(EventDispatchCompletion& registration) noexcept;
 void event_dispatch_node_destroyed(const Node& node);
 
 } // namespace jellyframe

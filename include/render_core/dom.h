@@ -75,6 +75,28 @@ private:
     Storage entries_;
 };
 
+struct Node;
+
+class NodeLifetimeObserverRegistration final {
+public:
+    using Observer = void (*)(Node& node, void* context) noexcept;
+
+    NodeLifetimeObserverRegistration() noexcept = default;
+    ~NodeLifetimeObserverRegistration();
+    NodeLifetimeObserverRegistration(const NodeLifetimeObserverRegistration&) = delete;
+    NodeLifetimeObserverRegistration& operator=(const NodeLifetimeObserverRegistration&) = delete;
+    NodeLifetimeObserverRegistration(NodeLifetimeObserverRegistration&&) = delete;
+    NodeLifetimeObserverRegistration& operator=(NodeLifetimeObserverRegistration&&) = delete;
+
+    bool active() const noexcept { return owner_ != nullptr; }
+
+private:
+    friend struct Node;
+    Node* owner_ = nullptr;
+    Observer observer_ = nullptr;
+    void* context_ = nullptr;
+};
+
 struct Node : public EventTarget {
     using DestroyObserver = void (*)(Node& node, void* context);
     using MutationObserver = void (*)(Node& node, DomDirtyFlags flags,
@@ -113,6 +135,16 @@ struct Node : public EventTarget {
     void add_destroy_observer(DestroyObserver observer, void* context);
     void remove_destroy_observer(DestroyObserver observer, void* context);
 
+    // Protected, caller-owned notification for bindings that must invalidate
+    // before Node storage is released. Ordinary destroy-observer replacement
+    // and removal never affect this registration. Registration may allocate;
+    // failure returns false without changing either object. The registration
+    // must outlive this Node or detach earlier.
+    bool add_lifetime_observer(NodeLifetimeObserverRegistration& registration,
+                               NodeLifetimeObserverRegistration::Observer observer,
+                               void* context) noexcept;
+    void remove_lifetime_observer(NodeLifetimeObserverRegistration& registration) noexcept;
+
     // Synchronous values after dirty propagation and root generation increment.
     // Registration replaces this subtree's observer and may allocate. Failure
     // preserves every previous registration. Callbacks may change observers or
@@ -129,6 +161,7 @@ private:
         DestroyObserver observer = nullptr;
         void* context = nullptr;
     };
+    static void dispatch_lifetime_observer(Node& node, void* context) noexcept;
     std::vector<DestroyObserverEntry> destroy_observers_;
     MutationObserver mutation_observer_ = nullptr;
     void* mutation_observer_context_ = nullptr;
