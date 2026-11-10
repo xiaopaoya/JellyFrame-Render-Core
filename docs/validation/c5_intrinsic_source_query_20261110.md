@@ -161,3 +161,83 @@ did not rerun browser operations.
 The queries remain isolated from Flex/Grid consumers. Layout, Style and
 computed-size storage files are unchanged. Candidate changes are uncommitted
 for root review.
+
+## Joined positioned candidate qualification
+
+The sections above retain the standalone qualification. This additional run
+qualifies rebased Core candidate
+`c459a17f5a6c5b57fa775cef49f017037bec7a38` on merged PR21 base
+`25fcd07c73b5b7ac726ce79a01c2e59fc4cb9df7`.
+All joined production manifests contain 145 inputs and source hash
+`b0fdf5be500dd56b3032c4ee53ccdc50631708960b000cb9952014102f415bf0`.
+Frozen combined evidence is
+`E:/Experiments/c5-intrinsic-positioned-joined-20261110`.
+The earlier standalone snapshots remain intact.
+
+The joined storage representation has eleven slots. Mixed LengthPercentage
+publication is restricted to its four inset slots. The original seven dimension
+slots retain their Pixels/Percent contract. The storage regression verifies
+atomic refusal and zero allocations for mixed writes to all seven dimensions.
+The intrinsic tests also verify refusal of the third kind and the real-pipeline
+fractional width/min-width/max-width percentage cases.
+
+| Joined gate | Result |
+| --- | ---: |
+| Full Release, Clang 22.1.8 | 24/24 |
+| Cropped Release, Clang 22.1.8 | 23/23 |
+| AddressSanitizer | 24/24 |
+| UndefinedBehaviorSanitizer trap mode | 24/24 |
+| MSVC 19.41.34120 checked Debug, targeted | 6/6 |
+| Clang 22.1.8 checked Debug, targeted | 6/6 |
+| Installed positioned precision consumer, full / cropped | 1/1 each |
+| Installed public TextSystem consumer, full / cropped | 1/1 each |
+| Installed Runtime canonical v10 and actual worker, full / cropped | 2/2 each |
+
+The Debug targets cover intrinsic width, intrinsic height, inset positioning,
+computed-size storage, layout mutation journal and DOM mutation observer.
+Both use the default checked iterator configuration and debug CRT. No iterator
+debug override was added. An initial normal Clang Debug run reproduced the
+observer test failure `parent storage allocation failure cannot commit an
+attachment`. Its fixed allocation countdown depended on whether the compiler
+elided a returned vector's checked-iterator proxy.
+
+The only test change calibrates successful identical append allocation requests
+with a fresh parent, fresh child and nonallocating observer. Setup, clear and
+destruction occur outside the counting interval. Injection targets its last
+allocation, the parent's child insertion. The four full suites above were
+rerun after this test change. Production sources were unchanged during joined
+qualification. Tests and this report have separate evidence hashes because
+the production source manifest excludes them.
+
+Full install `E:/Builds/c5-intrinsic-joined-install-full` has profile
+`render-core-default`. Cropped install
+`E:/Builds/c5-intrinsic-joined-install-cropped` has profile
+`render-core-minimal-no-forms-advanced`. Both are Core 0.9.0-dev / ABI4 with the
+joined source identity above. The tracked positioned consumer enforces that
+source hash, profile and manifest identity at configuration. Both public
+TextSystem consumers build only against the respective installed package.
+
+The tracked Runtime harness is the historical read-only tree at
+`D:/CodexTemp/migration-followup/Runtime-f5-canonical-v10`, HEAD
+`91d8123441985e9919bf4c30a1fccfb42726c6e4`. Its tree
+`01d99776ed9eb78727906c620f4ec82e6dbfbe40` exactly equals merged Runtime
+`161adce8b5746f3681cb18ded98f7175d4819eb6`. New Runtime consumer builds use
+`E:/Builds/c5-intrinsic-joined-runtime-v10-{full,cropped}` with
+`BUILD_V10_WORKER=ON` and matching expected Core source/profile identities.
+JerryScript is clean commit `b7069350c2e52e7dc721dfb75f067147bd79b39b`, using
+the documented headers and `build/lib/MinSizeRel/jerry-{core,ext,port}.lib`
+under `E:/Workspaces/JellyFrame/third_party/jerryscript`. The evidence records
+all three library hashes and both Runtime qualified Core identity files.
+The verbose results explicitly confirm signed-axis v10 replay and actual
+worker supervisor-gated mutation, publish/take, damage and retained replay.
+
+Joined logs use the `E:/Temp/c5-intrinsic-joined-` prefix and are copied into
+the combined evidence directory with six Core build caches/manifests, package
+consumer caches, Runtime caches/identities, repository identities and the
+test-only patch. The joined archived subset is
+`E:/Experiments/c5-intrinsic-positioned-joined-20261110`, with a SHA256 index
+for 157 files. The failing Clang Debug reproduction is retained separately
+from the final passing logs. Browser operations were not rerun. Repository
+code changes are limited to the previously described intrinsic-query slice and
+the compiler-independent allocation-injection calibration in the existing DOM
+observer test. Joined qualification uses the same production source hash.
