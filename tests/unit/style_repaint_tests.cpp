@@ -49,6 +49,15 @@ Node* find_element_by_id(Node& node, const std::string& id) {
     return nullptr;
 }
 
+const LayoutBox* find_layout_by_id(const LayoutBox& box, const std::string& id) {
+    if (box.node != nullptr && box.node->type == NodeType::Element && box.node->attribute("id") == id)
+        return &box;
+    for (const auto& child : box.children) {
+        if (const LayoutBox* found = find_layout_by_id(*child, id)) return found;
+    }
+    return nullptr;
+}
+
 const RenderObject* find_render_object(const RenderObject& object, const Node* node) {
     if (object.node == node) return &object;
     for (const auto& child : object.children) {
@@ -271,6 +280,30 @@ void flex_and_text_layout_fields_reject_paint_only_reuse() {
           "flex and text layout changes reject retained paint-only reuse");
 }
 
+void table_spacing_change_rejects_incremental_layout_reuse() {
+    auto fixture = build_fixture(
+        "<body><table id='grid' class='normal'><colgroup><col id='a'><col id='b'></colgroup>"
+        "<tbody><tr><td>One</td><td>Two</td></tr></tbody></table></body>",
+        "body { margin: 0; } table { width: 80px; table-layout: fixed; border-collapse: separate; }"
+        ".normal { border-spacing: 2px 2px; } .wide { border-spacing: 8px 2px; }"
+        "#a { width: 30px; } #b { width: 30px; }");
+    Node* table = find_element_by_id(*fixture.document, "grid");
+    check(table != nullptr, "fixed table exists for retained layout test");
+    const LayoutBox* old_table = find_layout_by_id(*fixture.layout_tree, "grid");
+    check(old_table != nullptr, "initial table layout exists");
+    const int old_width = old_table->rect.width;
+    table->set_attribute("class", "wide");
+    auto next_render = rebuild_render_tree(*fixture.document, fixture.resolver);
+    check(!style_dirty_can_reuse_layout(*fixture.document, *fixture.render_tree, *next_render,
+                                        *fixture.layout_tree, fixed_text_measure()),
+          "table spacing change rejects retained geometry reuse");
+    LayoutEngine engine(fixture.resolver, fixed_text_measure());
+    auto fresh_layout = engine.layout(*next_render, 240);
+    const LayoutBox* fresh_table = find_layout_by_id(*fresh_layout, "grid");
+    check(fresh_table != nullptr && fresh_table->rect.width > old_width,
+          "full table layout applies changed separate-border spacing");
+}
+
 } // namespace
 
 int main() {
@@ -282,6 +315,7 @@ int main() {
         class_change_with_stable_text_can_reuse_layout();
         class_change_with_wider_text_stays_conservative();
         flex_and_text_layout_fields_reject_paint_only_reuse();
+        table_spacing_change_rejects_incremental_layout_reuse();
     } catch (const std::exception& error) {
         std::cerr << "style repaint test failed: " << error.what() << '\n';
         return 1;

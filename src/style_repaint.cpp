@@ -22,6 +22,7 @@ bool color_equal(Color left, Color right) {
 bool layout_fields_equal(const Style& left, const Style& right) {
     return left.display == right.display &&
         left.computed_sizes.equals(right.computed_sizes) &&
+        left.table_properties == right.table_properties &&
         edge_sizes_equal(left.margin, right.margin) &&
         left.margin_left_auto == right.margin_left_auto &&
         left.margin_right_auto == right.margin_right_auto &&
