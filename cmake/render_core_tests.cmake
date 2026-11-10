@@ -205,6 +205,21 @@ if(COMMAND jellyframe_stage_sanitizer_runtime)
     jellyframe_stage_sanitizer_runtime(jellyframe_background_multilayer_style_tests)
 endif()
 
+# Standalone source queries remain tested in every feature profile.
+foreach(query intrinsic_source_query intrinsic_source_query_height)
+    add_executable(jellyframe_${query}_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/${query}_tests.cpp")
+    target_link_libraries(jellyframe_${query}_tests PRIVATE jellyframe_render_core)
+    if(MSVC)
+        target_compile_options(jellyframe_${query}_tests PRIVATE /UNDEBUG /utf-8)
+    else()
+        target_compile_options(jellyframe_${query}_tests PRIVATE -UNDEBUG)
+    endif()
+    if(COMMAND jellyframe_stage_sanitizer_runtime)
+        jellyframe_stage_sanitizer_runtime(jellyframe_${query}_tests)
+    endif()
+    add_test(NAME jellyframe_${query}_tests COMMAND jellyframe_${query}_tests)
+endforeach()
+
 # Keep failed CTest processes noninteractive on MSVC, with diagnostics on stderr.
 # This source belongs to test executables only, never the product library.
 if(MSVC)

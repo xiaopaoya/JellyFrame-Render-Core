@@ -8,6 +8,8 @@
 
 namespace jellyframe {
 
+namespace detail { struct TextSystemAccess; }
+
 class PreparedTextView;
 struct FrameBuffer;
 struct Rect;
@@ -110,9 +112,11 @@ public:
                            std::int64_t baseline_y_q1000, Color color,
                            TextPaintLimits limits = {}) const noexcept;
 private:
+    friend struct detail::TextSystemAccess;
     TextSystemStatus process(std::string_view, const TextFontRequest&,
                              PreparedTextGlyph*, std::size_t, bool,
-                             TextRunMetrics&) const noexcept;
+                             TextRunMetrics&, std::size_t,
+                             std::size_t*) const noexcept;
     const TextFontFace* faces_ = nullptr;
     std::size_t count_ = 0;
     TextSystemLimits limits_{};
