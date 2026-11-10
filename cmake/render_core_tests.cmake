@@ -2,6 +2,12 @@
 if(MSVC)
     get_property(_jellyframe_targets_before_tests DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 endif()
+add_executable(jellyframe_inset_position_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/inset_position_tests.cpp")
+target_link_libraries(jellyframe_inset_position_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_inset_position_tests COMMAND jellyframe_inset_position_tests)
+add_executable(jellyframe_layout_mutation_journal_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/layout_mutation_journal_tests.cpp")
+target_link_libraries(jellyframe_layout_mutation_journal_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_layout_mutation_journal_tests COMMAND jellyframe_layout_mutation_journal_tests)
 add_executable(jellyframe_dom_mutation_observer_tests
     "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/dom_mutation_observer_tests.cpp")
 target_link_libraries(jellyframe_dom_mutation_observer_tests PRIVATE jellyframe_render_core)

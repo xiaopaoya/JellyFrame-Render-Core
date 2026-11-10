@@ -233,49 +233,32 @@ bool is_out_of_flow_positioned(const Style& style) {
 
 void shift_box(LayoutBox& box, int dx, int dy);
 
-int horizontal_position_offset(const Style& style, int area_width, int box_width) {
-    if (style.inset_left_specified) {
-        return bounded_add(style.inset_left, style.margin.left);
-    }
-    if (style.inset_right_specified) {
-        return bounded_subtract(
-            bounded_subtract(bounded_subtract(area_width, style.inset_right), box_width),
-            style.margin.right);
-    }
-    return style.margin.left;
-}
+struct ResolvedInset {
+    std::int64_t units = 0;
+    bool specified = false;
+};
 
-int vertical_position_offset(const Style& style, int area_height, int box_height) {
-    if (style.inset_top_specified) {
-        return bounded_add(style.inset_top, style.margin.top);
-    }
-    if (style.inset_bottom_specified && area_height > 0) {
-        return bounded_subtract(
-            bounded_subtract(bounded_subtract(area_height, style.inset_bottom), box_height),
-            style.margin.bottom);
-    }
-    return style.margin.top;
-}
-
-void apply_relative_position_offset(LayoutBox& box) {
-    if (box.style.position_type != PositionType::Relative) {
-        return;
-    }
-    int dx = 0;
-    int dy = 0;
-    if (box.style.inset_left_specified) {
-        dx = box.style.inset_left;
-    } else if (box.style.inset_right_specified) {
-        dx = -box.style.inset_right;
-    }
-    if (box.style.inset_top_specified) {
-        dy = box.style.inset_top;
-    } else if (box.style.inset_bottom_specified) {
-        dy = -box.style.inset_bottom;
-    }
-    if (dx != 0 || dy != 0) {
-        shift_box(box, dx, dy);
-    }
+ResolvedInset resolve_inset(const Style& style, detail::SizeProperty property,
+                            std::int64_t basis, bool definite = true) {
+    constexpr int Style::* pixels[] = {&Style::inset_top, &Style::inset_right,
+        &Style::inset_bottom, &Style::inset_left};
+    constexpr bool Style::* specified[] = {&Style::inset_top_specified, &Style::inset_right_specified,
+        &Style::inset_bottom_specified, &Style::inset_left_specified};
+    const auto index = static_cast<unsigned>(property) - static_cast<unsigned>(detail::SizeProperty::InsetTop);
+    if (index >= 4 || !(style.*specified[index])) return {};
+    detail::SizeKind kind;
+    std::int64_t length = 0, percentage = 0;
+    if (!style.computed_sizes.get(property, kind, length, percentage))
+        return {static_cast<std::int64_t>(style.*pixels[index]) * 1000, true};
+    if (kind == detail::SizeKind::Pixels) return {length, true};
+    // Relative vertical percentages compute to auto when the containing
+    // height is indefinite; absolute/fixed containing padding boxes are definite.
+    if (!definite) return {};
+    if (kind == detail::SizeKind::Percent) { percentage = length; length = 0; }
+    basis = std::clamp<std::int64_t>(basis, 0, detail::kDimensionPrecisionMaximum);
+    const auto contribution = basis * percentage / 100000;
+    return {std::clamp<std::int64_t>(length + contribution,
+        -detail::kDimensionPrecisionMaximum, detail::kDimensionPrecisionMaximum), true};
 }
 
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
@@ -878,9 +861,7 @@ bool has_only_inline_children(const LayoutBox& box) {
     return has_in_flow_child;
 }
 
-void shift_box(LayoutBox& box, int dx, int dy) {
-    box.rect.x = bounded_add(box.rect.x, dx);
-    box.rect.y = bounded_add(box.rect.y, dy);
+void shift_text_cache(LayoutBox& box, int dx, int dy) {
     if (box.text_layout_cache.valid) {
         box.text_layout_cache.rect_x = bounded_add(box.text_layout_cache.rect_x, dx);
         box.text_layout_cache.rect_y = bounded_add(box.text_layout_cache.rect_y, dy);
@@ -893,9 +874,43 @@ void shift_box(LayoutBox& box, int dx, int dy) {
             }
         }
     }
+}
+
+void shift_box(LayoutBox& box, int dx, int dy) {
+    box.rect.x = bounded_add(box.rect.x, dx);
+    box.rect.y = bounded_add(box.rect.y, dy);
+    if (box.content_geometry.width >= 0 || box.content_geometry.width == -2) {
+        box.content_geometry.x += static_cast<std::int64_t>(dx) * 1000;
+        box.content_geometry.y += static_cast<std::int64_t>(dy) * 1000;
+    }
+    shift_text_cache(box, dx, dy);
     for (auto& child : box.children) {
         shift_box(*child, dx, dy);
     }
+}
+
+void shift_box_precise(LayoutBox& box, std::int64_t dx, std::int64_t dy) {
+    const auto old = box.rect;
+    auto& geometry = box.content_geometry;
+    if (geometry.width >= 0 && geometry.height() >= 0) {
+        geometry.x += dx; geometry.y += dy;
+        const auto x = geometry.x -
+            (static_cast<std::int64_t>(box.style.padding.left)+box.style.border_width.left)*1000;
+        const auto y = geometry.y -
+            (static_cast<std::int64_t>(box.style.padding.top)+box.style.border_width.top)*1000;
+        const auto width = geometry.width +
+            (static_cast<std::int64_t>(horizontal_edges(box.style.padding))+horizontal_edges(box.style.border_width))*1000;
+        const auto height = geometry.height() +
+            (static_cast<std::int64_t>(vertical_edges(box.style.padding))+vertical_edges(box.style.border_width))*1000;
+        box.rect = {detail::project_size_edge(x), detail::project_size_edge(y),
+            detail::project_size_extent(x, width), detail::project_size_extent(y, height)};
+    } else {
+        if (geometry.width == -2) { geometry.x += dx; geometry.y += dy; }
+        box.rect.x = detail::project_size_edge(static_cast<std::int64_t>(old.x)*1000+dx);
+        box.rect.y = detail::project_size_edge(static_cast<std::int64_t>(old.y)*1000+dy);
+    }
+    shift_text_cache(box, bounded_subtract(box.rect.x, old.x), bounded_subtract(box.rect.y, old.y));
+    for (auto& child : box.children) shift_box_precise(*child, dx, dy);
 }
 
 } // namespace
@@ -914,6 +929,11 @@ struct LayoutEngine::PreciseBoxContext {
     std::int64_t allocated_width = -1;
     std::int64_t allocated_height = -1;
     bool border_origin = false;
+};
+
+struct LayoutEngine::PositionedContext {
+    LayoutContentGeometry containing;
+    LayoutContentGeometry parent;
 };
 
 LayoutEngine::LayoutEngine(const StyleResolver& style_resolver,
@@ -981,6 +1001,8 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
     const PreciseBoxContext precision{static_cast<std::int64_t>(std::max(0,viewport_width))*1000,
         static_cast<std::int64_t>(std::max(0,viewport_height))*1000,0,0};
     layout_box(*root_box, 0, 0, viewport_width, viewport_height, 1, &precision);
+    const LayoutContentGeometry viewport{0, 0, precision.width, precision.height, true};
+    layout_positioned_children(*root_box, PositionedContext{viewport, viewport}, 1);
     return root_box;
 }
 
@@ -1267,7 +1289,10 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
     } else {
         auto cursor_units = content_y_units;
         for (auto& child : box.children) {
-            if (is_out_of_flow_positioned(child->style)) continue;
+            if (is_out_of_flow_positioned(child->style)) {
+                child->content_geometry = {content_x_units, cursor_units, -2, -2, false};
+                continue;
+            }
             const PreciseBoxContext child_context{content_width_units,child_height_basis,content_x_units,cursor_units};
             std::int64_t child_flow_units = std::numeric_limits<std::int64_t>::min();
             const auto child_height = layout_box(*child,project_size_edge(content_x_units),project_size_edge(cursor_units),
@@ -1291,9 +1316,8 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
     const auto border_height_units = std::min(kDimensionPrecisionMaximum,content_height_units+vertical_decoration);
     box.rect = Rect{project_size_edge(border_x_units),project_size_edge(border_y_units),
         project_size_extent(border_x_units,border_width_units),project_size_extent(border_y_units,border_height_units)};
-    layout_positioned_children(box,project_size_edge(content_x_units),project_size_edge(content_y_units),
-        content_width,project_size_extent(content_y_units,content_height_units),project_size_edge(context.width),depth);
-    apply_relative_position_offset(box);
+    box.content_geometry = {content_x_units, content_y_units, content_width_units, content_height_units,
+        fixed_height_units >= 0 || viewport_root};
     const auto total_units = static_cast<std::int64_t>(style.margin.top)*1000+border_height_units+
         static_cast<std::int64_t>(style.margin.bottom)*1000;
     if (flow_units) *flow_units = total_units;
@@ -1525,7 +1549,7 @@ int LayoutEngine::layout_box(LayoutBox& box, int x, int y, int width, int height
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
          || (box.style.display == Display::Flex && !box.style.flex_wrap)
 #endif
-        ) && !is_out_of_flow_positioned(box.style) &&
+        ) &&
         box.node && box.node->type != NodeType::Text && !is_form_control(*box.node)) {
         return layout_precise_block(box,height,depth,*precision,flow_units);
     }
@@ -1587,7 +1611,6 @@ int LayoutEngine::layout_box(LayoutBox& box, int x, int y, int width, int height
     if (box.style.display == Display::Table) {
         const int table_height = layout_fixed_table(box, x, border_box_y, containing_content_width, height, depth);
         if (table_height >= 0) {
-            apply_relative_position_offset(box);
             if (flow_units) *flow_units = static_cast<std::int64_t>(table_height) * 1000;
             return table_height;
         }
@@ -1608,6 +1631,8 @@ int LayoutEngine::layout_box(LayoutBox& box, int x, int y, int width, int height
             int flow_height = 0;
             for (auto& child : box.children) {
                 if (is_out_of_flow_positioned(child->style)) {
+                    child->content_geometry = {static_cast<std::int64_t>(content_x)*1000,
+                        static_cast<std::int64_t>(cursor_y)*1000, -2, -2, false};
                     continue;
                 }
                 const int child_height = layout_box(*child, content_x, cursor_y, content_width, height, depth + 1);
@@ -1678,8 +1703,9 @@ int LayoutEngine::layout_box(LayoutBox& box, int x, int y, int width, int height
     const int total_height = bounded_add(bounded_add(box.style.margin.top, border_box_height),
                                          box.style.margin.bottom);
     box.rect = Rect{border_box_x, border_box_y, border_box_width, border_box_height};
-    layout_positioned_children(box, content_x, content_y, content_width, content_height, width, depth);
-    apply_relative_position_offset(box);
+    box.content_geometry = {static_cast<std::int64_t>(content_x) * 1000,
+        static_cast<std::int64_t>(content_y) * 1000, static_cast<std::int64_t>(content_width) * 1000,
+        static_cast<std::int64_t>(content_height) * 1000, fixed_content_height >= 0};
     return total_height;
 }
 
@@ -2004,6 +2030,8 @@ int LayoutEngine::layout_inline_children(LayoutBox& box,
     for (std::size_t index = 0; index < box.children.size(); ++index) {
         auto& child = box.children[index];
         if (is_out_of_flow_positioned(child->style)) {
+            child->content_geometry = {static_cast<std::int64_t>(cursor_x)*1000,
+                static_cast<std::int64_t>(line_y)*1000, -2, -2, false};
             continue;
         }
         layout_box(*child, 0, 0, content_width, 0, depth + 1);
@@ -2036,50 +2064,139 @@ int LayoutEngine::layout_inline_children(LayoutBox& box,
 }
 
 void LayoutEngine::layout_positioned_children(LayoutBox& box,
-                                              int content_x,
-                                              int content_y,
-                                              int content_width,
-                                              int content_height,
-                                              int viewport_width,
+                                              const PositionedContext& parent,
                                               std::size_t depth) const {
-    for (auto& child : box.children) {
-        if (!is_out_of_flow_positioned(child->style)) {
-            continue;
+    using namespace detail;
+    if (depth > std::max<std::size_t>(1, options_.max_layout_depth)) return;
+    const auto& style = box.style;
+    const bool out_of_flow = is_out_of_flow_positioned(style);
+    const auto decoration = [&](bool horizontal) {
+        return static_cast<std::int64_t>(horizontal
+            ? bounded_add(horizontal_edges(style.padding), horizontal_edges(style.border_width))
+            : bounded_add(vertical_edges(style.padding), vertical_edges(style.border_width))) * 1000;
+    };
+    if (out_of_flow) {
+        const bool fixed = style.position_type == PositionType::Fixed;
+        const LayoutContentGeometry viewport{0, 0,
+            static_cast<std::int64_t>(std::max(0, box.viewport_width)) * 1000,
+            static_cast<std::int64_t>(std::max(0, box.viewport_height)) * 1000, true};
+        const auto& area = fixed ? viewport : parent.containing;
+        const auto left = resolve_inset(style, SizeProperty::InsetLeft, area.width);
+        const auto right = resolve_inset(style, SizeProperty::InsetRight, area.width);
+        const auto top = resolve_inset(style, SizeProperty::InsetTop, area.height());
+        const auto bottom = resolve_inset(style, SizeProperty::InsetBottom, area.height());
+        const auto horizontal_margins = static_cast<std::int64_t>(style.margin.left) * 1000 +
+            static_cast<std::int64_t>(style.margin.right) * 1000;
+        const auto vertical_margins = static_cast<std::int64_t>(style.margin.top) * 1000 +
+            static_cast<std::int64_t>(style.margin.bottom) * 1000;
+        PreciseBoxContext context{area.width, area.height(), 0, 0};
+        context.border_origin = true;
+        const bool stretch_width = computed_size_units(style, SizeProperty::Width, area.width) == -1 &&
+            left.specified && right.specified;
+        const bool stretch_height = computed_size_units(style, SizeProperty::Height, area.height()) == -1 &&
+            top.specified && bottom.specified;
+        if (stretch_width) {
+            const auto fallback = std::clamp<std::int64_t>(area.width-left.units-right.units-
+                horizontal_margins-decoration(true), 0, kDimensionPrecisionMaximum);
+            context.allocated_width = computed_content_axis(style, false, area.width, fallback, decoration(true));
         }
-
-        const bool fixed = child->style.position_type == PositionType::Fixed;
-        const int area_x = fixed ? 0 : content_x;
-        const int area_y = fixed ? 0 : content_y;
-        const int area_width = std::max(1, fixed ? viewport_width : content_width);
-        const int area_height = fixed ? 0 : content_height;
-
-        const int original_width = child->style.width;
-        const int original_width_percent = child->style.width_percent;
-        const bool original_box_sizing = child->style.box_sizing_border_box;
-        if (child->style.width < 0 && child->style.width_percent < 0 &&
-            child->style.inset_left_specified && child->style.inset_right_specified) {
-            child->style.width = std::max(0,
-                bounded_subtract(
-                    bounded_subtract(
-                        bounded_subtract(area_width, child->style.inset_left),
-                        child->style.inset_right),
-                    bounded_add(child->style.margin.left, child->style.margin.right)));
-            child->style.width_percent = -1;
-            child->style.box_sizing_border_box = true;
+        if (stretch_height) {
+            const auto fallback = std::clamp<std::int64_t>(area.height()-top.units-bottom.units-
+                vertical_margins-decoration(false), 0, kDimensionPrecisionMaximum);
+            context.allocated_height = computed_content_axis(style, true, area.height(), fallback, decoration(false));
         }
-
-        layout_box(*child, 0, 0, area_width, area_height, depth + 1);
-        child->style.width = original_width;
-        child->style.width_percent = original_width_percent;
-        child->style.box_sizing_border_box = original_box_sizing;
-
-        const int target_x = bounded_add(
-            area_x, horizontal_position_offset(child->style, area_width, child->rect.width));
-        const int target_y = bounded_add(
-            area_y, vertical_position_offset(child->style, area_height, child->rect.height));
-        shift_box(*child, bounded_subtract(target_x, child->rect.x),
-                  bounded_subtract(target_y, child->rect.y));
+        const auto original_sizes = style.computed_sizes;
+        const int original_width = style.width, original_width_percent = style.width_percent;
+        const int original_height = style.height, original_height_percent = style.height_percent;
+        struct RestoreSizes {
+            Style& style;
+            ComputedSizeStorage sizes;
+            int width, width_percent, height, height_percent;
+            ~RestoreSizes() noexcept {
+                style.width = width; style.width_percent = width_percent;
+                style.height = height; style.height_percent = height_percent;
+                style.computed_sizes = std::move(sizes);
+            }
+        } restore{box.style, original_sizes, original_width, original_width_percent,
+                  original_height, original_height_percent};
+        // Legacy modes receive the same allocation through scalar proxies.
+        if (stretch_width) {
+            box.style.computed_sizes.clear(SizeProperty::Width);
+            box.style.width = project_size_edge(context.allocated_width +
+                (style.box_sizing_border_box ? decoration(true) : 0));
+            box.style.width_percent = -1;
+        }
+        if (stretch_height) {
+            box.style.computed_sizes.clear(SizeProperty::Height);
+            box.style.height = project_size_edge(context.allocated_height +
+                (style.box_sizing_border_box ? decoration(false) : 0));
+            box.style.height_percent = -1;
+        }
+        const auto layout_at = [&](std::int64_t x, std::int64_t y) {
+            context.x = x; context.y = y;
+            layout_box(box, bounded_subtract(project_size_edge(x), style.margin.left),
+                bounded_subtract(project_size_edge(y), style.margin.top),
+                project_size_edge(area.width), project_size_edge(area.height()), depth, &context);
+        };
+        const auto static_x = box.content_geometry.width == -2 ? box.content_geometry.x : parent.parent.x;
+        const auto static_y = box.content_geometry.width == -2 ? box.content_geometry.y : parent.parent.y;
+        const auto initial_x = (left.specified ? area.x+left.units : static_x) +
+            static_cast<std::int64_t>(style.margin.left) * 1000;
+        const auto initial_y = (top.specified ? area.y+top.units : static_y) +
+            static_cast<std::int64_t>(style.margin.top) * 1000;
+        layout_at(initial_x, initial_y);
+        const auto border_width = box.content_geometry.width >= 0
+            ? box.content_geometry.width + decoration(true) : static_cast<std::int64_t>(box.rect.width) * 1000;
+        const auto border_height = box.content_geometry.height() >= 0
+            ? box.content_geometry.height() + decoration(false) : static_cast<std::int64_t>(box.rect.height) * 1000;
+        const auto target_x = !left.specified && right.specified
+            ? area.x+area.width-right.units-border_width-static_cast<std::int64_t>(style.margin.right)*1000
+            : initial_x;
+        const auto target_y = !top.specified && bottom.specified
+            ? area.y+area.height()-bottom.units-border_height-static_cast<std::int64_t>(style.margin.bottom)*1000
+            : initial_y;
+        // Opposite-edge placement needs measured extent before its final origin.
+        // Re-layout keeps fractional projected extents and prepared text coherent.
+        if (target_x != initial_x || target_y != initial_y) layout_at(target_x, target_y);
+    } else if (style.position_type == PositionType::Relative) {
+        const auto left = resolve_inset(style, SizeProperty::InsetLeft, parent.parent.width);
+        const auto right = resolve_inset(style, SizeProperty::InsetRight, parent.parent.width);
+        const auto top = resolve_inset(style, SizeProperty::InsetTop, parent.parent.height(),
+            parent.parent.height_definite());
+        const auto bottom = resolve_inset(style, SizeProperty::InsetBottom, parent.parent.height(),
+            parent.parent.height_definite());
+        const auto dx = left.specified ? left.units : right.specified ? -right.units : 0;
+        const auto dy = top.specified ? top.units : bottom.specified ? -bottom.units : 0;
+        shift_box_precise(box, dx, dy);
     }
+
+    auto content = box.content_geometry;
+    if (content.width < 0 || content.height() < 0) {
+        // Structural fixed-table boxes have integral owner-measured geometry;
+        // their owner does not call layout_box for these grid wrappers.
+        content = {static_cast<std::int64_t>(box.rect.x) * 1000 +
+                (static_cast<std::int64_t>(style.border_width.left)+style.padding.left)*1000,
+            static_cast<std::int64_t>(box.rect.y) * 1000 +
+                (static_cast<std::int64_t>(style.border_width.top)+style.padding.top)*1000,
+            std::max<std::int64_t>(0, static_cast<std::int64_t>(box.rect.width)*1000-decoration(true)),
+            std::max<std::int64_t>(0, static_cast<std::int64_t>(box.rect.height)*1000-decoration(false)), false};
+    }
+    if (!out_of_flow && !parent.parent.height_definite()) {
+        SizeKind kind; std::int64_t units = 0, percentage = 0;
+        if (style.height_percent >= 0 ||
+            (style.computed_sizes.get(SizeProperty::Height, kind, units, percentage) && kind != SizeKind::Pixels))
+            content.set_height_definite(false);
+    }
+    PositionedContext descendants{parent.containing, content};
+    if (style.position_type != PositionType::Static) {
+        // Positioned ordinary blocks establish their padding box. Transformed and
+        // fragmented inline containing blocks remain outside this layout subset.
+        descendants.containing = {content.x-static_cast<std::int64_t>(style.padding.left)*1000,
+            content.y-static_cast<std::int64_t>(style.padding.top)*1000,
+            std::min(kDimensionPrecisionMaximum, content.width+static_cast<std::int64_t>(horizontal_edges(style.padding))*1000),
+            std::min(kDimensionPrecisionMaximum, content.height()+static_cast<std::int64_t>(vertical_edges(style.padding))*1000), true};
+    }
+    for (auto& child : box.children) layout_positioned_children(*child, descendants, depth+1);
 }
 
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED

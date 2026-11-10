@@ -66,7 +66,10 @@ public:
             slots_.clear();
             return LayoutMutationJournalStatus::ResourceLimit;
         }
-        for (Slot& slot : slots_) slot.rect = slot.box->rect;
+        for (Slot& slot : slots_) {
+            slot.rect = slot.box->rect;
+            slot.content_geometry = slot.box->content_geometry;
+        }
         for (Slot& slot : slots_) {
             using std::swap;
             swap(slot.cache, slot.box->text_layout_cache);
@@ -79,6 +82,7 @@ public:
         if (!active_) return;
         for (Slot& slot : slots_) {
             slot.box->rect = slot.rect;
+            slot.box->content_geometry = slot.content_geometry;
             using std::swap;
             swap(slot.cache, slot.box->text_layout_cache);
         }
@@ -92,10 +96,14 @@ public:
         active_ = false;
     }
 
+    bool active() const noexcept { return active_; }
+    std::size_t size() const noexcept { return active_ ? slots_.size() : 0; }
+
 private:
     struct Slot {
         LayoutBox* box = nullptr;
         Rect rect{};
+        LayoutContentGeometry content_geometry{};
         TextLayoutCache cache{};
     };
     std::vector<Slot> slots_;

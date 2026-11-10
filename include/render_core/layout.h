@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "render_core/arena.h"
 #include "render_core/dom.h"
@@ -67,10 +67,41 @@ struct TextLayoutCache {
     TextAlign text_align = TextAlign::Start;
 };
 
+// Final flow geometry before pixel projection, also restored by speculative
+// layout transactions. Extents -1 mark unmeasured content; -2 preserves an
+// out-of-flow box's static flow origin until final positioned layout.
+struct LayoutContentGeometry {
+    std::int64_t x = 0, y = 0, width = -1;
+
+    constexpr LayoutContentGeometry() = default;
+    constexpr LayoutContentGeometry(std::int64_t origin_x, std::int64_t origin_y,
+                                    std::int64_t content_width, std::int64_t content_height,
+                                    bool definite_height)
+        : x(origin_x), y(origin_y), width(content_width),
+          encoded_height_(encode_height(content_height, definite_height)) {}
+
+    constexpr std::int64_t height() const {
+        return encoded_height_ <= -3 ? -(encoded_height_ + 3) : encoded_height_;
+    }
+    constexpr bool height_definite() const { return encoded_height_ >= 0; }
+    void set_height_definite(bool definite) { encoded_height_ = encode_height(height(), definite); }
+
+private:
+    // Measured Q1000 extents are bounded by INT_MAX * 1000. Nonnegative
+    // encoded heights are definite; -(height + 3) is indefinite. The -1/-2
+    // sentinels stay unmeasured/static, saving a bool and eight-byte padding.
+    static constexpr std::int64_t encode_height(std::int64_t height, bool definite) {
+        return height < 0 || definite ? height : -height - 3;
+    }
+    std::int64_t encoded_height_ = -1;
+};
+static_assert(sizeof(LayoutContentGeometry) == 4 * sizeof(std::int64_t));
+
 struct LayoutBox {
     const Node* node = nullptr;
     Style style;
     Rect rect;
+    LayoutContentGeometry content_geometry;
     int viewport_width = 0;
     int viewport_height = 0;
     TextLayoutCache text_layout_cache;
@@ -135,13 +166,8 @@ private:
                         std::size_t depth) const;
 #endif
     int layout_inline_children(LayoutBox& box, int content_x, int content_y, int content_width, std::size_t depth) const;
-    void layout_positioned_children(LayoutBox& box,
-                                    int content_x,
-                                    int content_y,
-                                    int content_width,
-                                    int content_height,
-                                    int viewport_width,
-                                    std::size_t depth) const;
+    struct PositionedContext;
+    void layout_positioned_children(LayoutBox&, const PositionedContext&, std::size_t depth) const;
     LayoutBoxPtr build_with_arena(const RenderObject& render_tree,
                                   int viewport_width,
                                   int viewport_height,

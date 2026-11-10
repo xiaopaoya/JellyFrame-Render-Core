@@ -875,11 +875,11 @@ void positioned_layout_offsets_without_flow_space() {
           "positioned fixture boxes exist");
     check(after->rect.y == normal->rect.y + normal->rect.height,
           "absolute child does not consume block flow height");
-    check(badge->rect.x == main->rect.x + main->style.border_width.left + main->style.padding.left +
-              200 - 6 - badge->rect.width,
-          "absolute right offset uses parent content box");
-    check(badge->rect.y == main->rect.y + main->style.border_width.top + main->style.padding.top + 5,
-          "absolute top offset uses parent content box");
+    check(badge->rect.x == main->rect.x + main->style.border_width.left +
+              220 - 6 - badge->rect.width,
+          "absolute right offset uses positioned parent padding box");
+    check(badge->rect.y == main->rect.y + main->style.border_width.top + 5,
+          "absolute top offset uses positioned parent padding box");
 }
 
 void logical_inset_layout_uses_ltr_physical_offsets() {
