@@ -605,20 +605,94 @@ bool parse_flex_factor(const std::string& raw_value, int& output) {
 
 bool parse_position_inset(const std::string& raw_value,
                           int font_size,
+                          detail::ComputedSizeStorage& retained,
+                          detail::SizeProperty property,
                           int& output,
                           bool& specified,
                           const LengthResolutionContext& context = {}) {
     const std::string value = lowercase(trim(raw_value));
     if (value == "auto") {
+        retained.clear(property);
         output = 0;
         specified = false;
         return true;
     }
-    int px = 0;
-    if (!parse_length_px(value, px, font_size, context)) {
-        return false;
+    if (value.find('%') != std::string::npos) {
+        const auto term = [&](const std::string& source, double& length, double& percentage) {
+            const auto token = trim(source);
+            char* end = nullptr;
+            errno = 0;
+            const double number = std::strtod(token.c_str(), &end);
+            if (end == token.c_str() || errno == ERANGE || !std::isfinite(number)) return false;
+            const auto unit = std::string(end);
+            if (unit == "%") { percentage = number; return true; }
+            // Percentages must never reach parse_length_px's viewport approximation.
+            if (token.find('%') != std::string::npos) return false;
+            // Keep numeric length terms in double precision before Q1000
+            // encoding; float cannot represent the valid INT_MAX pixel bound.
+            if (unit.empty() || unit == "px") length = number;
+            else if (unit == "em") length = number * font_size;
+            else if (unit == "rem") length = number * kRootFontSizePx;
+            else if (unit == "vw") length = number * context.viewport_width / 100.0;
+            else if (unit == "vh") length = number * context.viewport_height / 100.0;
+            else {
+                int pixels = 0;
+                double precise = 0;
+                if (!parse_length_px(token, pixels, font_size, context, &precise)) return false;
+                length = precise;
+            }
+            return std::isfinite(length);
+        };
+        double length = 0, percentage = 0;
+        if (value.rfind("calc(", 0) == 0 && value.back() == ')') {
+            const auto expression = value.substr(5, value.size() - 6);
+            std::size_t operation = std::string::npos;
+            for (std::size_t i = 1; i + 1 < expression.size(); ++i) {
+                if ((expression[i] == '+' || expression[i] == '-') &&
+                    std::isspace(static_cast<unsigned char>(expression[i - 1])) &&
+                    std::isspace(static_cast<unsigned char>(expression[i + 1]))) {
+                    if (operation != std::string::npos) return false;
+                    operation = i;
+                }
+            }
+            double right_length = 0, right_percentage = 0;
+            if (operation == std::string::npos ||
+                !term(expression.substr(0, operation), length, percentage) ||
+                !term(expression.substr(operation + 1), right_length, right_percentage)) return false;
+            const int sign = expression[operation] == '-' ? -1 : 1;
+            length += sign * right_length;
+            percentage += sign * right_percentage;
+        } else if (!term(value, length, percentage)) {
+            return false;
+        }
+        if (!retained.set_length_percentage(property, length, percentage)) return false;
+        // Scalar compatibility fields contain only the length component.
+        output = static_cast<int>(std::round(length));
+    } else {
+        // Plain px literals retain double precision across the signed INT_MAX
+        // bound; the general legacy length parser uses float proxies.
+        char* end = nullptr;
+        errno = 0;
+        const double number = std::strtod(value.c_str(), &end);
+        const auto unit = end ? trim(end) : std::string{};
+        if (end && end != value.c_str() && (unit.empty() || unit == "px")) {
+            if (errno == ERANGE || !retained.set(property, detail::SizeKind::Pixels, number)) return false;
+            output = static_cast<int>(std::round(number));
+            specified = true;
+            return true;
+        }
+        int px = 0;
+        if (!parse_length_px(value, px, font_size, context)) return false;
+        double precise = px;
+        // Preserve legacy math-function rounding and permissive fallback
+        // admission. Plain fractional lengths still retain their used value.
+        if (value.find('(') == std::string::npos) {
+            int precise_proxy = 0;
+            if (!parse_length_px(value, precise_proxy, font_size, context, &precise)) return false;
+        }
+        if (!retained.set(property, detail::SizeKind::Pixels, precise)) return false;
+        output = px;
     }
-    output = px;
     specified = true;
     return true;
 }
@@ -3999,7 +4073,11 @@ bool apply_declaration(Style& style,
                property == "bottom" || property == "left") {
         int px = 0;
         bool specified = false;
-        if (!parse_position_inset(value, style.font_size, px, specified, context)) {
+        const auto inset_property = property == "top" ? detail::SizeProperty::InsetTop :
+            property == "right" ? detail::SizeProperty::InsetRight :
+            property == "bottom" ? detail::SizeProperty::InsetBottom : detail::SizeProperty::InsetLeft;
+        if (!parse_position_inset(value, style.font_size, style.computed_sizes,
+                                  inset_property, px, specified, context)) {
             return false;
         }
         if (property == "top") {
