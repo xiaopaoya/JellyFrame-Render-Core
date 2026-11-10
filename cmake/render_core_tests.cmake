@@ -1,3 +1,10 @@
+add_executable(jellyframe_dom_mutation_observer_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/dom_mutation_observer_tests.cpp")
+target_link_libraries(jellyframe_dom_mutation_observer_tests PRIVATE jellyframe_render_core)
+if(COMMAND jellyframe_stage_sanitizer_runtime)
+    jellyframe_stage_sanitizer_runtime(jellyframe_dom_mutation_observer_tests)
+endif()
+add_test(NAME jellyframe_dom_mutation_observer_tests COMMAND jellyframe_dom_mutation_observer_tests)
 add_executable(jellyframe_flex_auto_min_tests
     "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/flex_auto_min_tests.cpp")
 target_link_libraries(jellyframe_flex_auto_min_tests PRIVATE jellyframe_render_core)
