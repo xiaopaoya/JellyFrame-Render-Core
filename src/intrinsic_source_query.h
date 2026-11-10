@@ -53,6 +53,28 @@ struct IntrinsicSourceWidthResult {
     std::size_t work = 0;
 };
 
+struct IntrinsicSourceQueryUsage {
+    std::size_t boxes = 0;
+    std::size_t source_bytes = 0;
+    std::size_t measurements = 0;
+    std::size_t work = 0;
+
+    bool consume(const IntrinsicSourceWidthResult& result, const IntrinsicSourceQueryLimits& limits) noexcept {
+        const auto fits = [](std::size_t used, std::size_t amount, std::size_t maximum) {
+            return used <= maximum && amount <= maximum - used;
+        };
+        if (!fits(boxes, result.boxes_visited, limits.max_boxes) ||
+            !fits(source_bytes, result.source_bytes, limits.max_source_bytes) ||
+            !fits(measurements, result.measurements, limits.max_measurements) ||
+            !fits(work, result.work, limits.max_work)) return false;
+        boxes += result.boxes_visited;
+        source_bytes += result.source_bytes;
+        measurements += result.measurements;
+        work += result.work;
+        return true;
+    }
+};
+
 // Initial admission is one ordinary horizontal block with an ASCII inline
 // source. ASCII overflow-wrap:anywhere adds per-character min-content breaks;
 // ASCII uppercase/lowercase transforms are applied before measurement. Non-ASCII
