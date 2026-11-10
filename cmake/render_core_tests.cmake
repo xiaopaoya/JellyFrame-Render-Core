@@ -36,6 +36,10 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     add_test(NAME jellyframe_source_hash_private_headers
         COMMAND "${Python3_EXECUTABLE}" "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/tools/source_hash_private_header_tests.py")
+    add_test(NAME jellyframe_source_hash_build_refresh
+        COMMAND "${Python3_EXECUTABLE}" "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/tools/source_hash_build_refresh_tests.py"
+            --cmake "${CMAKE_COMMAND}" --generator "${CMAKE_GENERATOR}")
+    set_tests_properties(jellyframe_source_hash_build_refresh PROPERTIES TIMEOUT 45)
 endif()
 
 set(JELLYFRAME_RENDER_CORE_TEST_SOURCES
