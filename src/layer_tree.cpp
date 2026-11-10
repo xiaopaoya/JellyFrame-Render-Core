@@ -1026,6 +1026,7 @@ bool resolve_image_handle(const LayoutBox& box,
                           const LayerTreeBuilderOptions& options,
                           std::uint32_t& image_handle) {
     image_handle = 0;
+    ResolvedImageResource resource;
     if (box.node == nullptr || box.node->type != NodeType::Element || options.image_resolver.resolve == nullptr) {
         return false;
     }
@@ -1039,11 +1040,27 @@ bool resolve_image_handle(const LayoutBox& box,
     if (kind == ImageResolveKind::Background && background_resource_id == 0) {
         return false;
     }
-    return options.image_resolver.resolve(*box.node,
-                                          kind,
-                                          background_resource_id,
-                                          image_handle,
-                                          options.image_resolver.context) && image_handle != 0;
+    if (!options.image_resolver.resolve(*box.node, kind, background_resource_id,
+                                         resource, options.image_resolver.context) ||
+        resource.image_handle == 0) {
+        return false;
+    }
+    // Natural size is metadata for background geometry, not a new content
+    // decoder limit. Legacy content images continue to use their valid handle.
+    if (kind == ImageResolveKind::Background) {
+        const auto& size = resource.intrinsic_size;
+        if ((size.state != ImageIntrinsicSizeState::Unknown &&
+             size.state != ImageIntrinsicSizeState::Known) ||
+            (size.state == ImageIntrinsicSizeState::Known &&
+             (size.width == 0 || size.height == 0 || size.width > 8191 || size.height > 8191))) {
+            report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree,
+                              DiagnosticSeverity::Warning, "layer-background-image-size-invalid",
+                              "Background image natural size is invalid; image layer was omitted");
+            return false;
+        }
+    }
+    image_handle = resource.image_handle;
+    return true;
 }
 
 Rect content_rect_for(const LayoutBox& box) {
@@ -1453,7 +1470,7 @@ void append_flattened_command(DisplayList& output,
     // Frame clips are consumed in destination space. A v4 source-clip index
     // separately preserves the current transformed layer's pre-transform
     // overflow clip without cropping away its transparent sampling fringe.
-    if (has_clip && !has_affine_transform) {
+    if (has_clip && !has_affine_transform && display_clip_indices == nullptr) {
         flattened.rect = intersect_rect(flattened.rect, clip);
         if (empty_rect(flattened.rect)) {
             return;

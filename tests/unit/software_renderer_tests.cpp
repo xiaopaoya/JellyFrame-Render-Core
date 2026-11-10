@@ -268,12 +268,13 @@ struct ImagePaintProbe {
 };
 
 bool probe_image_painter(FrameBuffer& target,
-                         Rect rect,
-                         std::uint32_t image_handle,
-                         ObjectFit object_fit,
-                         ObjectPosition object_position,
-                         ImageRendering image_rendering,
+                         const ImagePaintRequest& request,
                          void* raw_context) {
+    const Rect rect = request.destination;
+    const auto image_handle = request.image_handle;
+    const auto object_fit = request.object_fit;
+    const auto object_position = request.object_position;
+    const auto image_rendering = request.image_rendering;
     auto* probe = static_cast<ImagePaintProbe*>(raw_context);
     if (probe == nullptr || image_handle != probe->expected_handle) {
         return false;

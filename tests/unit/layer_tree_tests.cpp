@@ -1783,27 +1783,27 @@ struct ImageResolveContext {
 bool resolve_test_image(const Node& node,
                         ImageResolveKind kind,
                         std::uint16_t,
-                        std::uint32_t& handle,
+                        ResolvedImageResource& resource,
                         void* raw_context) {
     auto* context = static_cast<ImageResolveContext*>(raw_context);
     if (context == nullptr || kind != ImageResolveKind::Content || node.attribute("src") != context->url) {
         return false;
     }
-    handle = context->handle;
+    resource.image_handle = context->handle;
     return true;
 }
 
 bool resolve_test_canvas(const Node& node,
                          ImageResolveKind kind,
                          std::uint16_t,
-                         std::uint32_t& handle,
+                         ResolvedImageResource& resource,
                          void* raw_context) {
     auto* expected_handle = static_cast<std::uint32_t*>(raw_context);
     if (expected_handle == nullptr || kind != ImageResolveKind::Content ||
         node.type != NodeType::Element || node.tag_name != "canvas") {
         return false;
     }
-    handle = *expected_handle;
+    resource.image_handle = *expected_handle;
     return true;
 }
 
@@ -1815,14 +1815,14 @@ struct BackgroundImageResolveContext {
 bool resolve_test_background_image(const Node&,
                                    ImageResolveKind kind,
                                    std::uint16_t resource_id,
-                                   std::uint32_t& handle,
+                                   ResolvedImageResource& resource,
                                    void* raw_context) {
     auto* context = static_cast<BackgroundImageResolveContext*>(raw_context);
     if (context == nullptr || kind != ImageResolveKind::Background ||
         resource_id == 0 || resource_id != context->resource_id) {
         return false;
     }
-    handle = context->handle;
+    resource.image_handle = context->handle;
     return true;
 }
 

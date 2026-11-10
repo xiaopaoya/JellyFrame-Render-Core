@@ -8,6 +8,16 @@
 #include <limits>
 
 namespace jellyframe {
+namespace {
+
+Rect intersect_paint_rect(Rect a, Rect b) {
+    const int left = std::max(a.x, b.x);
+    const int top = std::max(a.y, b.y);
+    const int right = std::min(safe_edge(a.x, a.width), safe_edge(b.x, b.width));
+    const int bottom = std::min(safe_edge(a.y, a.height), safe_edge(b.y, b.height));
+    return {left, top, safe_span(left, right), safe_span(top, bottom)};
+}
+} // namespace
 
 bool modern_paint_fill_opaque_linear_gradient_fast(FrameBuffer& target,
                                                     Rect rect,
@@ -124,14 +134,26 @@ void modern_paint_fill_linear_gradient(FrameBuffer& target,
                                        Color second,
                                        GradientAxis axis,
                                        int border_radius) {
-    const Rect clipped = raster_clip_rect(target, rect, clip);
+    modern_paint_fill_linear_gradient_area(target, rect, rect, clip, first, second, axis, border_radius);
+}
+
+void modern_paint_fill_linear_gradient_area(FrameBuffer& target,
+                                       Rect rect,
+                                       Rect paint_area,
+                                       Rect clip,
+                                       Color first,
+                                       Color second,
+                                       GradientAxis axis,
+                                       int border_radius) {
+    const Rect clipped = raster_clip_rect(target, rect, intersect_paint_rect(clip, paint_area));
     if (raster_empty_rect(clipped)) {
         return;
     }
-    if (modern_paint_fill_opaque_linear_gradient_fast(target, rect, clipped, first, second, axis, border_radius)) {
+    if (modern_paint_fill_opaque_linear_gradient_fast(
+            target, rect, clipped, first, second, axis, border_radius)) {
         return;
     }
-    const RasterRoundedRect rounded = prepare_rounded_rect(rect, border_radius);
+    const RasterRoundedRect rounded = prepare_rounded_rect(paint_area, border_radius);
     if (axis == GradientAxis::Vertical) {
         const int denom = std::max(1, safe_add(rect.height, -1));
         modern_paint_fill_rounded_rows(target, clipped, rounded, [&](int, int y) {
@@ -168,13 +190,25 @@ void modern_paint_fill_conic_gradient_region(FrameBuffer& target,
                                              Color second,
                                              int stop_percent,
                                              int border_radius) {
+    modern_paint_fill_conic_gradient_area(target, rect, clipped, rect, first, second, stop_percent, border_radius);
+}
+
+void modern_paint_fill_conic_gradient_area(FrameBuffer& target,
+                                             Rect rect,
+                                             Rect clipped,
+                                             Rect paint_area,
+                                             Color first,
+                                             Color second,
+                                             int stop_percent,
+                                             int border_radius) {
+    clipped = intersect_paint_rect(clipped, paint_area);
     if (raster_empty_rect(clipped)) {
         return;
     }
     stop_percent = std::max(0, std::min(100, stop_percent));
     const std::int64_t center_x2 = static_cast<std::int64_t>(rect.x) * 2 + rect.width;
     const std::int64_t center_y2 = static_cast<std::int64_t>(rect.y) * 2 + rect.height;
-    const RasterRoundedRect rounded = prepare_rounded_rect(rect, border_radius);
+    const RasterRoundedRect rounded = prepare_rounded_rect(paint_area, border_radius);
     modern_paint_fill_rounded_rows(target, clipped, rounded, [&](int x, int y) {
             const int dx = static_cast<int>(static_cast<std::int64_t>(x) * 2 + 1 - center_x2);
             const int dy = static_cast<int>(static_cast<std::int64_t>(y) * 2 + 1 - center_y2);
@@ -191,6 +225,19 @@ void modern_paint_fill_radial_gradient_region(FrameBuffer& target,
                                               GradientAxis axis,
                                               int packed_position,
                                               int border_radius) {
+    modern_paint_fill_radial_gradient_area(target, rect, clipped, rect, center_color, edge_color, axis, packed_position, border_radius);
+}
+
+void modern_paint_fill_radial_gradient_area(FrameBuffer& target,
+                                              Rect rect,
+                                              Rect clipped,
+                                             Rect paint_area,
+                                              Color center_color,
+                                              Color edge_color,
+                                              GradientAxis axis,
+                                              int packed_position,
+                                              int border_radius) {
+    clipped = intersect_paint_rect(clipped, paint_area);
     if (raster_empty_rect(clipped)) {
         return;
     }
@@ -206,7 +253,7 @@ void modern_paint_fill_radial_gradient_region(FrameBuffer& target,
     }
     const int radius2 = std::max(1, std::max(rect.width, rect.height));
     const int gradient_scale = (255 << 16) / radius2;
-    const RasterRoundedRect rounded = prepare_rounded_rect(rect, border_radius);
+    const RasterRoundedRect rounded = prepare_rounded_rect(paint_area, border_radius);
     modern_paint_fill_rounded_rows(target, clipped, rounded, [&](int x, int y) {
             const std::int64_t dx2 = static_cast<std::int64_t>(x) * 2 + 1 - center_x2;
             const std::int64_t dy2 = static_cast<std::int64_t>(y) * 2 + 1 - center_y2;

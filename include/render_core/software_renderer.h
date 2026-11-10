@@ -142,14 +142,25 @@ struct TextPainter {
     bool writes_only_within_rect = false;
 };
 
+// All rectangles use target coordinates, including temporary target surfaces.
+// destination retains the complete sampling geometry. A zero painting rect
+// means no independent background clip; Core applies admitted clips itself.
+struct ImagePaintRequest {
+    std::uint32_t image_handle = 0;
+    Rect destination;
+    ObjectFit object_fit = ObjectFit::Fill;
+    ObjectPosition object_position;
+    ImageRendering image_rendering = ImageRendering::Auto;
+    Rect background_painting_rect;
+    int background_painting_radius = 0;
+};
+
 using ImagePaintCallback = bool (*)(FrameBuffer& target,
-                                    Rect rect,
-                                    std::uint32_t image_handle,
-                                    ObjectFit object_fit,
-                                    ObjectPosition object_position,
-                                    ImageRendering image_rendering,
+                                    const ImagePaintRequest& request,
                                     void* context);
 
+// The callback and context are borrowed through the final raster/compositor
+// call. Neither callback return value nor a display command transfers ownership.
 struct ImagePainter {
     ImagePaintCallback paint = nullptr;
     void* context = nullptr;

@@ -51,6 +51,16 @@ void modern_paint_fill_soft_box_shadow(FrameBuffer& target,
                                        int extent,
                                        int blur);
 
+void modern_paint_fill_linear_gradient_area(FrameBuffer& target, Rect rect, Rect paint_area, Rect clip,
+                                            Color first, Color second, GradientAxis axis, int border_radius);
+
+void modern_paint_fill_conic_gradient_area(FrameBuffer& target, Rect rect, Rect clipped, Rect paint_area,
+                                           Color first, Color second, int stop_percent, int border_radius);
+
+void modern_paint_fill_radial_gradient_area(FrameBuffer& target, Rect rect, Rect clipped, Rect paint_area,
+                                            Color center_color, Color edge_color, GradientAxis axis,
+                                            int packed_position, int border_radius);
+
 // Pure bounded math shared by the optional CSS modern-paint raster paths.
 // This header deliberately contains no framebuffer, host, or allocation API.
 inline std::uint8_t modern_paint_clamp_u8(int value) {

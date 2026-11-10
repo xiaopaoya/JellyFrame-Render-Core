@@ -165,3 +165,11 @@ add_test(NAME jellyframe_typed_display_command_tests COMMAND jellyframe_typed_di
 if(COMMAND jellyframe_stage_sanitizer_runtime)
     jellyframe_stage_sanitizer_runtime(jellyframe_typed_display_command_tests)
 endif()
+
+add_executable(jellyframe_image_callback_contract_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/image_callback_contract_tests.cpp")
+target_link_libraries(jellyframe_image_callback_contract_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_image_callback_contract_tests COMMAND jellyframe_image_callback_contract_tests)
+if(COMMAND jellyframe_stage_sanitizer_runtime)
+    jellyframe_stage_sanitizer_runtime(jellyframe_image_callback_contract_tests)
+endif()
