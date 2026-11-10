@@ -139,3 +139,14 @@ add_test(NAME jellyframe_rounded_coverage_tests COMMAND jellyframe_rounded_cover
 if(COMMAND jellyframe_stage_sanitizer_runtime)
     jellyframe_stage_sanitizer_runtime(jellyframe_rounded_coverage_tests)
 endif()
+
+foreach(geometry IN ITEMS image repeat gradient)
+    set(geometry_target "jellyframe_background_${geometry}_geometry_tests")
+    add_executable(${geometry_target}
+        "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/background_${geometry}_geometry_tests.cpp")
+    target_link_libraries(${geometry_target} PRIVATE jellyframe_render_core)
+    add_test(NAME ${geometry_target} COMMAND ${geometry_target})
+    if(COMMAND jellyframe_stage_sanitizer_runtime)
+        jellyframe_stage_sanitizer_runtime(${geometry_target})
+    endif()
+endforeach()

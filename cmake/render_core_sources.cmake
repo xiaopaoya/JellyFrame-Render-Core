@@ -33,6 +33,9 @@ set(JELLYFRAME_RENDER_CORE_CORE_DOCUMENT_SOURCES
 
 set(JELLYFRAME_RENDER_CORE_CORE_PAINT_SOURCES
     src/animation_invalidation.cpp
+    src/background_image_geometry.cpp
+    src/background_repeat_geometry.cpp
+    src/background_gradient_geometry.cpp
     src/animation_timeline.cpp
     src/bitmap_font.cpp
     src/bitmap_font_resource.cpp

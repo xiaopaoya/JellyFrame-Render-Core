@@ -215,6 +215,15 @@ enum class ImageRendering : std::uint8_t {
     CrispEdges,
 };
 
+// Relative painting bounds preserve the full image/gradient sampling tile.
+struct BackgroundPaintClip {
+    std::int16_t dx = 0;
+    std::int16_t dy = 0;
+    std::uint16_t width = 0;
+    std::uint16_t height = 0;
+};
+static_assert(sizeof(BackgroundPaintClip) == 8, "Background paint clip must remain compact");
+
 struct ObjectPosition {
     int x_percent = 50;
     int y_percent = 50;
