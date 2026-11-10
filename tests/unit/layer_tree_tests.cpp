@@ -1823,6 +1823,7 @@ bool resolve_test_background_image(const Node&,
         return false;
     }
     resource.image_handle = context->handle;
+    resource.intrinsic_size = {ImageIntrinsicSizeState::Known, 64, 32};
     return true;
 }
 
@@ -1854,13 +1855,15 @@ void package_background_image_emits_image_display_command_when_surface_resolves(
     for (const DisplayCommand& command : flattened) {
         if (command.type() == DisplayCommandType::Image && command.image_paint().image_handle == context.handle) {
             found_image = true;
-            check(command.rect.width == 48 && command.rect.height == 32,
-                  "background image fills the documented element paint area");
+            check(command.rect.width == 64 && command.rect.height == 32,
+                  "background image sampling tile retains its resolved cover geometry");
             check(has_corner_radius(command.image_paint().border_radius),
                   "background image inherits the element rounded paint clip");
-            check(command.image_paint().object_fit == ObjectFit::Cover && command.image_paint().object_position.x_percent == 100 &&
-                      command.image_paint().object_position.y_percent == 0 && command.image_paint().image_rendering == ImageRendering::CrispEdges,
-                  "background image command carries bounded size, position and sampling controls");
+            check(command.image_paint().object_fit == ObjectFit::Fill &&
+                      command.image_paint().background_paint_clip.width == 48 &&
+                      command.image_paint().background_paint_clip.height == 32 &&
+                      command.image_paint().image_rendering == ImageRendering::CrispEdges,
+                  "background sampling geometry and clip are resolved before image painting");
         }
     }
     check(found_image, "resolved package background image emits image display command");

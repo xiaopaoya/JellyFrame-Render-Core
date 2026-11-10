@@ -1,5 +1,8 @@
 #pragma once
 
+// Version of the installed value-safe display-command payload contract.
+#define JELLYFRAME_RENDER_CORE_CANONICAL_VALUE_API_VERSION 1
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>

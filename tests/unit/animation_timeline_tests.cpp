@@ -179,6 +179,11 @@ void animation_timeline_samples_paint_only_properties() {
     Style from;
     from.opacity = 0.0F;
     from.background_color = Color{0, 0, 0, 255};
+    from.background_layer_count = 1;
+    from.background_layers[0].kind = BackgroundLayerKind::Gradient;
+    from.background_layers[0].paint.kind = BackgroundPaintKind::LinearGradient;
+    from.background_layers[0].paint.color = Color{255, 0, 0, 255};
+    from.background_layers[0].paint.color2 = Color{0, 0, 255, 255};
     from.color = Color{255, 255, 255, 255};
     Style to = from;
     to.opacity = 1.0F;
@@ -212,6 +217,11 @@ void animation_timeline_samples_keyframes_subset() {
     Style base;
     base.opacity = 1.0F;
     base.background_color = Color{0, 0, 0, 255};
+    base.background_layer_count = 1;
+    base.background_layers[0].kind = BackgroundLayerKind::Gradient;
+    base.background_layers[0].paint.kind = BackgroundPaintKind::LinearGradient;
+    base.background_layers[0].paint.color = Color{255, 0, 0, 255};
+    base.background_layers[0].paint.color2 = Color{0, 0, 255, 255};
     base.color = Color{255, 255, 255, 255};
 
     StyleAnimation animation;

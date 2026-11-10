@@ -6,6 +6,9 @@
 #include "render_core/flex_grid_paint.h"
 #include "render_core/text_normalization.h"
 #include "render_core/text_scan.h"
+#include "background_image_geometry.h"
+#include "background_gradient_geometry.h"
+#include "background_repeat_geometry.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -19,6 +22,14 @@
 
 namespace jellyframe {
 namespace {
+
+constexpr std::size_t kMaxImageResolutionAttemptsPerBuild = 128;
+struct ImageResolutionBuildState {
+    std::size_t attempts = 0;
+    bool limit_reported = false;
+};
+thread_local ImageResolutionBuildState* active_image_resolution_state = nullptr;
+
 
 #if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
 constexpr int kConicGradientAreaWarningPixels = 65536;
@@ -293,6 +304,160 @@ void paint_background_paint(const BackgroundPaint& paint,
 
 bool equal_border_widths(const EdgeSizes& border) {
     return border.top == border.right && border.top == border.bottom && border.top == border.left;
+}
+
+detail::BackgroundBoxAreasRequest background_box_request(
+    const LayoutBox& box, const BackgroundImageStyleValues& style) {
+    detail::BackgroundBoxAreasRequest request;
+    request.border_box = box.rect;
+    request.border = {box.style.border_width.top, box.style.border_width.right,
+                       box.style.border_width.bottom, box.style.border_width.left};
+    request.padding = {box.style.padding.top, box.style.padding.right,
+                        box.style.padding.bottom, box.style.padding.left};
+    request.origin = static_cast<detail::BackgroundBoxArea>(style.origin);
+    request.clip = static_cast<detail::BackgroundBoxArea>(style.clip);
+    request.border_radius = resolved_border_radius(box);
+    return request;
+}
+
+bool background_color_clip(const LayoutBox& box, BackgroundBox clip,
+                           Rect& area, int& radius) {
+    const auto inset = [](BackgroundBox selected, const EdgeSizes& border,
+                          const EdgeSizes& padding, int& top, int& right,
+                          int& bottom, int& left) {
+        top = right = bottom = left = 0;
+        if (selected == BackgroundBox::BorderBox) return true;
+        if (selected != BackgroundBox::PaddingBox && selected != BackgroundBox::ContentBox)
+            return false;
+        const auto add = [selected](int border_value, int padding_value) {
+            return static_cast<std::int64_t>(border_value) +
+                (selected == BackgroundBox::ContentBox ? padding_value : 0);
+        };
+        const auto t = add(border.top, padding.top);
+        const auto r = add(border.right, padding.right);
+        const auto b = add(border.bottom, padding.bottom);
+        const auto l = add(border.left, padding.left);
+        if (std::min({t, r, b, l}) < 0 ||
+            std::max({t, r, b, l}) > std::numeric_limits<int>::max()) return false;
+        top = static_cast<int>(t);
+        right = static_cast<int>(r);
+        bottom = static_cast<int>(b);
+        left = static_cast<int>(l);
+        return true;
+    };
+
+    if (clip != BackgroundBox::BorderBox && clip != BackgroundBox::PaddingBox &&
+        clip != BackgroundBox::ContentBox) return false;
+    int top = 0, right = 0, bottom = 0, left = 0;
+    if (!inset(clip, box.style.border_width, box.style.padding, top, right, bottom, left))
+        return false;
+    const Rect border_box = paint_rect_for(box);
+    const auto x = static_cast<std::int64_t>(border_box.x) + left;
+    const auto y = static_cast<std::int64_t>(border_box.y) + top;
+    const auto width = static_cast<std::int64_t>(border_box.width) - left - right;
+    const auto height = static_cast<std::int64_t>(border_box.height) - top - bottom;
+    if (width < 0 || height < 0) return false;
+    const auto max_int = static_cast<std::int64_t>(std::numeric_limits<int>::max());
+    const auto min_int = static_cast<std::int64_t>(std::numeric_limits<int>::min());
+    if (x < min_int || x > max_int || y < min_int || y > max_int ||
+        width > max_int || height > max_int || x + width > max_int || y + height > max_int)
+        return false;
+    area = {static_cast<int>(x), static_cast<int>(y),
+            static_cast<int>(width), static_cast<int>(height)};
+    radius = std::max(0, resolved_border_radius(box) - std::max({top, right, bottom, left}));
+    return width > 0 && height > 0;
+}
+
+bool paint_background_gradient(const BackgroundPaint& paint, const LayoutBox& box,
+                               DisplayList& display_list, const LayerTreeBuilderOptions& options,
+                               std::size_t remaining_commands, std::size_t box_command_begin,
+                               const BackgroundImageStyleValues* layer_style = nullptr) {
+    if (paint.kind != BackgroundPaintKind::LinearGradient &&
+        paint.kind != BackgroundPaintKind::ConicGradient &&
+        paint.kind != BackgroundPaintKind::RadialGradient) return false;
+#if !JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
+    (void)box;
+    (void)display_list;
+    (void)options;
+    (void)remaining_commands;
+    (void)box_command_begin;
+    (void)layer_style;
+    return false;
+#else
+    const Rect bounds = paint_rect_for(box);
+    const long long area = static_cast<long long>(std::max(0, bounds.width)) *
+        static_cast<long long>(std::max(0, bounds.height));
+    if (paint.kind == BackgroundPaintKind::ConicGradient && area > kConicGradientAreaWarningPixels) {
+        report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                          "layer-conic-gradient-area-budget",
+                          "conic-gradient() area is above the embedded progress-ring budget",
+                          "area=" + std::to_string(area) + "px limit=" +
+                              std::to_string(kConicGradientAreaWarningPixels) + "px");
+    } else if (paint.kind == BackgroundPaintKind::RadialGradient && area > kRadialGradientAreaWarningPixels) {
+        report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                          "layer-radial-gradient-area-budget",
+                          "radial-gradient() area is above the embedded highlight budget",
+                          "area=" + std::to_string(area) + "px limit=" +
+                              std::to_string(kRadialGradientAreaWarningPixels) + "px");
+    }
+    detail::BackgroundGradientGeometryRequest request;
+    request.boxes = background_box_request(box, layer_style ? *layer_style : BackgroundImageStyleValues{});
+    if (layer_style != nullptr) {
+        request.size_mode = static_cast<detail::BackgroundGradientSizeMode>(layer_style->size);
+        request.position_x_percent_q1000 = static_cast<std::int32_t>(layer_style->position_x_percent) * 1000;
+        request.position_y_percent_q1000 = static_cast<std::int32_t>(layer_style->position_y_percent) * 1000;
+        request.repeat_x = static_cast<detail::BackgroundAxisRepeat>(layer_style->repeat_x);
+        request.repeat_y = static_cast<detail::BackgroundAxisRepeat>(layer_style->repeat_y);
+    }
+    const std::size_t used = display_list.size() - box_command_begin;
+    request.max_tiles = used < remaining_commands ? remaining_commands - used : 0;
+    detail::BackgroundGradientGeometry geometry;
+    const auto status = detail::resolve_background_gradient_geometry(request, geometry);
+    if (status == detail::BackgroundGradientGeometryStatus::Empty) return true;
+    if (status != detail::BackgroundGradientGeometryStatus::Ready) {
+        report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                          status == detail::BackgroundGradientGeometryStatus::TileLimit
+                              ? "layer-background-gradient-limit" : "layer-background-gradient-geometry",
+                          "Background gradient pattern was refused; the complete gradient layer was omitted.");
+        return true;
+    }
+    for (std::size_t i = 0; i < geometry.sampling_tiles.count; ++i) {
+        BackgroundPaintClip clip;
+        if (!detail::make_background_paint_clip(geometry.sampling_tiles.tiles[i], geometry.painting_area, clip)) {
+            report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                              "layer-background-gradient-geometry",
+                              "Background gradient pattern was refused; its shared painting clip cannot be represented.");
+            return true;
+        }
+    }
+    const std::size_t begin = display_list.size();
+    try {
+        display_list.reserve(begin + geometry.sampling_tiles.count);
+        for (std::size_t i = 0; i < geometry.sampling_tiles.count; ++i) {
+            const Rect tile = geometry.sampling_tiles.tiles[i];
+            BackgroundPaintClip clip;
+            detail::make_background_paint_clip(tile, geometry.painting_area, clip);
+            if (paint.kind == BackgroundPaintKind::LinearGradient) {
+                push_linear_gradient(display_list, tile, paint.color, paint.color2, paint.axis,
+                                     geometry.painting_radius);
+            } else if (paint.kind == BackgroundPaintKind::ConicGradient) {
+                push_conic_gradient(display_list, tile, paint.color, paint.color2, paint.stop_percent,
+                                    geometry.painting_radius);
+            } else {
+                push_radial_gradient(display_list, tile, paint.color, paint.color2, paint.axis,
+                                     paint.stop_percent, geometry.painting_radius);
+            }
+            if (display_list.size() > begin + i)
+                display_list.back().basic_paint().background_paint_clip = clip;
+        }
+    } catch (const std::bad_alloc&) {
+        display_list.resize(begin);
+        report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                          "layer-background-gradient-limit",
+                          "Background gradient pattern was refused because command storage was unavailable.");
+    }
+    return true;
+#endif
 }
 
 void push_stroke_rect(DisplayList& display_list, Rect rect, Color color, int stroke_width, int border_radius) {
@@ -1024,9 +1189,8 @@ bool resolve_image_handle(const LayoutBox& box,
                           ImageResolveKind kind,
                           std::uint16_t background_resource_id,
                           const LayerTreeBuilderOptions& options,
-                          std::uint32_t& image_handle) {
-    image_handle = 0;
-    ResolvedImageResource resource;
+                          ResolvedImageResource& resource) {
+    resource = {};
     if (box.node == nullptr || box.node->type != NodeType::Element || options.image_resolver.resolve == nullptr) {
         return false;
     }
@@ -1040,6 +1204,18 @@ bool resolve_image_handle(const LayoutBox& box,
     if (kind == ImageResolveKind::Background && background_resource_id == 0) {
         return false;
     }
+    if (active_image_resolution_state == nullptr ||
+        active_image_resolution_state->attempts >= kMaxImageResolutionAttemptsPerBuild) {
+        if (active_image_resolution_state != nullptr && !active_image_resolution_state->limit_reported) {
+            report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree,
+                              DiagnosticSeverity::Warning, "layer-image-resolution-limit",
+                              "Image resolution attempt limit reached; later image layers were omitted",
+                              "Reduce the number of image resources in this build.");
+            active_image_resolution_state->limit_reported = true;
+        }
+        return false;
+    }
+    ++active_image_resolution_state->attempts;
     if (!options.image_resolver.resolve(*box.node, kind, background_resource_id,
                                          resource, options.image_resolver.context) ||
         resource.image_handle == 0) {
@@ -1059,7 +1235,6 @@ bool resolve_image_handle(const LayoutBox& box,
             return false;
         }
     }
-    image_handle = resource.image_handle;
     return true;
 }
 
@@ -1223,35 +1398,138 @@ bool paint_select_popup(const LayoutBox& box,
 }
 #endif
 
-void paint_box_self(const LayoutBox& box, DisplayList& display_list, const LayerTreeBuilderOptions& options) {
+void paint_background_image(const LayoutBox& box, const BackgroundImageStyleValues& background_style,
+                            const detail::BackgroundBoxAreas& background_areas,
+                            detail::BackgroundBoxAreasStatus background_areas_status,
+                            DisplayList& display_list, const LayerTreeBuilderOptions& options,
+                            std::size_t remaining_commands, std::size_t box_command_begin) {
+    ResolvedImageResource background_resource;
+    if (resolve_image_handle(box,
+                             ImageResolveKind::Background,
+                             background_style.resource_id,
+                             options,
+                             background_resource)) {
+        detail::BackgroundImageGeometryRequest geometry_request;
+        geometry_request.positioning_area = background_areas.positioning_area;
+        geometry_request.painting_area = background_areas.painting_area;
+        geometry_request.intrinsic_size_known = background_resource.intrinsic_size.state == ImageIntrinsicSizeState::Known;
+        geometry_request.intrinsic_width = background_resource.intrinsic_size.width;
+        geometry_request.intrinsic_height = background_resource.intrinsic_size.height;
+        geometry_request.size_mode = static_cast<detail::BackgroundImageSizeMode>(background_style.size);
+        const auto to_q1000 = [](int percent) {
+            const auto scaled = static_cast<std::int64_t>(percent) * 1000;
+            return static_cast<std::int32_t>(std::clamp<std::int64_t>(
+                scaled, std::numeric_limits<std::int32_t>::min(),
+                std::numeric_limits<std::int32_t>::max()));
+        };
+        geometry_request.position_x_percent_q1000 = to_q1000(background_style.position_x_percent);
+        geometry_request.position_y_percent_q1000 = to_q1000(background_style.position_y_percent);
+        const bool intrinsic_state_valid =
+            background_resource.intrinsic_size.state == ImageIntrinsicSizeState::Unknown ||
+            background_resource.intrinsic_size.state == ImageIntrinsicSizeState::Known;
+        detail::BackgroundRepeatRequest repeat_request;
+        repeat_request.image = geometry_request;
+        repeat_request.repeat_x = static_cast<detail::BackgroundAxisRepeat>(background_style.repeat_x);
+        repeat_request.repeat_y = static_cast<detail::BackgroundAxisRepeat>(background_style.repeat_y);
+        const auto prior_commands = display_list.size() - box_command_begin;
+        repeat_request.max_tiles = prior_commands < remaining_commands
+            ? remaining_commands - prior_commands : 0;
+        detail::BackgroundRepeatPlan plan;
+        auto status = background_areas_status == detail::BackgroundBoxAreasStatus::Ready && intrinsic_state_valid
+            ? detail::plan_background_image_tiles(repeat_request, plan)
+            : detail::BackgroundRepeatStatus::InvalidGeometry;
+        // Validate every compact clip before publishing any member of this layer.
+        for (std::size_t i = 0; status == detail::BackgroundRepeatStatus::Ready && i < plan.count; ++i) {
+            BackgroundPaintClip clip;
+            if (!detail::make_background_paint_clip(plan.tiles[i], background_areas.painting_area, clip))
+                status = detail::BackgroundRepeatStatus::CoordinateOverflow;
+        }
+        if (status == detail::BackgroundRepeatStatus::Ready) {
+            const auto image_begin = display_list.size();
+            try {
+                display_list.reserve(image_begin + plan.count);
+                for (std::size_t i = 0; i < plan.count; ++i) {
+                    BackgroundPaintClip clip;
+                    detail::make_background_paint_clip(plan.tiles[i], background_areas.painting_area, clip);
+                    push_image(display_list, plan.tiles[i], background_resource.image_handle,
+                               ObjectFit::Fill, {}, box.style.image_rendering, background_areas.painting_radius);
+                    display_list.back().image_paint().background_paint_clip = clip;
+                }
+            } catch (const std::bad_alloc&) {
+                display_list.resize(image_begin);
+                status = detail::BackgroundRepeatStatus::TileLimit;
+            }
+        }
+        if (status != detail::BackgroundRepeatStatus::Ready && status != detail::BackgroundRepeatStatus::Empty) {
+            const char* code = status == detail::BackgroundRepeatStatus::TileLimit
+                ? "layer-background-repeat-limit"
+                : status == detail::BackgroundRepeatStatus::FractionalGeometry
+                    ? "layer-background-repeat-fractional"
+                    : status == detail::BackgroundRepeatStatus::UnsupportedCombination
+                        ? "layer-background-repeat-unsupported" : "layer-background-image-geometry";
+            report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree,
+                              DiagnosticSeverity::Warning, code,
+                              "Background image pattern was refused; the complete image layer was omitted",
+                              "Use integral supported geometry within the 64-tile and remaining display-command budgets.");
+        }
+    }
+}
+
+void paint_canonical_background(const LayoutBox& box, DisplayList& display_list,
+                                const LayerTreeBuilderOptions& options,
+                                std::size_t remaining_commands, std::size_t box_command_begin) {
+    const bool valid_count = box.style.background_layer_count <= kMaxBackgroundLayers;
+    const std::size_t count = valid_count ? box.style.background_layer_count : 0;
+    if (!valid_count) {
+        report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                          "layer-background-layer-limit",
+                          "Background image list was refused; its layer count exceeds the four-slot value boundary.");
+    }
+    const BackgroundImageStyleValues color_style = count == 0
+        ? BackgroundImageStyleValues{} : box.style.background_layers[count - 1].image;
+    Rect color_area;
+    int color_radius = 0;
+    bool color_clip_ready = background_color_clip(box, color_style.clip, color_area, color_radius);
+    if (!color_clip_ready && color_style.clip == BackgroundBox::BorderBox) {
+        color_area = paint_rect_for(box);
+        color_radius = resolved_border_radius(box);
+        color_clip_ready = color_area.width > 0 && color_area.height > 0;
+    }
+    if (color_clip_ready) {
+        push_fill_rect(display_list, color_area, box.style.background_color, color_radius);
+    } else {
+        report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                          "layer-background-color-clip-geometry",
+                          "Background color was omitted because its clip geometry is empty or unsupported.");
+    }
+    for (std::size_t index = count; index > 0; --index) {
+        const auto& layer = box.style.background_layers[index - 1];
+        if (layer.kind == BackgroundLayerKind::None) continue;
+        detail::BackgroundBoxAreas areas;
+        const auto status = detail::resolve_background_box_areas(
+            background_box_request(box, layer.image), areas);
+        if (layer.kind == BackgroundLayerKind::Url) {
+            paint_background_image(box, layer.image, areas, status, display_list,
+                                   options, remaining_commands, box_command_begin);
+        } else if (layer.kind == BackgroundLayerKind::Gradient) {
+            if (!paint_background_gradient(layer.paint, box, display_list, options,
+                                           remaining_commands, box_command_begin, &layer.image)) {
+                // Cropped modern-paint profiles retain their existing solid fallback.
+                if (status == detail::BackgroundBoxAreasStatus::Ready)
+                    paint_background_paint(layer.paint, areas.painting_area, areas.painting_radius,
+                                           display_list, options);
+            }
+        }
+    }
+}
+
+void paint_box_self(const LayoutBox& box, DisplayList& display_list,
+                    const LayerTreeBuilderOptions& options, std::size_t remaining_commands) {
+    const std::size_t box_command_begin = display_list.size();
     const Rect paint_rect = paint_rect_for(box);
     const int border_radius = resolved_border_radius(box);
     paint_box_shadow(box, display_list, options);
-    const BackgroundPaint base{box.style.background_paint, box.style.background_gradient_axis,
-                               box.style.background_gradient_stop_percent, box.style.background_color,
-                               box.style.background_color2};
-    paint_background_paint(base, paint_rect, border_radius, display_list, options);
-    if (has_background_overlay(box.style.background_overlay_packed) &&
-        !has_background_image_resource(box.style.background_overlay_packed)) {
-        paint_background_paint(unpack_background_overlay(box.style.background_overlay_packed),
-                               paint_rect, border_radius, display_list, options);
-    }
-    const std::uint16_t background_resource_id =
-        background_image_resource_id(box.style.background_overlay_packed);
-    std::uint32_t background_image_handle = 0;
-    if (resolve_image_handle(box,
-                             ImageResolveKind::Background,
-                             background_resource_id,
-                             options,
-                             background_image_handle)) {
-        push_image(display_list,
-                   paint_rect,
-                   background_image_handle,
-                   background_image_object_fit(box.style.background_overlay_packed),
-                   background_image_object_position(box.style.background_overlay_packed),
-                   background_image_rendering(box.style.background_overlay_packed),
-                   border_radius);
-    }
+    paint_canonical_background(box, display_list, options, remaining_commands, box_command_begin);
 
     if (has_border(box.style.border_width)) {
         push_border_rects(display_list,
@@ -1267,11 +1545,11 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list, const Layer
     paint_list_marker(box, display_list);
     paint_generated_inline_content(box, display_list, CssPseudoElement::Before);
 
-    std::uint32_t image_handle = 0;
-    if (resolve_image_handle(box, ImageResolveKind::Content, 0, options, image_handle)) {
+    ResolvedImageResource content_resource;
+    if (resolve_image_handle(box, ImageResolveKind::Content, 0, options, content_resource)) {
         push_image(display_list,
                    content_rect_for(box),
-                   image_handle,
+                   content_resource.image_handle,
                    box.style.object_fit,
                    box.style.object_position,
                    box.style.image_rendering,
@@ -1659,6 +1937,15 @@ LayerNodePtr LayerTreeBuilder::build(const LayoutBox& root, MonotonicArena& aren
 }
 
 LayerNodePtr LayerTreeBuilder::build_with_arena(const LayoutBox& root, MonotonicArena* arena) const {
+    ImageResolutionBuildState image_resolution_state;
+    ImageResolutionBuildState* previous_image_resolution_state = active_image_resolution_state;
+    active_image_resolution_state = &image_resolution_state;
+    struct RestoreImageResolutionState {
+        ImageResolutionBuildState*& active;
+        ImageResolutionBuildState* previous;
+        ~RestoreImageResolutionState() { active = previous; }
+    } restore_image_resolution_state{active_image_resolution_state, previous_image_resolution_state};
+
     std::size_t remaining_commands = std::max<std::size_t>(1, options_.max_display_commands);
     bool display_budget_reported = false;
     auto root_layer = make_layer_node(arena);
@@ -1681,7 +1968,7 @@ LayerNodePtr LayerTreeBuilder::build_with_arena(const LayoutBox& root, Monotonic
 
     if (!root.style.visibility_hidden) {
         const std::size_t command_begin = root_layer->display_list.size();
-        paint_box_self(root, root_layer->display_list, options_);
+        paint_box_self(root, root_layer->display_list, options_, remaining_commands);
         trim_display_list(root_layer->display_list, command_begin, remaining_commands, display_budget_reported);
         stamp_trace_owner(root_layer->display_list, command_begin, trace_owner_token_for(root, options_));
     }
@@ -1922,7 +2209,7 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
 
         if (!current_box->style.visibility_hidden) {
             const std::size_t command_begin = target_layer->display_list.size();
-            paint_box_self(*current_box, target_layer->display_list, options_);
+            paint_box_self(*current_box, target_layer->display_list, options_, remaining_commands);
             if (target_layer == &current_layer) {
                 translate_display_commands(target_layer->display_list, command_begin, 0, -current.scroll_y);
             }

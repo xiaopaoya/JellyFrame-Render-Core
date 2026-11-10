@@ -1,5 +1,8 @@
 ﻿#pragma once
 
+// Version of the installed ordered layer-tree value contract.
+#define JELLYFRAME_RENDER_CORE_CANONICAL_LAYER_API_VERSION 1
+
 #include "render_core/arena.h"
 #include "render_core/geometry.h"
 #include "render_core/layout.h"

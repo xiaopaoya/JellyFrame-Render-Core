@@ -220,10 +220,12 @@ void supports_queries_apply_representative_supported_properties() {
           "space-evenly justification applies after @supports");
     check(style.overflow == "auto", "overflow-y auto applies after @supports");
 #if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
-    check(style.background_paint == BackgroundPaintKind::RadialGradient,
+    check(style.background_layer_count == 1 &&
+              style.background_layers[0].kind == BackgroundLayerKind::Gradient &&
+              style.background_layers[0].paint.kind == BackgroundPaintKind::RadialGradient,
           "background-image radial-gradient applies after @supports");
 #else
-    check(style.background_paint == BackgroundPaintKind::Solid,
+    check(style.background_layer_count == 1 && style.background_layers[0].kind == BackgroundLayerKind::None,
           "background-image radial-gradient falls back when modern paint is disabled");
 #endif
     check(style.color.r == 0 && style.color.g == 0 && style.color.b == 0, "unsupported @supports block is not applied");
@@ -265,8 +267,9 @@ void text_wrap_alias_reuses_bounded_white_space_behavior() {
 
 void style_struct_size_has_embedded_guardrail() {
 #if !defined(JELLYFRAME_TEST_CONFIG_DEBUG)
-    // One pointer for independently shared computed dimension residues.
-    check(sizeof(Style) <= 784, "Style should stay within the embedded size guardrail");
+    // ABI4 stores four lossless computed background layers inline. The measured
+    // Style size is 888 bytes, 104 bytes above the prior 784-byte ABI baseline.
+    check(sizeof(Style) <= 888, "Style should stay within the ABI4 size guardrail");
     check(sizeof(DisplayCommand) <= 160, "DisplayCommand should stay compact for display-list reuse");
 #endif
     const Style idle_style;
@@ -590,17 +593,22 @@ void linear_gradient_background_applies_without_breaking_fallbacks() {
     const Style fallback_style = resolver.resolve(*fallback);
     const Style fx_style = resolver.resolve(*fx);
 
-    check(gel_style.background_paint == BackgroundPaintKind::LinearGradient,
+    check(gel_style.background_layer_count == 1 &&
+              gel_style.background_layers[0].kind == BackgroundLayerKind::Gradient &&
+              gel_style.background_layers[0].paint.kind == BackgroundPaintKind::LinearGradient,
           "linear-gradient background selects gradient paint");
-    check(gel_style.background_gradient_axis == GradientAxis::Horizontal,
+    check(gel_style.background_layers[0].paint.axis == GradientAxis::Horizontal,
           "linear-gradient direction stores horizontal axis");
-    check(gel_style.background_color.r == 0x10 && gel_style.background_color2.r == 80,
+    check(gel_style.background_layers[0].paint.color.r == 0x10 &&
+              gel_style.background_layers[0].paint.color2.r == 80,
           "linear-gradient stores both colors");
-    check(gel_style.background_color2.a >= 126 && gel_style.background_color2.a <= 128,
+    check(gel_style.background_layers[0].paint.color2.a >= 126 &&
+              gel_style.background_layers[0].paint.color2.a <= 128,
           "linear-gradient stores rgba alpha");
     check(bad_color_style.color.r == 0x12 && bad_color_style.color.g == 0x34,
           "gradient is not accepted as text color");
-    check(fallback_style.background_paint == BackgroundPaintKind::Solid &&
+    check(fallback_style.background_layer_count == 1 &&
+              fallback_style.background_layers[0].kind == BackgroundLayerKind::None &&
               fallback_style.background_color.r == 0x11,
           "unsupported gradient does not replace earlier solid fallback");
     check(fx_style.text_shadow.enabled && fx_style.text_shadow.color.a >= 88 && fx_style.text_shadow.color.a <= 90 &&
@@ -618,8 +626,9 @@ void linear_gradient_background_applies_without_breaking_fallbacks() {
     StyleResolver diagonal_resolver(parse(
         ".diagonal { background: linear-gradient(to bottom left, #ffffff, #000000); }"));
     const Style diagonal_style = diagonal_resolver.resolve(*diagonal);
-    check(diagonal_style.background_paint == BackgroundPaintKind::LinearGradient &&
-              diagonal_style.background_gradient_axis == GradientAxis::DiagonalDownLeft,
+    check(diagonal_style.background_layers[0].kind == BackgroundLayerKind::Gradient &&
+              diagonal_style.background_layers[0].paint.kind == BackgroundPaintKind::LinearGradient &&
+              diagonal_style.background_layers[0].paint.axis == GradientAxis::DiagonalDownLeft,
           "linear-gradient stores diagonal direction subset");
 
     auto angle = make_element("div");
@@ -627,8 +636,9 @@ void linear_gradient_background_applies_without_breaking_fallbacks() {
     StyleResolver angle_resolver(parse(
         ".angle { background: linear-gradient(135deg, #ffffff, #000000); }"));
     const Style angle_style = angle_resolver.resolve(*angle);
-    check(angle_style.background_paint == BackgroundPaintKind::LinearGradient &&
-              angle_style.background_gradient_axis == GradientAxis::DiagonalDownRight,
+    check(angle_style.background_layers[0].kind == BackgroundLayerKind::Gradient &&
+              angle_style.background_layers[0].paint.kind == BackgroundPaintKind::LinearGradient &&
+              angle_style.background_layers[0].paint.axis == GradientAxis::DiagonalDownRight,
           "linear-gradient maps common design-tool degree angles to the bounded diagonal raster path");
 }
 
@@ -665,12 +675,14 @@ void two_layer_background_keeps_base_and_highlight() {
         ".card { background: radial-gradient(circle at 78% 12%, rgba(255, 255, 255, 0.22) 0%, transparent 100%), "
         "linear-gradient(to bottom right, #315a7a, #142331); }"));
     const Style style = resolver.resolve(*card);
-    check(style.background_paint == BackgroundPaintKind::LinearGradient &&
-              style.background_gradient_axis == GradientAxis::DiagonalDownRight,
-          "two-layer background keeps the last CSS layer as the base paint");
-    const BackgroundPaint overlay = unpack_background_overlay(style.background_overlay_packed);
-    check(has_background_overlay(style.background_overlay_packed) && overlay.kind == BackgroundPaintKind::RadialGradient &&
-              overlay.axis == GradientAxis::RadialPosition,
+    check(style.background_layer_count == 2 &&
+              style.background_layers[1].kind == BackgroundLayerKind::Gradient &&
+              style.background_layers[1].paint.kind == BackgroundPaintKind::LinearGradient &&
+              style.background_layers[1].paint.axis == GradientAxis::DiagonalDownRight,
+          "two-layer background keeps the last CSS layer in the lower layer slot");
+    const BackgroundPaint& overlay = style.background_layers[0].paint;
+    check(style.background_layers[0].kind == BackgroundLayerKind::Gradient &&
+              overlay.kind == BackgroundPaintKind::RadialGradient && overlay.axis == GradientAxis::RadialPosition,
           "two-layer background keeps the first CSS layer as the top highlight");
     check(overlay.stop_percent == 78 * 101 + 12,
           "two-layer radial highlight retains percentage position");
@@ -691,13 +703,16 @@ void conic_gradient_background_applies_progress_subset() {
 
     const Style ring_style = resolver.resolve(*ring);
     const Style fallback_style = resolver.resolve(*fallback);
-    check(ring_style.background_paint == BackgroundPaintKind::ConicGradient,
+    check(ring_style.background_layers[0].kind == BackgroundLayerKind::Gradient &&
+              ring_style.background_layers[0].paint.kind == BackgroundPaintKind::ConicGradient,
           "conic-gradient background selects conic paint");
-    check(ring_style.background_gradient_stop_percent == 76,
+    check(ring_style.background_layers[0].paint.stop_percent == 76,
           "conic-gradient stores progress stop");
-    check(ring_style.background_color.g == 0xcc && ring_style.background_color2.a >= 88,
+    check(ring_style.background_layers[0].paint.color.g == 0xcc &&
+              ring_style.background_layers[0].paint.color2.a >= 88,
           "conic-gradient stores progress and track colors");
-    check(fallback_style.background_paint == BackgroundPaintKind::Solid &&
+    check(fallback_style.background_layer_count == 1 &&
+              fallback_style.background_layers[0].kind == BackgroundLayerKind::None &&
               fallback_style.background_color.r == 0x10,
           "unsupported conic-gradient does not clear earlier fallback");
 }
@@ -725,20 +740,26 @@ void radial_gradient_background_applies_center_circle_subset() {
     const Style image_style = resolver.resolve(*image);
     const Style highlight_style = resolver.resolve(*highlight);
     const Style fallback_style = resolver.resolve(*fallback);
-    check(gel_style.background_paint == BackgroundPaintKind::RadialGradient,
+    check(gel_style.background_layers[0].kind == BackgroundLayerKind::Gradient &&
+              gel_style.background_layers[0].paint.kind == BackgroundPaintKind::RadialGradient,
           "radial-gradient background selects radial paint");
-    check(gel_style.background_color.r == 240 && gel_style.background_color2.b == 160,
+    check(gel_style.background_layers[0].paint.color.r == 240 &&
+              gel_style.background_layers[0].paint.color2.b == 160,
           "radial-gradient stores center and edge colors");
-    check(gel_style.background_color.a >= 216 && gel_style.background_color.a <= 217,
+    check(gel_style.background_layers[0].paint.color.a >= 216 &&
+              gel_style.background_layers[0].paint.color.a <= 217,
           "radial-gradient stores rgba center alpha");
-    check(image_style.background_paint == BackgroundPaintKind::RadialGradient &&
-              image_style.background_color.r == 255,
+    check(image_style.background_layers[0].kind == BackgroundLayerKind::Gradient &&
+              image_style.background_layers[0].paint.kind == BackgroundPaintKind::RadialGradient &&
+              image_style.background_layers[0].paint.color.r == 255,
           "background-image accepts radial-gradient image subset");
-    check(highlight_style.background_paint == BackgroundPaintKind::RadialGradient &&
-              highlight_style.background_gradient_axis == GradientAxis::RadialPosition &&
-              highlight_style.background_gradient_stop_percent == 82 * 101 + 12,
+    check(highlight_style.background_layers[0].kind == BackgroundLayerKind::Gradient &&
+              highlight_style.background_layers[0].paint.kind == BackgroundPaintKind::RadialGradient &&
+              highlight_style.background_layers[0].paint.axis == GradientAxis::RadialPosition &&
+              highlight_style.background_layers[0].paint.stop_percent == 82 * 101 + 12,
           "radial-gradient stores bounded percentage center position");
-    check(fallback_style.background_paint == BackgroundPaintKind::Solid &&
+    check(fallback_style.background_layer_count == 1 &&
+              fallback_style.background_layers[0].kind == BackgroundLayerKind::None &&
               fallback_style.background_color.r == 0x10,
           "unsupported radial-gradient does not clear earlier fallback");
 }
@@ -765,24 +786,31 @@ void package_background_image_url_is_bounded_and_preserves_background_color() {
     const Style cover_style = resolver.resolve(*cover);
     const Style invalid_style = resolver.resolve(*invalid);
     const Style replacement_style = resolver.resolve(*replacement);
-    const std::uint16_t resource_id = background_image_resource_id(cover_style.background_overlay_packed);
-    check(resource_id != 0 && has_background_image_resource(cover_style.background_overlay_packed),
-          "absolute package url stores a compact background image resource id");
+    const std::uint16_t resource_id = cover_style.background_layers[0].image.resource_id;
+    check(cover_style.background_layer_count == 1 && cover_style.background_layers[0].kind == BackgroundLayerKind::Url &&
+              resource_id != 0,
+          "absolute package url stores a background image resource id");
     const std::string* resource_url = resolver.background_image_resource_url(resource_id);
     check(resource_url != nullptr && *resource_url == "/assets/Cover.bmp",
           "background image resource keeps the case-sensitive package path");
     check(cover_style.background_color.r == 0x10 && cover_style.background_color.g == 0x20,
           "background-image url preserves the existing background color fallback");
-    check(background_image_object_fit(cover_style.background_overlay_packed) == ObjectFit::Cover &&
-              background_image_object_position(cover_style.background_overlay_packed).x_percent == 100 &&
-              background_image_object_position(cover_style.background_overlay_packed).y_percent == 0 &&
-              background_image_rendering(cover_style.background_overlay_packed) == ImageRendering::CrispEdges,
-          "background image packs size, position and sampling without extending Style");
-    check(replacement_style.background_paint == BackgroundPaintKind::Solid &&
+    check(cover_style.background_layers[0].image.size == BackgroundImageSizeMode::Cover &&
+              cover_style.background_layers[0].image.position_x_percent == 100 &&
+              cover_style.background_layers[0].image.position_y_percent == 0 &&
+              cover_style.background_layers[0].image.repeat_x == BackgroundImageRepeat::NoRepeat &&
+              cover_style.background_layers[0].image.repeat_y == BackgroundImageRepeat::NoRepeat &&
+              cover_style.background_layers[0].image.origin == BackgroundBox::PaddingBox &&
+              cover_style.background_layers[0].image.clip == BackgroundBox::BorderBox &&
+              cover_style.image_rendering == ImageRendering::CrispEdges,
+          "background image stores size, position, repeat, boxes and sampling");
+    check(replacement_style.background_layer_count == 1 &&
+              replacement_style.background_layers[0].kind == BackgroundLayerKind::Url &&
               replacement_style.background_color.a == 0 &&
-              has_background_image_resource(replacement_style.background_overlay_packed),
+              replacement_style.background_layers[0].image.resource_id != 0,
           "background-image URL replaces an earlier gradient image layer");
-    check(!has_background_image_resource(invalid_style.background_overlay_packed) &&
+    check(invalid_style.background_layer_count == 1 &&
+              invalid_style.background_layers[0].kind == BackgroundLayerKind::None &&
               invalid_style.background_color.r == 0x10,
           "remote background image URL is rejected without clearing the fallback");
 }
@@ -800,7 +828,7 @@ void unsupported_conic_gradient_reports_specific_diagnostic() {
         options);
 
     const Style style = resolver.resolve(*fallback);
-    check(style.background_paint == BackgroundPaintKind::Solid &&
+    check(style.background_layer_count == 1 && style.background_layers[0].kind == BackgroundLayerKind::None &&
               style.background_color.r == 0x10,
           "invalid conic-gradient preserves earlier fallback background");
     check(has_diagnostic_code(diagnostics, "style-conic-gradient-unsupported"),
@@ -820,7 +848,7 @@ void unsupported_radial_gradient_reports_specific_diagnostic() {
         options);
 
     const Style style = resolver.resolve(*fallback);
-    check(style.background_paint == BackgroundPaintKind::Solid &&
+    check(style.background_layer_count == 1 && style.background_layers[0].kind == BackgroundLayerKind::None &&
               style.background_color.r == 0x10,
           "invalid radial-gradient preserves earlier fallback background");
     check(has_diagnostic_code(diagnostics, "style-radial-gradient-unsupported"),

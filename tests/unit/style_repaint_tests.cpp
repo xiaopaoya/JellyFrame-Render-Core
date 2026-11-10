@@ -49,6 +49,14 @@ Node* find_element_by_id(Node& node, const std::string& id) {
     return nullptr;
 }
 
+const RenderObject* find_render_object(const RenderObject& object, const Node* node) {
+    if (object.node == node) return &object;
+    for (const auto& child : object.children) {
+        if (const auto* found = find_render_object(*child, node)) return found;
+    }
+    return nullptr;
+}
+
 struct Fixture {
     std::unique_ptr<Node> document;
     Stylesheet stylesheet;
@@ -85,7 +93,8 @@ RenderObjectPtr rebuild_render_tree(const Node& document, const StyleResolver& r
 void paint_only_class_change_can_reuse_layout() {
     auto fixture = build_fixture(
         "<body><button id='pulse' class='pill'>Open</button></body>",
-        ".pill { display: block; width: 80px; height: 20px; background-color: #111111; }"
+        ".pill { display: block; width: 80px; height: 20px; background-color: #111111; "
+        "background-image: url('/a.png'), url('/b.png'), url('/c.png'), url('/d.png'); }"
         ".pill.active { background-color: #222222; transform: scale(1.05); opacity: .9; }");
     Node* pulse = find_element_by_id(*fixture.document, "pulse");
     check(pulse != nullptr, "pulse exists");
@@ -116,6 +125,35 @@ void paint_only_class_change_can_reuse_layout() {
           "background repaint override is captured");
     check(previous_overrides.front().has_opacity && current_overrides.front().has_opacity,
           "opacity repaint override is captured");
+
+    RenderTreeOptions override_options;
+    override_options.style_overrides = &current_overrides;
+    auto overridden_tree = RenderTreeBuilder(fixture.resolver, override_options).build(*fixture.document);
+    const auto* overridden = find_render_object(*overridden_tree, pulse);
+    const auto* unoverridden = find_render_object(*next_render, pulse);
+    check(overridden != nullptr && unoverridden != nullptr && overridden->style.background_layer_count == 4 &&
+              overridden->style.background_layers[0].image.resource_id ==
+                  unoverridden->style.background_layers[0].image.resource_id &&
+              overridden->style.background_color.r == 34,
+          "background color override preserves canonical image layers and updates the shared fallback color");
+}
+
+void fourth_background_layer_change_stays_conservative() {
+    auto fixture = build_fixture(
+        "<body><button id='pulse' class='pill'>Open</button></body>",
+        ".pill { display:block; width:80px; height:20px; background-image:"
+        "url('/a.png'),url('/b.png'),url('/c.png'),url('/d.png'); }"
+        ".pill.active { background-image:url('/a.png'),url('/b.png'),url('/c.png'),url('/e.png'); }");
+    Node* pulse = find_element_by_id(*fixture.document, "pulse");
+    check(pulse != nullptr, "pulse exists for fourth-layer invalidation");
+    pulse->set_attribute("class", "pill active");
+    auto next_render = rebuild_render_tree(*fixture.document, fixture.resolver);
+    check(!style_dirty_can_reuse_layout(*fixture.document,
+                                        *fixture.render_tree,
+                                        *next_render,
+                                        *fixture.layout_tree,
+                                        fixed_text_measure()),
+          "a fourth background image change cannot hide behind the legacy first-layer projection");
 }
 
 void layout_class_change_stays_conservative() {
@@ -238,6 +276,7 @@ void flex_and_text_layout_fields_reject_paint_only_reuse() {
 int main() {
     try {
         paint_only_class_change_can_reuse_layout();
+        fourth_background_layer_change_stays_conservative();
         layout_class_change_stays_conservative();
         transform_class_change_invalidates_old_and_new_bounds();
         class_change_with_stable_text_can_reuse_layout();

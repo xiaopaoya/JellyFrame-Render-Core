@@ -4,6 +4,8 @@
 #include "render_core/feature_config.h"
 #include "render_core/text_backend.h"
 #include "css_aspect_ratio.h"
+#include "css_background_layers.h"
+#include "background_resource_transaction.h"
 #include "css_flex_values.h"
 #include "computed_size_values.h"
 
@@ -17,6 +19,7 @@
 #include <cstring>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -2136,52 +2139,6 @@ bool parse_radial_gradient_background(const std::string& raw_value,
     return parse_radial_stop(args[0], first, 0) && parse_radial_stop(args[1], second, 100);
 }
 
-bool parse_background_paint(const std::string& value,
-                            BackgroundPaintKind& kind,
-                            GradientAxis& axis,
-                            int& stop_percent,
-                            Color& color,
-                            Color& color2) {
-    Color first;
-    Color second;
-    if (parse_linear_gradient_background(value, first, second, axis)) {
-        kind = BackgroundPaintKind::LinearGradient;
-        stop_percent = 100;
-        color = first;
-        color2 = second;
-        return true;
-    }
-    int conic_stop_percent = 100;
-    if (parse_conic_gradient_background(value, first, second, conic_stop_percent)) {
-        kind = BackgroundPaintKind::ConicGradient;
-        axis = GradientAxis::Vertical;
-        stop_percent = conic_stop_percent;
-        color = first;
-        color2 = second;
-        return true;
-    }
-    int radial_x_percent = 50;
-    int radial_y_percent = 50;
-    if (parse_radial_gradient_background(value, first, second, radial_x_percent, radial_y_percent)) {
-        kind = BackgroundPaintKind::RadialGradient;
-        axis = radial_x_percent == 50 && radial_y_percent == 50
-            ? GradientAxis::Vertical
-            : GradientAxis::RadialPosition;
-        stop_percent = radial_x_percent * 101 + radial_y_percent;
-        color = first;
-        color2 = second;
-        return true;
-    }
-    if (parse_color(value, color)) {
-        kind = BackgroundPaintKind::Solid;
-        axis = GradientAxis::Vertical;
-        stop_percent = 100;
-        color2 = color;
-        return true;
-    }
-    return false;
-}
-
 bool parse_background_image_paint(const std::string& value,
                                   BackgroundPaintKind& kind,
                                   GradientAxis& axis,
@@ -2258,12 +2215,44 @@ bool parse_package_background_image_url(std::string_view raw_value, std::string_
     });
 }
 
-void update_package_background_image_presentation(Style& style) {
-    const std::uint16_t resource_id = background_image_resource_id(style.background_overlay_packed);
-    if (resource_id != 0) {
-        style.background_overlay_packed = pack_background_image_resource(
-            resource_id, style.object_fit, style.object_position, style.image_rendering);
+struct ParsedBackgroundLayers {
+    std::array<BackgroundLayer, 4> layers{};
+    std::array<std::string_view, 4> urls{};
+    std::size_t count = 0;
+    Color color{0, 0, 0, 0};
+};
+
+bool parse_background_layers(std::string_view value, bool shorthand, ParsedBackgroundLayers& output) {
+    css_background_detail::ImageListSyntax syntax;
+    const auto image_valid = [](std::string_view image) {
+        if (lowercase(trim(image)) == "none") return true;
+        std::string_view url;
+        if (parse_package_background_image_url(image, url)) return true;
+#if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
+        BackgroundPaint paint;
+        return parse_background_image_paint(std::string(image), paint.kind, paint.axis,
+                                            paint.stop_percent, paint.color, paint.color2);
+#else
+        return false;
+#endif
+    };
+    if (!css_background_detail::parse_image_list(value, shorthand, image_valid,
+            [](std::string_view color) { Color parsed; return parse_color(std::string(color), parsed); }, syntax)) return false;
+    ParsedBackgroundLayers candidate;
+    candidate.count = syntax.count;
+    if (!syntax.color.empty() && !parse_color(std::string(syntax.color), candidate.color)) return false;
+    for (std::size_t i = 0; i < syntax.count; ++i) {
+        if (lowercase(trim(syntax.images[i])) == "none") continue;
+        auto& layer = candidate.layers[i];
+        if (parse_package_background_image_url(syntax.images[i], candidate.urls[i])) layer.kind = BackgroundLayerKind::Url;
+        else {
+            layer.kind = BackgroundLayerKind::Gradient;
+            if (!parse_background_image_paint(std::string(syntax.images[i]), layer.paint.kind, layer.paint.axis,
+                    layer.paint.stop_percent, layer.paint.color, layer.paint.color2)) return false;
+        }
     }
+    output = candidate;
+    return true;
 }
 
 bool parse_number_or_length_for_transform(const std::string& value, float& output, int em_base = kRootFontSizePx) {
@@ -2912,9 +2901,12 @@ enum class CascadeProperty : std::size_t {
     Display,
     Visibility,
     Color,
-    Background,
+    BackgroundImage,
+    BackgroundColor,
     BackgroundSize,
     BackgroundPosition,
+    BackgroundOrigin,
+    BackgroundClip,
     BackgroundRepeat,
     Margin,
     MarginTop,
@@ -3019,6 +3011,12 @@ enum class CascadeProperty : std::size_t {
 
 struct CascadeSlots {
     std::array<CascadeSlot, static_cast<std::size_t>(CascadeProperty::Count)> slots;
+    std::array<std::array<BackgroundImageStyleValues, 4>, 5> background_lists{};
+    std::array<std::size_t, 5> background_list_counts{};
+    CascadeSlots() {
+        for (auto& list : background_lists)
+            for (auto& item : list) item.position_x_percent = item.position_y_percent = 0;
+    }
 };
 
 struct CustomPropertySlot {
@@ -3057,9 +3055,11 @@ CascadeSlot* cascade_slot_for_property(CascadeSlots& slots, const std::string& p
         {"animation-name", CascadeProperty::AnimationName},
         {"animation-timing-function", CascadeProperty::AnimationTimingFunction},
         {"aspect-ratio", CascadeProperty::AspectRatio},
-        {"background", CascadeProperty::Background},
-        {"background-color", CascadeProperty::Background},
-        {"background-image", CascadeProperty::Background},
+        {"background", CascadeProperty::BackgroundImage},
+        {"background-clip", CascadeProperty::BackgroundClip},
+        {"background-color", CascadeProperty::BackgroundColor},
+        {"background-image", CascadeProperty::BackgroundImage},
+        {"background-origin", CascadeProperty::BackgroundOrigin},
         {"background-position", CascadeProperty::BackgroundPosition},
         {"background-repeat", CascadeProperty::BackgroundRepeat},
         {"background-size", CascadeProperty::BackgroundSize},
@@ -3472,7 +3472,8 @@ bool apply_declaration(Style& style,
                        const std::string& property,
                        const std::string& value,
                        const StyleResolver* resolver = nullptr,
-                       const LengthResolutionContext& context = {}) {
+                       const LengthResolutionContext& context = {},
+                       CascadeSlots* cascade_slots = nullptr) {
 #if !JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
     if (is_flex_grid_property(property)) {
         return false;
@@ -3528,75 +3529,22 @@ bool apply_declaration(Style& style,
         return true;
     } else if (property == "background-color") {
         Color parsed;
-        if (!parse_color(value, parsed)) {
-            return false;
-        }
-        style.background_paint = BackgroundPaintKind::Solid;
-        style.background_gradient_axis = GradientAxis::Vertical;
-        style.background_gradient_stop_percent = 100;
+        if (!parse_color(value, parsed)) return false;
         style.background_color = parsed;
-        style.background_color2 = parsed;
-        style.background_overlay_packed = 0;
         return true;
     } else if (property == "background" || property == "background-image") {
-        std::string_view image_url;
-        if (parse_package_background_image_url(value, image_url)) {
-            if (resolver == nullptr) {
-                return false;
-            }
-            const std::uint16_t resource_id = resolver->background_image_resource_id_for(image_url);
-            if (resource_id == 0) {
-                return false;
-            }
-            if (property == "background") {
-                style.background_paint = BackgroundPaintKind::Solid;
-                style.background_gradient_axis = GradientAxis::Vertical;
-                style.background_gradient_stop_percent = 100;
-                style.background_color = Color{0, 0, 0, 0};
-                style.background_color2 = style.background_color;
-            } else if (style.background_paint != BackgroundPaintKind::Solid) {
-                // background-image replaces older image layers but leaves a
-                // separately declared background-color fallback in place.
-                style.background_paint = BackgroundPaintKind::Solid;
-                style.background_gradient_axis = GradientAxis::Vertical;
-                style.background_gradient_stop_percent = 100;
-                style.background_color = Color{0, 0, 0, 0};
-                style.background_color2 = style.background_color;
-            }
-            style.background_overlay_packed = pack_background_image_resource(
-                resource_id, style.object_fit, style.object_position, style.image_rendering);
-            return true;
+        ParsedBackgroundLayers candidate;
+        if (!parse_background_layers(value, property == "background", candidate)) return false;
+        std::array<std::uint16_t, 4> ids{};
+        const bool has_urls = std::any_of(candidate.urls.begin(), candidate.urls.end(), [](auto url) { return !url.empty(); });
+        if (has_urls && (!resolver || !detail::BackgroundResourceTransaction::register_urls(*resolver, candidate.urls, candidate.count, ids))) return false;
+        for (std::size_t i = 0; i < candidate.count; ++i) candidate.layers[i].image.resource_id = ids[i];
+        style.background_layers = candidate.layers;
+        style.background_layer_count = static_cast<std::uint8_t>(candidate.count);
+        if (property == "background") {
+            style.background_color = candidate.color;
+            if (cascade_slots) cascade_slots->background_list_counts.fill(0);
         }
-        if (property == "background-image" && lowercase(trim(value)) == "none") {
-            style.background_overlay_packed = 0;
-            return true;
-        }
-        const std::vector<std::string> layers = split_function_arguments(value);
-        if (layers.empty() || layers.size() > 2) {
-            return false;
-        }
-        std::array<BackgroundPaint, 2> parsed_layers;
-        for (std::size_t index = 0; index < layers.size(); ++index) {
-            BackgroundPaint& layer = parsed_layers[index];
-            const bool parsed = property == "background"
-                ? parse_background_paint(layers[index], layer.kind, layer.axis, layer.stop_percent, layer.color, layer.color2)
-                : parse_background_image_paint(layers[index], layer.kind, layer.axis, layer.stop_percent, layer.color, layer.color2);
-            if (!parsed) {
-                return false;
-            }
-#if !JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
-            if (layer.kind != BackgroundPaintKind::Solid) {
-                return false;
-            }
-#endif
-        }
-        const BackgroundPaint& base = parsed_layers[layers.size() - 1];
-        style.background_paint = base.kind;
-        style.background_gradient_axis = base.axis;
-        style.background_gradient_stop_percent = base.stop_percent;
-        style.background_color = base.color;
-        style.background_color2 = base.color2;
-        style.background_overlay_packed = layers.size() == 2 ? pack_background_overlay(parsed_layers[0]) : 0;
         return true;
     }
     const DeclarationApplyResult box_model = apply_box_model_declaration(style, property, value, context);
@@ -4149,7 +4097,6 @@ bool apply_declaration(Style& style,
         } else {
             return false;
         }
-        update_package_background_image_presentation(style);
         return true;
     } else if (property == "object-position") {
         ObjectPosition position;
@@ -4157,7 +4104,6 @@ bool apply_declaration(Style& style,
             return false;
         }
         style.object_position = position;
-        update_package_background_image_presentation(style);
         return true;
     } else if (property == "image-rendering") {
         const std::string lowered = lowercase(trim(value));
@@ -4170,31 +4116,62 @@ bool apply_declaration(Style& style,
         } else {
             return false;
         }
-        update_package_background_image_presentation(style);
         return true;
-    } else if (property == "background-size") {
-        const std::string lowered = lowercase(trim(value));
-        if (lowered == "cover") {
-            style.object_fit = ObjectFit::Cover;
-        } else if (lowered == "contain") {
-            style.object_fit = ObjectFit::Contain;
-        } else if (lowered == "100% 100%") {
-            style.object_fit = ObjectFit::Fill;
-        } else {
-            return false;
+    } else if (property == "background-size" || property == "background-position" ||
+               property == "background-origin" || property == "background-clip" || property == "background-repeat") {
+        const std::size_t property_index = property == "background-size" ? 0 : property == "background-position" ? 1 :
+            property == "background-origin" ? 2 : property == "background-clip" ? 3 : 4;
+        std::array<BackgroundImageStyleValues, 4> parsed{};
+        std::size_t count = 0;
+        if (!css_background_detail::visit_list(value, [&](std::string_view item, std::size_t index) {
+            BackgroundImageStyleValues entry;
+            const std::string lowered = lowercase(trim(item));
+            if (property_index == 0) {
+                if (lowered == "auto") entry.size = BackgroundImageSizeMode::Auto;
+                else if (lowered == "cover") entry.size = BackgroundImageSizeMode::Cover;
+                else if (lowered == "contain") entry.size = BackgroundImageSizeMode::Contain;
+                else if (lowered == "100% 100%") entry.size = BackgroundImageSizeMode::Stretch;
+                else return false;
+            } else if (property_index == 1) {
+                ObjectPosition position;
+                if (!parse_object_position_value(std::string(item), position)) return false;
+                entry.position_x_percent = static_cast<std::uint8_t>(position.x_percent);
+                entry.position_y_percent = static_cast<std::uint8_t>(position.y_percent);
+            } else if (property_index == 2 || property_index == 3) {
+                BackgroundBox box;
+                if (lowered == "border-box") box = BackgroundBox::BorderBox;
+                else if (lowered == "padding-box") box = BackgroundBox::PaddingBox;
+                else if (lowered == "content-box") box = BackgroundBox::ContentBox;
+                else return false;
+                if (property_index == 2) entry.origin = box; else entry.clip = box;
+            } else {
+                const auto tokens = split_whitespace_components(lowered);
+                if (tokens.empty() || tokens.size() > 2) return false;
+                const auto axis = [](const std::string& token, BackgroundImageRepeat& out) {
+                    if (token == "no-repeat") out = BackgroundImageRepeat::NoRepeat;
+                    else if (token == "repeat") out = BackgroundImageRepeat::Repeat;
+                    else if (token == "space") out = BackgroundImageRepeat::Space;
+                    else if (token == "round") out = BackgroundImageRepeat::Round;
+                    else return false;
+                    return true;
+                };
+                if (tokens.size() == 1 && tokens[0] == "repeat-x") entry.repeat_y = BackgroundImageRepeat::NoRepeat;
+                else if (tokens.size() == 1 && tokens[0] == "repeat-y") entry.repeat_x = BackgroundImageRepeat::NoRepeat;
+                else {
+                    if (!axis(tokens[0], entry.repeat_x)) return false;
+                    entry.repeat_y = entry.repeat_x;
+                    if (tokens.size() == 2 && !axis(tokens[1], entry.repeat_y)) return false;
+                }
+            }
+            if (index < parsed.size()) parsed[index] = entry;
+            ++count;
+            return true;
+        })) return false;
+        if (cascade_slots) {
+            cascade_slots->background_lists[property_index] = parsed;
+            cascade_slots->background_list_counts[property_index] = std::min<std::size_t>(4, count);
         }
-        update_package_background_image_presentation(style);
         return true;
-    } else if (property == "background-position") {
-        ObjectPosition position;
-        if (!parse_object_position_value(value, position)) {
-            return false;
-        }
-        style.object_position = position;
-        update_package_background_image_presentation(style);
-        return true;
-    } else if (property == "background-repeat") {
-        return lowercase(trim(value)) == "no-repeat";
     } else if (property == "list-style" || property == "list-style-type") {
         std::istringstream stream(lowercase(trim(value)));
         std::string token;
@@ -4517,16 +4494,60 @@ bool apply_edge_shorthand(Style& style,
 }
 
 bool apply_cascaded_declaration(Style& style,
+                                CascadeSlots& cascade_slots,
                                 CascadeSlot& slot,
                                 const CssDeclaration& declaration,
                                 const CssSpecificity& specificity,
                                 std::size_t source_order,
                                 const StyleResolver* resolver,
                                 const LengthResolutionContext& context) {
+    if (declaration.property == "background") {
+        constexpr std::array<CascadeProperty, 7> affected{CascadeProperty::BackgroundImage,
+            CascadeProperty::BackgroundColor, CascadeProperty::BackgroundSize, CascadeProperty::BackgroundPosition,
+            CascadeProperty::BackgroundOrigin, CascadeProperty::BackgroundClip, CascadeProperty::BackgroundRepeat};
+        std::array<bool, affected.size()> wins{};
+        bool any_wins = false;
+        for (std::size_t i = 0; i < affected.size(); ++i) {
+            wins[i] = declaration_wins(cascade_slot(cascade_slots, affected[i]), declaration, specificity, source_order);
+            any_wins = any_wins || wins[i];
+        }
+        if (!any_wins) return true;
+        ParsedBackgroundLayers candidate;
+        if (!parse_background_layers(declaration.value, true, candidate)) return false;
+        std::array<std::uint16_t, 4> resource_ids{};
+        bool image_ready = true;
+        if (wins[0]) {
+            const bool has_urls = std::any_of(candidate.urls.begin(), candidate.urls.end(),
+                                              [](std::string_view url) { return !url.empty(); });
+            image_ready = !has_urls ||
+                (resolver != nullptr && detail::BackgroundResourceTransaction::register_urls(
+                    *resolver, candidate.urls, candidate.count, resource_ids));
+            if (image_ready) {
+                for (std::size_t i = 0; i < candidate.count; ++i)
+                    candidate.layers[i].image.resource_id = resource_ids[i];
+                style.background_layers = candidate.layers;
+                style.background_layer_count = static_cast<std::uint8_t>(candidate.count);
+                mark_slot(cascade_slot(cascade_slots, affected[0]), declaration, specificity, source_order);
+            }
+        }
+        bool applied = wins[0] && image_ready;
+        if (wins[1]) {
+            style.background_color = candidate.color;
+            mark_slot(cascade_slot(cascade_slots, affected[1]), declaration, specificity, source_order);
+            applied = true;
+        }
+        for (std::size_t i = 0; i < affected.size(); ++i) {
+            if (i < 2 || !wins[i]) continue;
+            mark_slot(cascade_slot(cascade_slots, affected[i]), declaration, specificity, source_order);
+            cascade_slots.background_list_counts[i - 2] = 0;
+            applied = true;
+        }
+        return applied;
+    }
     if (!declaration_wins(slot, declaration, specificity, source_order)) {
         return true;
     }
-    if (apply_declaration(style, declaration.property, declaration.value, resolver, context)) {
+    if (apply_declaration(style, declaration.property, declaration.value, resolver, context, &cascade_slots)) {
         mark_slot(slot, declaration, specificity, source_order);
         return true;
     }
@@ -4848,6 +4869,7 @@ void apply_declarations(Style& style,
         CascadeSlot* slot = cascade_slot_for_property(slots, applied_declaration.property);
         if (slot != nullptr) {
             if (!apply_cascaded_declaration(style,
+                                            slots,
                                             *slot,
                                             applied_declaration,
                                             specificity,
@@ -4895,6 +4917,20 @@ void apply_declarations(Style& style,
                               "CSS property is outside the supported subset and was ignored",
                               applied_declaration.property);
         }
+        }
+    }
+    for (std::size_t i = 0; i < style.background_layer_count; ++i) {
+        auto& image = style.background_layers[i].image;
+        for (std::size_t p = 0; p < slots.background_list_counts.size(); ++p) {
+            const std::size_t count = slots.background_list_counts[p];
+            BackgroundImageStyleValues initial;
+            initial.position_x_percent = initial.position_y_percent = 0;
+            const auto& entry = count ? slots.background_lists[p][i % count] : initial;
+            if (p == 0) image.size = entry.size;
+            else if (p == 1) { image.position_x_percent = entry.position_x_percent; image.position_y_percent = entry.position_y_percent; }
+            else if (p == 2) image.origin = entry.origin;
+            else if (p == 3) image.clip = entry.clip;
+            else { image.repeat_x = entry.repeat_x; image.repeat_y = entry.repeat_y; }
         }
     }
 }
@@ -5348,9 +5384,10 @@ StyleResolver::StyleResolver(Stylesheet stylesheet, StyleResolverOptions options
             if (declaration.property != "background" && declaration.property != "background-image") {
                 continue;
             }
-            std::string_view url;
-            if (parse_package_background_image_url(declaration.value, url)) {
-                background_image_resource_id_for(url);
+            ParsedBackgroundLayers parsed;
+            if (parse_background_layers(declaration.value, declaration.property == "background", parsed)) {
+                std::array<std::uint16_t, 4> ids{};
+                background_image_resource_ids_for(parsed.urls, parsed.count, ids);
             }
         }
     }
@@ -5403,9 +5440,10 @@ void StyleResolver::rebuild_derived_state() {
             if (declaration.property != "background" && declaration.property != "background-image") {
                 continue;
             }
-            std::string_view url;
-            if (parse_package_background_image_url(declaration.value, url)) {
-                background_image_resource_id_for(url);
+            ParsedBackgroundLayers parsed;
+            if (parse_background_layers(declaration.value, declaration.property == "background", parsed)) {
+                std::array<std::uint16_t, 4> ids{};
+                background_image_resource_ids_for(parsed.urls, parsed.count, ids);
             }
         }
     }
@@ -5918,18 +5956,45 @@ const CssKeyframesRule* StyleResolver::keyframes(std::string_view name) const {
 }
 
 std::uint16_t StyleResolver::background_image_resource_id_for(std::string_view url) const {
-    for (std::size_t index = 0; index < background_image_resources_.size(); ++index) {
-        const std::string& existing = background_image_resources_[index];
-        if (existing.size() == url.size() && existing.compare(0, existing.size(), url.data(), url.size()) == 0) {
-            return static_cast<std::uint16_t>(index + 1);
-        }
-    }
+    std::array<std::string_view, 4> urls{url};
+    std::array<std::uint16_t, 4> ids{};
+    return background_image_resource_ids_for(urls, 1, ids) ? ids[0] : 0;
+}
+
+bool StyleResolver::background_image_resource_ids_for(const std::array<std::string_view, 4>& urls,
+                                                        std::size_t count,
+                                                        std::array<std::uint16_t, 4>& ids) const {
+    if (count > urls.size()) return false;
+    std::array<std::uint16_t, 4> candidate{};
+    const std::size_t checkpoint = background_image_resources_.size();
     const std::size_t limit = std::min<std::size_t>(options_.max_background_image_resources, 0xFFFFU);
-    if (limit == 0 || background_image_resources_.size() >= limit) {
-        return 0;
+    try {
+        std::array<std::string, 4> pending;
+        std::size_t pending_count = 0;
+        for (std::size_t i = 0; i < count; ++i) {
+            if (urls[i].empty()) continue;
+            for (std::size_t j = 0; j < checkpoint; ++j)
+                if (background_image_resources_[j] == urls[i]) candidate[i] = static_cast<std::uint16_t>(j + 1);
+            if (candidate[i]) continue;
+            for (std::size_t j = 0; j < pending_count; ++j)
+                if (pending[j] == urls[i]) candidate[i] = static_cast<std::uint16_t>(checkpoint + j + 1);
+            if (candidate[i]) continue;
+            if (checkpoint + pending_count >= limit) return false;
+            pending[pending_count] = std::string(urls[i]);
+            candidate[i] = static_cast<std::uint16_t>(checkpoint + ++pending_count);
+        }
+        background_image_resources_.reserve(checkpoint + pending_count);
+        for (std::size_t i = 0; i < pending_count; ++i)
+            background_image_resources_.push_back(std::move(pending[i]));
+    } catch (const std::bad_alloc&) {
+        background_image_resources_.resize(checkpoint);
+        return false;
+    } catch (const std::length_error&) {
+        background_image_resources_.resize(checkpoint);
+        return false;
     }
-    background_image_resources_.emplace_back(url);
-    return static_cast<std::uint16_t>(background_image_resources_.size());
+    ids = candidate;
+    return true;
 }
 
 const std::string* StyleResolver::background_image_resource_url(std::uint16_t resource_id) const {

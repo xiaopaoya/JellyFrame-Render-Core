@@ -115,93 +115,30 @@ struct BackgroundPaint {
     Color color2{0, 0, 0, 0};
 };
 
-inline std::uint16_t pack_background_overlay_color(Color color) {
-    const auto compress = [](std::uint8_t component) {
-        return static_cast<std::uint16_t>(std::min(15U, (static_cast<unsigned int>(component) + 8U) >> 4U));
-    };
-    return static_cast<std::uint16_t>(compress(color.r) << 12U) |
-        static_cast<std::uint16_t>(compress(color.g) << 8U) |
-        static_cast<std::uint16_t>(compress(color.b) << 4U) |
-        compress(color.a);
-}
+enum class BackgroundImageSizeMode : std::uint8_t { Auto, Cover, Contain, Stretch };
+enum class BackgroundImageRepeat : std::uint8_t { NoRepeat, Repeat, Space, Round };
+enum class BackgroundBox : std::uint8_t { BorderBox, PaddingBox, ContentBox };
 
-inline Color unpack_background_overlay_color(std::uint16_t packed) {
-    const auto expand = [](std::uint16_t component) {
-        return static_cast<std::uint8_t>((component << 4U) | component);
-    };
-    return Color{expand((packed >> 12U) & 0xFU), expand((packed >> 8U) & 0xFU),
-                 expand((packed >> 4U) & 0xFU), expand(packed & 0xFU)};
-}
+struct BackgroundImageStyleValues {
+    std::uint16_t resource_id = 0;
+    BackgroundImageSizeMode size = BackgroundImageSizeMode::Auto;
+    std::uint8_t position_x_percent = 0;
+    std::uint8_t position_y_percent = 0;
+    BackgroundBox origin = BackgroundBox::PaddingBox;
+    BackgroundBox clip = BackgroundBox::BorderBox;
+    BackgroundImageRepeat repeat_x = BackgroundImageRepeat::Repeat;
+    BackgroundImageRepeat repeat_y = BackgroundImageRepeat::Repeat;
+};
 
-inline std::uint64_t pack_background_overlay(const BackgroundPaint& paint) {
-    constexpr std::uint64_t kValid = 1U;
-    return kValid |
-        (static_cast<std::uint64_t>(paint.kind) << 1U) |
-        (static_cast<std::uint64_t>(paint.axis) << 3U) |
-        (static_cast<std::uint64_t>(std::max(0, std::min(16383, paint.stop_percent))) << 6U) |
-        (static_cast<std::uint64_t>(pack_background_overlay_color(paint.color)) << 20U) |
-        (static_cast<std::uint64_t>(pack_background_overlay_color(paint.color2)) << 36U);
-}
+enum class BackgroundLayerKind : std::uint8_t { None, Url, Gradient };
 
-inline bool has_background_overlay(std::uint64_t packed) {
-    return (packed & 1U) != 0U;
-}
-
-inline BackgroundPaint unpack_background_overlay(std::uint64_t packed) {
+struct BackgroundLayer {
     BackgroundPaint paint;
-    paint.kind = static_cast<BackgroundPaintKind>((packed >> 1U) & 0x3U);
-    paint.axis = static_cast<GradientAxis>((packed >> 3U) & 0x7U);
-    paint.stop_percent = static_cast<int>((packed >> 6U) & 0x3FFFU);
-    paint.color = unpack_background_overlay_color(static_cast<std::uint16_t>((packed >> 20U) & 0xFFFFU));
-    paint.color2 = unpack_background_overlay_color(static_cast<std::uint16_t>((packed >> 36U) & 0xFFFFU));
-    return paint;
-}
+    BackgroundImageStyleValues image;
+    BackgroundLayerKind kind = BackgroundLayerKind::None;
+};
 
-// A package background image reuses the existing optional overlay word instead
-// of extending Style. Resource ids are local to one StyleResolver and zero is
-// reserved for "not present".
-inline std::uint64_t pack_background_image_resource(std::uint16_t resource_id,
-                                                    ObjectFit object_fit = ObjectFit::Fill,
-                                                    ObjectPosition object_position = {},
-                                                    ImageRendering image_rendering = ImageRendering::Auto) {
-    constexpr std::uint64_t kImageResourceMarker = 1ULL << 63U;
-    const auto clamp_percent = [](int value) {
-        return static_cast<std::uint64_t>(std::max(0, std::min(100, value)));
-    };
-    return resource_id == 0 ? 0 :
-        kImageResourceMarker | 1U |
-        (static_cast<std::uint64_t>(resource_id) << 3U) |
-        (static_cast<std::uint64_t>(object_fit) << 19U) |
-        (clamp_percent(object_position.x_percent) << 22U) |
-        (clamp_percent(object_position.y_percent) << 29U) |
-        (static_cast<std::uint64_t>(image_rendering) << 36U);
-}
-
-inline bool has_background_image_resource(std::uint64_t packed) {
-    constexpr std::uint64_t kImageResourceMarker = 1ULL << 63U;
-    return has_background_overlay(packed) && (packed & kImageResourceMarker) != 0;
-}
-
-inline std::uint16_t background_image_resource_id(std::uint64_t packed) {
-    return has_background_image_resource(packed)
-        ? static_cast<std::uint16_t>((packed >> 3U) & 0xFFFFU)
-        : 0;
-}
-
-inline ObjectFit background_image_object_fit(std::uint64_t packed) {
-    return static_cast<ObjectFit>((packed >> 19U) & 0x7U);
-}
-
-inline ObjectPosition background_image_object_position(std::uint64_t packed) {
-    return ObjectPosition{
-        static_cast<int>((packed >> 22U) & 0x7FU),
-        static_cast<int>((packed >> 29U) & 0x7FU),
-    };
-}
-
-inline ImageRendering background_image_rendering(std::uint64_t packed) {
-    return static_cast<ImageRendering>((packed >> 36U) & 0x3U);
-}
+inline constexpr std::size_t kMaxBackgroundLayers = 4;
 
 struct StyleTransition {
     AnimatableProperty property = AnimatableProperty::All;
@@ -276,13 +213,11 @@ struct Style {
     bool aspect_ratio_auto = true;
     Color color{0, 0, 0, 255};
     bool color_specified = false;
-    BackgroundPaintKind background_paint = BackgroundPaintKind::Solid;
-    GradientAxis background_gradient_axis = GradientAxis::Vertical;
-    int background_gradient_stop_percent = 100;
+    // Slot zero is the topmost image layer. Resource IDs are resolver-local.
+    std::array<BackgroundLayer, kMaxBackgroundLayers> background_layers{};
+    std::uint8_t background_layer_count = 1;
+    // Shared CSS background color, painted beneath every image layer.
     Color background_color{0, 0, 0, 0};
-    Color background_color2{0, 0, 0, 0};
-    // Packed RGBA4444 top layer of the documented two-layer subset. Zero means absent.
-    std::uint64_t background_overlay_packed = 0;
     EdgeSizes margin;
     bool margin_left_auto = false;
     bool margin_right_auto = false;
@@ -530,6 +465,7 @@ struct InteractionInvalidationHints {
 
 using CustomPropertyMap = std::unordered_map<std::string, std::string>;
 
+namespace detail { struct BackgroundResourceTransaction; }
 class StyleResolver;
 
 struct StyleLengthResolutionContext {
@@ -578,6 +514,10 @@ public:
     void set_interaction_state(const Node* hovered_node, const Node* active_node, const Node* focused_node);
 
 private:
+    friend struct detail::BackgroundResourceTransaction;
+    bool background_image_resource_ids_for(const std::array<std::string_view, 4>& urls,
+                                           std::size_t count,
+                                           std::array<std::uint16_t, 4>& ids) const;
     Stylesheet stylesheet_;
     StyleResolverOptions options_;
     std::unordered_map<std::string, std::vector<const CssRule*>> id_rules_;

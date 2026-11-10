@@ -2,6 +2,7 @@
 #include "css_aspect_ratio.h"
 #include "css_flex_values.h"
 #include "render_core/feature_config.h"
+#include "css_background_layers.h"
 
 #include <algorithm>
 #include <array>
@@ -732,27 +733,23 @@ bool is_supported_single_background_value(std::string_view value) {
 }
 
 bool is_supported_background_value(std::string_view value) {
-    const std::vector<std::string> layers = split_top_level_commas(value);
-    if (layers.empty() || layers.size() > 2) {
-        return false;
-    }
-    return std::all_of(layers.begin(), layers.end(), [](const std::string& layer) {
-        return is_supported_single_background_value(layer);
-    });
+    css_background_detail::ImageListSyntax syntax;
+    return css_background_detail::parse_image_list(value, true,
+        [](std::string_view image) {
+            const std::string text = ascii_lowercase(trim(image));
+            return text == "none" || is_supported_package_background_url(image) ||
+                (!is_supported_color_value(text) && is_supported_single_background_value(image));
+        }, [](std::string_view color) { return is_supported_color_value(color); }, syntax);
 }
 
 bool is_supported_background_image_value(std::string_view value) {
-    if (is_supported_package_background_url(value)) {
-        return true;
-    }
-    const std::string text = ascii_lowercase(trim(value));
-    if (text == "none") {
-        return true;
-    }
-    if (is_supported_color_value(text)) {
-        return false;
-    }
-    return is_supported_background_value(value);
+    css_background_detail::ImageListSyntax syntax;
+    return css_background_detail::parse_image_list(value, false,
+        [](std::string_view image) {
+            const std::string text = ascii_lowercase(trim(image));
+            return text == "none" || is_supported_package_background_url(image) ||
+                (!is_supported_color_value(text) && is_supported_single_background_value(image));
+        }, [](std::string_view color) { return is_supported_color_value(color); }, syntax);
 }
 
 bool supported_keyword(std::string_view value, const std::initializer_list<std::string_view>& keywords) {
@@ -889,13 +886,28 @@ bool is_supported_declaration_feature(std::string_view feature) {
         return is_supported_background_image_value(value);
     }
     if (property == "background-size") {
-        return supported_keyword(value, {"cover", "contain"}) || ascii_lowercase(trim(value)) == "100% 100%";
+        return css_background_detail::visit_list(value, [](std::string_view item, std::size_t) {
+            return supported_keyword(item, {"auto", "cover", "contain"}) || ascii_lowercase(trim(item)) == "100% 100%";
+        });
     }
     if (property == "background-position") {
-        return is_supported_object_position_value(value);
+        return css_background_detail::visit_list(value, [](std::string_view item, std::size_t) {
+            return is_supported_object_position_value(std::string(item));
+        });
     }
     if (property == "background-repeat") {
-        return supported_keyword(value, {"no-repeat"});
+        return css_background_detail::visit_list(value, [](std::string_view item, std::size_t) {
+            if (supported_keyword(item, {"repeat-x", "repeat-y"})) return true;
+            const auto tokens = split_whitespace_top_level(item);
+            return !tokens.empty() && tokens.size() <= 2 && std::all_of(tokens.begin(), tokens.end(), [](const std::string& token) {
+                return supported_keyword(token, {"repeat", "no-repeat", "space", "round"});
+            });
+        });
+    }
+    if (property == "background-origin" || property == "background-clip") {
+        return css_background_detail::visit_list(value, [](std::string_view item, std::size_t) {
+            return supported_keyword(item, {"border-box", "padding-box", "content-box"});
+        });
     }
     if (property == "width" || property == "height" || property == "min-width" ||
         property == "min-height" || property == "max-width" || property == "max-height" || property == "font-size" ||

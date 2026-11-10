@@ -74,6 +74,19 @@ Prepared text stores its explicit origin and baseline in the text payload.
 The public installed-consumer regression covers the source API replacement.
 Hosts qualify and pin the new source manifest before adopting this candidate.
 
+ABI4 `Style` stores four value-semantic background image layer slots in CSS
+paint order (slot zero is topmost), plus one shared `background_color` painted
+beneath the layers. The default style has one `none` image slot. This is a
+bounded Core contract, not general browser CSS support: `background-image`
+accepts one to four `none`, supported gradient, or package-absolute URL items;
+`background` accepts the same image items and a final shared color. The
+supported URL path is package-local and is resolved by the host image resolver.
+Shorthand resets the image-list geometry, image and color longhands cascade
+independently, and shorter geometry lists repeat cyclically across image
+layers. Unsupported or invalid declarations leave prior winners intact. See
+the CSS parser scope references for the supported gradient forms, image
+geometry values and explicit exclusions.
+
 The same ABI4 candidate replaces image resolver output with
 `ResolvedImageResource` (handle plus Unknown/Known/Invalid natural-size metadata)
 and image paint arguments with `ImagePaintRequest`. Known background dimensions

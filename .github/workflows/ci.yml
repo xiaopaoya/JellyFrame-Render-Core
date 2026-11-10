@@ -12,6 +12,71 @@ permissions:
   contents: read
 
 jobs:
+  background-multilayer-installed-consumer:
+    name: Background Multilayer Installed Consumer (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: full
+            options: ""
+          - profile: cropped
+            options: >-
+              -DJELLYFRAME_ENABLE_CANVAS2D=OFF
+              -DJELLYFRAME_ENABLE_MODERN_PAINT=OFF
+              -DJELLYFRAME_ENABLE_FLEX_GRID=OFF
+              -DJELLYFRAME_ENABLE_ADVANCED_FORMS=OFF
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Configure ABI4 Core
+        run: >-
+          cmake -S . -B build/package-${{ matrix.profile }} -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DJELLYFRAME_BUILD_TESTS=OFF
+          -DJELLYFRAME_INSTALL_RENDER_CORE=ON
+          -DJELLYFRAME_RENDER_CORE_ENGINE_ABI=4
+          ${{ matrix.options }}
+
+      - name: Build and install ABI4 Core
+        run: |
+          cmake --build build/package-${{ matrix.profile }} --parallel
+          cmake --install build/package-${{ matrix.profile }} --prefix "$PWD/build/install-${{ matrix.profile }}"
+
+      - name: Derive expected package identities
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          build = Path("build/package-${{ matrix.profile }}") / "generated"
+          manifest = json.loads((build / "jellyframe_render_core_source_manifest.json").read_text())
+          profile = json.loads((build / "jellyframe_render_core_profile.json").read_text())
+          if profile["engineAbi"] != 4:
+              raise SystemExit(f"expected ABI4, got ABI{profile['engineAbi']}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"EXPECTED_CORE_SOURCE_HASH={manifest['sourceHash']}\n")
+              env.write(f"EXPECTED_CORE_PROFILE_ID={profile['profileId']}\n")
+          PY
+
+      - name: Configure installed consumer
+        run: >-
+          cmake -S tests/package/background_multilayer_consumer
+          -B build/consumer-${{ matrix.profile }} -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="$PWD/build/install-${{ matrix.profile }}"
+          -DEXPECTED_CORE_SOURCE_HASH="$EXPECTED_CORE_SOURCE_HASH"
+          -DEXPECTED_CORE_PROFILE_ID="$EXPECTED_CORE_PROFILE_ID"
+
+      - name: Build and test installed consumer
+        run: |
+          cmake --build build/consumer-${{ matrix.profile }} --parallel
+          ctest --test-dir build/consumer-${{ matrix.profile }} --output-on-failure
+
   standalone:
     name: Standalone Build And Archive
     runs-on: ubuntu-latest

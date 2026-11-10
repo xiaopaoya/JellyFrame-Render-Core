@@ -1,6 +1,6 @@
 # CSS Parser 裁剪范围
 
-> 最后更新：2026-07-22；适用版本：0.5.0
+> 最后更新：2026-11-10；适用版本：0.9.0-dev / ABI4 候选版
 
 最后对照 CSS Syntax Module Level 3、Media Queries 和浏览器 parser 源码结构的时间：
 2026-06-16。
@@ -52,14 +52,21 @@ cascade。Parser 接受常见语法，在 at-rule 和 declaration 边界恢复�
   `var(--token)` / `var(--token, fallback)` 子集。Token 沿 DOM 路径继承，
   `:root` token 和 inline token 可用；无法解析的值不会覆盖之前的 fallback
   declaration。
-- `background` 支持纯色，以及 style resolution 阶段的
-  `linear-gradient(<color>, <color>)`、`linear-gradient(to bottom/top/right/left, ...)`、
-  两段 `conic-gradient()` 进度环和两色中心圆形 `radial-gradient()` 高光子集。
-  不支持的角度、stop、焦点、椭圆或图片值会被报告，且不会替换之前已经支持的 fallback。
-- `background-image` 接受同一 gradient 子集，但不接受纯色。也接受一个包内绝对路径
-  `url("/assets/image.bmp")`，由宿主图片 resolver 处理并填充元素背景绘制区域。
-  parser 会拒绝远程/data URL、相对路径、traversal、query/fragment、多 URL 层及
-  background repeat/position/size 语法。
+- `Style` 用四个值语义背景图片层槽表示图像（槽 0 位于最上方），并使用一个共享的
+  `background_color` 绘制在所有图像层下方。默认是一个 `none` 图像槽。`background-image`
+  接受一到四项的有界逗号列表，每项为 `none`、受支持的 gradient 或包内绝对 URL。
+  如 `url("/assets/image.bmp")` 的 URL 交由宿主图片 resolver；远程/data URL、相对路径、
+  traversal、query 和 fragment 路径会被拒绝。`background` 接受相同图像项，并允许在最后一层
+  指定共享颜色；纯色 shorthand 会设置共享颜色，并将图像列表重置为 `none`。
+- 受支持的 gradient 包括带有界方向/角度的双色 `linear-gradient()`、两段进度环
+  `conic-gradient()`，以及带中心或百分比定位的双色圆形 `radial-gradient()`。不支持的 stop、
+  角度/方向、径向形状/位置或格式错误项会诊断，且不会替换先前有效的声明。
+- `background-repeat`、`background-position`、`background-size`、`background-origin` 和
+  `background-clip` 接受有界列表，并在图像列表上循环匹配。受支持的几何值包括 repeat/no-repeat
+  组合、关键词/百分比位置、`cover`/`contain`/`auto` 或 `100% 100%` 尺寸，以及受支持的
+  border/padding/content 盒子。shorthand 会重置图像几何；图像、几何和共享颜色 longhand
+  独立参与 cascade，shorthand 颜色只作为所有图像层下方的共享颜色。无效声明保留之前的赢家。
+  这不等同于完整 CSS background grammar，不支持任意 gradient stop、任意图像类型或无界列表。
 - Type/class/id/attribute compound selectors、descendant 和 child combinators，
   以及 adjacent/general sibling combinators。
 - 动态 pseudo-classes：`:hover`、`:active`、`:focus`、`:focus-within`、
