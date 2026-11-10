@@ -91,12 +91,17 @@ inline void blend_pixel_unchecked(FrameBuffer& target, int x, int y, Color sourc
 // pixel by several raster paths, so repeating this work there is avoidable.
 struct RasterRoundedRect {
     CornerRadii radii{};
+    CornerRadii vertical_radii{};
     int left = 0;
     int top = 0;
     int right = 0;
     int bottom = 0;
     bool rounded = false;
 };
+
+inline EllipticalCornerRadii decode_elliptical_radii(int encoded_x, int encoded_y) {
+    return {decode_corner_radii(encoded_x), decode_corner_radii(encoded_y)};
+}
 
 inline RasterRoundedRect prepare_rounded_rect(Rect rect, int encoded_radius) {
     CornerRadii radii = decode_corner_radii(encoded_radius);
@@ -107,12 +112,40 @@ inline RasterRoundedRect prepare_rounded_rect(Rect rect, int encoded_radius) {
     radii.bottom_left = std::min(radii.bottom_left, max_radius);
     return RasterRoundedRect{
         radii,
+        radii,
         rect.x,
         rect.y,
         safe_edge(rect.x, rect.width),
         safe_edge(rect.y, rect.height),
         radii.top_left > 0 || radii.top_right > 0 || radii.bottom_right > 0 || radii.bottom_left > 0,
     };
+}
+
+inline RasterRoundedRect prepare_rounded_rect(Rect rect, int encoded_x, int encoded_y) {
+    encoded_y = effective_vertical_radius(encoded_x, encoded_y);
+    CornerRadii x = decode_corner_radii(encoded_x);
+    CornerRadii y = decode_corner_radii(encoded_y);
+    // Preserve the circular fast path only for uniform corners. Independent
+    // per-corner clamping changes the common CSS overlap reduction factor.
+    if (encoded_x == encoded_y && x.top_left == x.top_right &&
+        x.top_left == x.bottom_right && x.top_left == x.bottom_left)
+        return prepare_rounded_rect(rect, encoded_x);
+    if (rect.width <= 0 || rect.height <= 0)
+        return RasterRoundedRect{{}, {}, rect.x, rect.y, rect.x, rect.y, false};
+    const double scale = std::min({
+        1.0,
+        static_cast<double>(x.top_left) + x.top_right == 0 ? 1.0 : static_cast<double>(rect.width) / (static_cast<double>(x.top_left) + x.top_right),
+        static_cast<double>(x.bottom_left) + x.bottom_right == 0 ? 1.0 : static_cast<double>(rect.width) / (static_cast<double>(x.bottom_left) + x.bottom_right),
+        static_cast<double>(y.top_left) + y.bottom_left == 0 ? 1.0 : static_cast<double>(rect.height) / (static_cast<double>(y.top_left) + y.bottom_left),
+        static_cast<double>(y.top_right) + y.bottom_right == 0 ? 1.0 : static_cast<double>(rect.height) / (static_cast<double>(y.top_right) + y.bottom_right),
+    });
+    // Integer projection rounds down together so independently rounded corners
+    // cannot exceed an edge by one pixel and trigger a second reduction.
+    const auto scaled = [scale](int value) { return std::max(0, static_cast<int>(value * scale)); };
+    x = {scaled(x.top_left), scaled(x.top_right), scaled(x.bottom_right), scaled(x.bottom_left)};
+    y = {scaled(y.top_left), scaled(y.top_right), scaled(y.bottom_right), scaled(y.bottom_left)};
+    return RasterRoundedRect{x, y, rect.x, rect.y, safe_edge(rect.x, rect.width), safe_edge(rect.y, rect.height),
+        x.top_left > 0 || x.top_right > 0 || x.bottom_right > 0 || x.bottom_left > 0};
 }
 
 struct RoundedRectCoverage {
@@ -142,27 +175,33 @@ inline RoundedRectCoverage rounded_rect_coverage_detail(const RasterRoundedRect&
     }
     std::int64_t cx = 0;
     std::int64_t cy = 0;
-    int radius = 0;
+    int radius_x = 0;
+    int radius_y = 0;
+    const CornerRadii& vertical = geometry.vertical_radii;
     if (static_cast<std::int64_t>(x) < left + radii.top_left &&
-        static_cast<std::int64_t>(y) < top + radii.top_left) {
-        radius = radii.top_left;
-        cx = left + radius;
-        cy = top + radius;
+        static_cast<std::int64_t>(y) < top + vertical.top_left) {
+        radius_x = radii.top_left;
+        radius_y = geometry.vertical_radii.top_left;
+        cx = left + radius_x;
+        cy = top + radius_y;
     } else if (static_cast<std::int64_t>(x) >= right - radii.top_right &&
-               static_cast<std::int64_t>(y) < top + radii.top_right) {
-        radius = radii.top_right;
-        cx = right - radius;
-        cy = top + radius;
+               static_cast<std::int64_t>(y) < top + vertical.top_right) {
+        radius_x = radii.top_right;
+        radius_y = geometry.vertical_radii.top_right;
+        cx = right - radius_x;
+        cy = top + radius_y;
     } else if (static_cast<std::int64_t>(x) < left + radii.bottom_left &&
-               static_cast<std::int64_t>(y) >= bottom - radii.bottom_left) {
-        radius = radii.bottom_left;
-        cx = left + radius;
-        cy = bottom - radius;
+               static_cast<std::int64_t>(y) >= bottom - vertical.bottom_left) {
+        radius_x = radii.bottom_left;
+        radius_y = geometry.vertical_radii.bottom_left;
+        cx = left + radius_x;
+        cy = bottom - radius_y;
     } else if (static_cast<std::int64_t>(x) >= right - radii.bottom_right &&
-               static_cast<std::int64_t>(y) >= bottom - radii.bottom_right) {
-        radius = radii.bottom_right;
-        cx = right - radius;
-        cy = bottom - radius;
+               static_cast<std::int64_t>(y) >= bottom - vertical.bottom_right) {
+        radius_x = radii.bottom_right;
+        radius_y = geometry.vertical_radii.bottom_right;
+        cx = right - radius_x;
+        cy = bottom - radius_y;
     } else {
         return {255, false};
     }
@@ -179,8 +218,9 @@ inline RoundedRectCoverage rounded_rect_coverage_detail(const RasterRoundedRect&
         }
         return left * right;
     };
-    const std::uint64_t radius_scaled = saturated_multiply(static_cast<std::uint64_t>(radius), kCoordinateScale);
-    const std::uint64_t radius_squared = saturated_multiply(radius_scaled, radius_scaled);
+    if (radius_x == 0 || radius_y == 0) return {255, false};
+    const std::uint64_t radius_x_scaled = saturated_multiply(static_cast<std::uint64_t>(radius_x), kCoordinateScale);
+    const std::uint64_t radius_y_scaled = saturated_multiply(static_cast<std::uint64_t>(radius_y), kCoordinateScale);
     const auto saturated_square = [saturated_multiply](std::int64_t value) {
         const std::uint64_t magnitude = value < 0
             ? static_cast<std::uint64_t>(-(value + 1)) + 1U
@@ -209,13 +249,15 @@ inline RoundedRectCoverage rounded_rect_coverage_detail(const RasterRoundedRect&
         return covered;
     };
     // Select once per pixel; ordinary radii retain the bounded integer path.
-    const int covered = radius_scaled <= std::numeric_limits<std::uint32_t>::max()
+    const int covered = radius_x == radius_y && radius_x_scaled <= std::numeric_limits<std::uint32_t>::max()
         ? count_samples([&](std::int64_t dx, std::int64_t dy) {
-            return saturated_add(saturated_square(dx), saturated_square(dy)) <= radius_squared;
+            return saturated_add(saturated_square(dx), saturated_square(dy)) <=
+                saturated_multiply(radius_x_scaled, radius_x_scaled);
         })
         : count_samples([&](std::int64_t dx, std::int64_t dy) {
-            return static_cast<long double>(dx) * dx + static_cast<long double>(dy) * dy <=
-                static_cast<long double>(radius_scaled) * radius_scaled;
+            const long double nx = static_cast<long double>(dx) / radius_x_scaled;
+            const long double ny = static_cast<long double>(dy) / radius_y_scaled;
+            return nx * nx + ny * ny <= 1.0L;
         });
     return {(covered * 255 + 8) / 16, true};
 }
@@ -226,6 +268,10 @@ inline int rounded_rect_coverage(const RasterRoundedRect& geometry, int x, int y
 
 inline int rounded_rect_coverage(Rect rect, int encoded_radius, int x, int y) {
     return rounded_rect_coverage(prepare_rounded_rect(rect, encoded_radius), x, y);
+}
+
+inline int rounded_rect_coverage(Rect rect, int encoded_x, int encoded_y, int x, int y) {
+    return rounded_rect_coverage(prepare_rounded_rect(rect, encoded_x, encoded_y), x, y);
 }
 
 } // namespace jellyframe

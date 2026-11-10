@@ -1,3 +1,4 @@
+#include "test_crt_diagnostics.h"
 #include "render_core/dom.h"
 #include "render_core/feature_config.h"
 #include "render_core/form_control.h"
@@ -13,10 +14,25 @@
 
 namespace {
 long allocation_countdown = -1;
+#if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL != 0
+// MSVC checked containers allocate their iterator proxy in noexcept default
+// constructors. Exhaustion there terminates before the operation under test can
+// catch bad_alloc. Allow that metadata, then fail the intended vector storage.
+constexpr long vector_metadata_allocations = 1;
+#else
+constexpr long vector_metadata_allocations = 0;
+#endif
 }
 
 void* operator new(std::size_t bytes) {
-    if (allocation_countdown == 0) throw std::bad_alloc();
+    if (allocation_countdown == 0) {
+#if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL != 0
+        // Unwinding constructs checked-container proxies in Node destruction.
+        // Inject one storage failure without breaking those noexcept helpers.
+        allocation_countdown = -1;
+#endif
+        throw std::bad_alloc();
+    }
     if (allocation_countdown > 0) --allocation_countdown;
     if (void* memory = std::malloc(bytes ? bytes : 1)) return memory;
     throw std::bad_alloc();
@@ -94,7 +110,7 @@ void registration_allocation_failure_is_atomic_and_clear_is_noexcept() {
     root->set_mutation_observer(observe, &old_records);
     for (long fail_after : {0L, 1L}) {
         bool threw = false;
-        allocation_countdown = fail_after;
+        allocation_countdown = fail_after + vector_metadata_allocations;
         try { root->set_mutation_observer(observe, &replacement); }
         catch (const std::bad_alloc&) { threw = true; }
         allocation_countdown = -1;
@@ -105,7 +121,7 @@ void registration_allocation_failure_is_atomic_and_clear_is_noexcept() {
               "failed registration preserves every prior observer");
     }
     grandchild.set_mutation_observer(observe, &replacement);
-    allocation_countdown = 0;
+    allocation_countdown = vector_metadata_allocations;
     root->clear_mutation_observer(observe, &old_records);
     allocation_countdown = -1;
     const auto previous = old_records.size();
@@ -122,7 +138,7 @@ void registration_allocation_failure_is_atomic_and_clear_is_noexcept() {
     const auto count = root->children.size();
     const auto generation = root->mutation_generation;
     bool threw = false;
-    allocation_countdown = 0;
+    allocation_countdown = 2 * vector_metadata_allocations; // insert_child owns another temporary vector.
     try { root->append_child(std::move(leaf)); }
     catch (const std::bad_alloc&) { threw = true; }
     allocation_countdown = -1;
@@ -134,7 +150,7 @@ void registration_allocation_failure_is_atomic_and_clear_is_noexcept() {
     empty->set_mutation_observer(observe, &old_records);
     auto pending = make_element("pending");
     bool insertion_threw = false;
-    allocation_countdown = 1; // Child collection succeeds; parent vector growth fails.
+    allocation_countdown = 1 + 3 * vector_metadata_allocations; // Includes the returned vector proxy in MSVC Debug.
     try { empty->append_child(std::move(pending)); }
     catch (const std::bad_alloc&) { insertion_threw = true; }
     allocation_countdown = -1;
@@ -154,7 +170,7 @@ void registration_allocation_failure_is_atomic_and_clear_is_noexcept() {
     pending_tree->add_destroy_observer(report_registration_during_destruction, nullptr);
     pending_leaf.add_destroy_observer(report_registration_during_destruction, nullptr);
     bool collection_threw = false;
-    allocation_countdown = 1; // Root collected, second subtree collection allocation fails.
+    allocation_countdown = 1 + 2 * vector_metadata_allocations; // Root collected, second subtree collection allocation fails.
     try { parent->append_child(std::move(pending_tree)); }
     catch (const std::bad_alloc&) { collection_threw = true; }
     allocation_countdown = -1;
@@ -173,7 +189,7 @@ void deep_tree_and_wide_tree_cleanup_survive_allocation_failure() {
     root->set_mutation_observer(observe, &records);
     mark_dirty(*deepest, DomDirtyPaint);
     check(records.size() == 1 && records.back().owner == deepest, "deep registration is stack safe");
-    allocation_countdown = 0;
+    allocation_countdown = vector_metadata_allocations;
     root->clear_mutation_observer(observe, &records);
     allocation_countdown = -1;
     mark_dirty(*deepest, DomDirtyPaint);
@@ -182,7 +198,7 @@ void deep_tree_and_wide_tree_cleanup_survive_allocation_failure() {
     auto wide = make_element("wide");
     for (unsigned index = 0; index < 1024; ++index) wide->append_child(make_element("n"));
     wide->set_mutation_observer(observe, &records);
-    allocation_countdown = 0;
+    allocation_countdown = vector_metadata_allocations;
     wide->clear_mutation_observer(observe, &records);
     allocation_countdown = -1;
     for (auto& child : wide->children) mark_dirty(*child, DomDirtyPaint);
@@ -280,6 +296,7 @@ void compound_helpers_report_each_core_owned_mutation() {
 }
 
 int main() {
+    configure_test_crt_diagnostics();
     try {
         exact_values_inheritance_and_matching_clear();
         registration_allocation_failure_is_atomic_and_clear_is_noexcept();

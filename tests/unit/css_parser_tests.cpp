@@ -267,9 +267,10 @@ void text_wrap_alias_reuses_bounded_white_space_behavior() {
 
 void style_struct_size_has_embedded_guardrail() {
 #if !defined(JELLYFRAME_TEST_CONFIG_DEBUG)
-    // ABI4 stores four lossless computed background layers inline. The measured
-    // Style size is 888 bytes, 104 bytes above the prior 784-byte ABI baseline.
-    check(sizeof(Style) <= 888, "Style should stay within the ABI4 size guardrail");
+    // ABI4 four-layer Style was 888B. Two four-corner authored radius axes and
+    // unit metadata bring the measured x64 Release value to 920B (+32B).
+    // This is an explicit candidate layout budget, not target heap admission.
+    check(sizeof(Style) <= 920, "Style should stay within the ABI4 size guardrail");
     check(sizeof(DisplayCommand) <= 160, "DisplayCommand should stay compact for display-list reuse");
 #endif
     const Style idle_style;
@@ -1354,7 +1355,9 @@ void after_generated_content_and_text_overflow_apply() {
         ".badge::after { content: \"%\"; color: #22cc88; font-weight: 700; left: 4px; }"));
 
     const Style style = resolver.resolve(*badge);
-    check(style.border_radius_percent == 50, "percentage border-radius parsed");
+    check(style.border_radius_axes_specified && style.border_radius_x_percent_mask == 0x0fU &&
+          style.border_radius_y_percent_mask == 0x0fU,
+          "percentage border-radius expands into independent horizontal and vertical axes");
     check(style.white_space_nowrap, "white-space nowrap parsed");
     check(style.text_overflow_ellipsis, "text-overflow ellipsis parsed");
     check(style.after_content_kind == GeneratedContentKind::Text, "after generated content parsed");
@@ -1372,6 +1375,54 @@ void per_corner_border_radius_applies() {
     const CornerRadii radii = decode_corner_radii(style.border_radius);
     check(radii.top_left == 16 && radii.top_right == 10 && radii.bottom_right == 4 && radii.bottom_left == 0,
           "border-radius 1-4 length syntax retains physical corner radii");
+}
+
+void elliptical_border_radius_axes_apply_and_refuse_unsupported_values() {
+    auto card = make_element("div");
+    card->attributes["class"] = "card";
+    StyleResolver resolver(parse(
+        ".card { border-radius: 72px 30px 55px 18px / 22px 38px 12px 45px; }"
+        ".bad { border-radius: calc(10px) / 20px; }"));
+    const Style style = resolver.resolve(*card);
+    check(style.border_radius_axes_specified, "slash border-radius retains authored axes");
+    check(style.border_radius_x_values == std::array<int, 4>{72, 30, 55, 18} &&
+          style.border_radius_y_values == std::array<int, 4>{22, 38, 12, 45},
+          "slash border-radius expands each physical axis independently");
+    check(style.border_radius_x_percent_mask == 0 && style.border_radius_y_percent_mask == 0,
+          "absolute elliptical radii retain absolute units");
+
+    card->attributes["class"] = "percent";
+    StyleResolver percent_resolver(parse(".percent { border-radius: 50% 20% 35% 10%; }"));
+    const Style percent_style = percent_resolver.resolve(*card);
+    check(percent_style.border_radius_axes_specified &&
+          percent_style.border_radius_x_values == std::array<int, 4>{50, 20, 35, 10} &&
+          percent_style.border_radius_y_values == percent_style.border_radius_x_values &&
+          percent_style.border_radius_x_percent_mask == 0x0fU &&
+          percent_style.border_radius_y_percent_mask == 0x0fU,
+          "one-axis percentage shorthand expands against both independent box dimensions");
+
+    card->attributes["class"] = "bad";
+    const Style unsupported = resolver.resolve(*card);
+    check(!unsupported.border_radius_axes_specified && unsupported.border_radius == 0,
+          "unsupported calculated ellipse values are refused instead of partially applied");
+}
+
+void invalid_elliptical_radius_preserves_prior_winner() {
+    auto card = make_element("div");
+    StyleResolver resolver(parse(
+        "div { border-radius: 25% / 20px; border-radius: 30px / bogus; "
+        "border-radius: bogus / 40%; border-radius: -.4px / 10px; "
+        "border-radius: 10px / -.4%; border-radius: -.4px; }"));
+    const Style style = resolver.resolve(*card);
+    check(style.border_radius_axes_specified &&
+          style.border_radius_x_values == std::array<int, 4>{25, 25, 25, 25} &&
+          style.border_radius_y_values == std::array<int, 4>{20, 20, 20, 20} &&
+          style.border_radius_x_percent_mask == 0x0fU && style.border_radius_y_percent_mask == 0,
+          "invalid ellipse declarations preserve both prior axes and their percentage units");
+    StyleResolver large(parse("div { border-radius: 2000% 1000% / 40% 20%; }"));
+    const Style large_style = large.resolve(*card);
+    check(large_style.border_radius_x_values == std::array<int, 4>{2000, 1000, 2000, 1000},
+          "large valid percentages retain their ratios before overlap normalization");
 }
 
 void overflow_y_uses_the_vertical_scroll_subset() {
@@ -1965,6 +2016,8 @@ int main() {
         font_family_declares_runtime_family_hash_and_inherits();
         after_generated_content_and_text_overflow_apply();
         per_corner_border_radius_applies();
+        elliptical_border_radius_axes_apply_and_refuse_unsupported_values();
+        invalid_elliptical_radius_preserves_prior_winner();
         overflow_y_uses_the_vertical_scroll_subset();
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
         fixed_two_column_grid_template_applies();

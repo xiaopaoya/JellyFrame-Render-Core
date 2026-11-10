@@ -20,21 +20,24 @@ bool modern_paint_fill_opaque_linear_gradient_fast(FrameBuffer& target,
                                                     Color first,
                                                     Color second,
                                                     GradientAxis axis,
-                                                    int border_radius);
+                                                    int border_radius,
+                                                    int border_radius_y = -1);
 void modern_paint_fill_linear_gradient(FrameBuffer& target,
                                        Rect rect,
                                        Rect clip,
                                        Color first,
                                        Color second,
                                        GradientAxis axis,
-                                       int border_radius);
+                                       int border_radius,
+                                       int border_radius_y = -1);
 void modern_paint_fill_conic_gradient_region(FrameBuffer& target,
                                              Rect rect,
                                              Rect clipped,
                                              Color first,
                                              Color second,
                                              int stop_percent,
-                                             int border_radius);
+                                             int border_radius,
+                                             int border_radius_y = -1);
 void modern_paint_fill_radial_gradient_region(FrameBuffer& target,
                                               Rect rect,
                                               Rect clipped,
@@ -42,7 +45,8 @@ void modern_paint_fill_radial_gradient_region(FrameBuffer& target,
                                               Color edge_color,
                                               GradientAxis axis,
                                               int packed_position,
-                                              int border_radius);
+                                              int border_radius,
+                                              int border_radius_y = -1);
 void modern_paint_fill_soft_box_shadow(FrameBuffer& target,
                                        Rect rect,
                                        Rect clip,
@@ -52,14 +56,16 @@ void modern_paint_fill_soft_box_shadow(FrameBuffer& target,
                                        int blur);
 
 void modern_paint_fill_linear_gradient_area(FrameBuffer& target, Rect rect, Rect paint_area, Rect clip,
-                                            Color first, Color second, GradientAxis axis, int border_radius);
+                                            Color first, Color second, GradientAxis axis, int border_radius,
+                                            int border_radius_y = -1);
 
 void modern_paint_fill_conic_gradient_area(FrameBuffer& target, Rect rect, Rect clipped, Rect paint_area,
-                                           Color first, Color second, int stop_percent, int border_radius);
+                                           Color first, Color second, int stop_percent, int border_radius,
+                                           int border_radius_y = -1);
 
 void modern_paint_fill_radial_gradient_area(FrameBuffer& target, Rect rect, Rect clipped, Rect paint_area,
                                             Color center_color, Color edge_color, GradientAxis axis,
-                                            int packed_position, int border_radius);
+                                            int packed_position, int border_radius, int border_radius_y = -1);
 
 // Pure bounded math shared by the optional CSS modern-paint raster paths.
 // This header deliberately contains no framebuffer, host, or allocation API.

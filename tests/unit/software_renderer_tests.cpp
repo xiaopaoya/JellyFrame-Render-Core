@@ -575,6 +575,43 @@ void soft_box_shadow_fades_outside_rounded_card() {
           "soft shadow fades instead of drawing a flat translucent rectangle");
 }
 
+void rasterizer_refuses_elliptical_box_shadow_commands() {
+    const Color background{225, 232, 240, 255};
+    DisplayCommand command(DisplayCommandType::BoxShadow);
+    command.rect = {2, 2, 16, 16};
+    command.color = {0, 0, 0, 96};
+    command.basic_paint().border_radius = 7;
+    command.basic_paint().border_radius_y = 4;
+    command.basic_paint().stroke_width = 3;
+    command.basic_paint().gradient_stop_percent = 3;
+    VectorDiagnosticSink diagnostics;
+    FrameBuffer refused(20, 20, background);
+    SoftwareRasterizer({}, &diagnostics).rasterize(command, refused, {0, 0, 20, 20});
+    check(diagnostics.size() == 1 &&
+          has_diagnostic_code(diagnostics, "paint-elliptical-box-shadow-unsupported"),
+          "raw elliptical shadow command reports its unsupported paint boundary");
+    check(diagnostics.diagnostics()[0].stage == DiagnosticStage::Paint &&
+          diagnostics.diagnostics()[0].severity == DiagnosticSeverity::Warning,
+          "elliptical shadow refusal reaches the paint diagnostic sink");
+    for (const Color pixel : refused.pixels) {
+        check(pixel.r == background.r && pixel.g == background.g &&
+              pixel.b == background.b && pixel.a == background.a,
+              "raw elliptical shadow command is refused without painting");
+    }
+    diagnostics.clear();
+    FrameBuffer inherited(20, 20, background), explicit_circle(20, 20, background);
+    command.basic_paint().border_radius_y = -1;
+    SoftwareRasterizer({}, &diagnostics).rasterize(command, inherited, {0, 0, 20, 20});
+    command.basic_paint().border_radius_y = 7;
+    SoftwareRasterizer({}, &diagnostics).rasterize(command, explicit_circle, {0, 0, 20, 20});
+    check(diagnostics.empty(), "inherited and explicit circular shadows remain admitted");
+    for (std::size_t i = 0; i < inherited.pixels.size(); ++i) {
+        const Color a = inherited.pixels[i], b = explicit_circle.pixels[i];
+        check(a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a,
+              "explicit circular shadow preserves inherited circular pixels");
+    }
+}
+
 void circular_box_shadow_keeps_diagonal_falloff_close_to_axis() {
 #if !JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
     return;
@@ -1015,6 +1052,130 @@ void rasterizer_applies_value_rounded_clip_chain() {
     check(statistics.rounded_clip_replay_candidate_pixels_by_type[
               static_cast<std::size_t>(DisplayCommandType::FillRect)] == 256,
           "single rounded clip command attributes its clipped temporary-surface area");
+}
+
+void elliptical_clip_fast_paths_match_per_pixel_coverage() {
+    const int axes[][2] = {
+        {encode_corner_radii({4, 8, 6, 3}), encode_corner_radii({32, 25, 28, 30})},
+        {encode_corner_radii({32, 25, 28, 30}), encode_corner_radii({4, 8, 6, 3})},
+        {encode_corner_radii({80, 0, 0, 0}), encode_corner_radii({80, 0, 0, 0})},
+        {encode_corner_radii({80, 0, 80, 0}), encode_corner_radii({80, 0, 80, 0})},
+    };
+    const Rect clip_rect{4, 4, 100, 100};
+    const Rect dirty_rects[] = {{0, 0, 112, 112}, {4, 14, 3, 8}};
+    const Color background{225, 232, 240, 255};
+    DisplayCommand fill = black_fill({0, 0, 112, 112});
+    fill.color = {23, 103, 203, 255};
+    for (const auto& axis : axes) {
+        const RasterRoundedRect rounded = prepare_rounded_rect(clip_rect, axis[0], axis[1]);
+        const RasterClip value_clip{clip_rect, axis[0], axis[1]};
+        for (const Rect dirty : dirty_rects) {
+            FrameBuffer expected(112, 112, background);
+            const Rect visible = raster_intersect_rect(clip_rect, dirty);
+            for (int y = visible.y; y < visible.y + visible.height; ++y) {
+                for (int x = visible.x; x < visible.x + visible.width; ++x) {
+                    blend_pixel(expected, x, y, with_coverage(fill.color, rounded_rect_coverage(rounded, x, y)));
+                }
+            }
+            const auto compare = [&](const FrameBuffer& actual, const char* message) {
+                for (std::size_t i = 0; i < actual.pixels.size(); ++i) {
+                    const Color a = actual.pixels[i], b = expected.pixels[i];
+                    check(a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a, message);
+                }
+            };
+            FrameBuffer direct(112, 112, background);
+            DisplayCommand rounded_fill = fill;
+            rounded_fill.rect = clip_rect;
+            rounded_fill.basic_paint().border_radius = axis[0];
+            rounded_fill.basic_paint().border_radius_y = axis[1];
+            SoftwareRasterizer().rasterize(rounded_fill, direct, dirty);
+            compare(direct, "direct elliptical fill matches coverage reference");
+            FrameBuffer clipped(112, 112, background);
+            SoftwareRasterizer().rasterize_clipped(fill, clipped, dirty, 0, 0, &value_clip, 1);
+            compare(clipped, "single clip fast paths use independent vertical ellipse extents");
+            FrameBuffer batched(112, 112, background);
+            const DisplayCommand commands[] = {fill, fill};
+            SoftwareRasterizer().rasterize_clipped(commands, 2, batched, dirty, 0, 0, &value_clip, 1);
+            compare(batched, "batched clip row spans match elliptical coverage reference");
+            LayerNode root;
+            root.type = LayerType::Root;
+            root.bounds = {0, 0, 112, 112};
+            root.clip_rect = clip_rect;
+            root.has_clip = true;
+            root.clip_border_radius = axis[0];
+            root.clip_border_radius_y = axis[1];
+            root.display_list.push_back(fill);
+            FrameBuffer retained(112, 112, background);
+            SoftwareCompositor().render_into(root, retained, background, &dirty, 1);
+            compare(retained, "retained elliptical clip matches coverage with full and dirty rendering");
+        }
+    }
+}
+
+void elliptical_gradient_commands_match_fill_routes() {
+    const int axes[][2] = {
+        {encode_corner_radii({4, 8, 6, 3}), encode_corner_radii({32, 25, 28, 30})},
+        {encode_corner_radii({32, 25, 28, 30}), encode_corner_radii({4, 8, 6, 3})},
+        {encode_corner_radii({80, 0, 80, 0}), encode_corner_radii({80, 0, 80, 0})},
+    };
+    const Rect dirty_rects[] = {{0, 0, 112, 112}, {4, 14, 26, 24}};
+    const Color background{225, 232, 240, 255};
+    for (const auto& axis : axes) {
+        for (const int alpha : {180, 255}) {
+            for (const bool inset : {false, true}) {
+                DisplayCommand fill = black_fill(inset ? Rect{8, 8, 92, 92} : Rect{4, 4, 100, 100});
+                fill.color = {23, 103, 203, static_cast<std::uint8_t>(alpha)};
+                fill.basic_paint().border_radius = axis[0];
+                fill.basic_paint().border_radius_y = axis[1];
+                for (const Rect dirty : dirty_rects) {
+                    for (int route = 0; route < 3; ++route) {
+                        const RasterClip value_clip{{4, 4, 100, 100}, axis[1], axis[0]};
+                        const auto render = [&](const DisplayCommand& command, FrameBuffer& frame) {
+                            if (route == 0) {
+                                SoftwareRasterizer().rasterize(command, frame, dirty);
+                            } else if (route == 1) {
+                                SoftwareRasterizer().rasterize_clipped(command, frame, dirty, 0, 0, &value_clip, 1);
+                            } else {
+                                LayerNode root;
+                                root.type = LayerType::Root;
+                                root.bounds = {0, 0, 112, 112};
+                                root.has_clip = true;
+                                root.clip_rect = value_clip.rect;
+                                root.clip_border_radius = axis[1];
+                                root.clip_border_radius_y = axis[0];
+                                root.display_list.push_back(command);
+                                SoftwareCompositor().render_into(root, frame, background, &dirty, 1);
+                            }
+                        };
+                        FrameBuffer expected(112, 112, background);
+                        render(fill, expected);
+                        for (const auto type : {DisplayCommandType::LinearGradient,
+                                               DisplayCommandType::ConicGradient,
+                                               DisplayCommandType::RadialGradient}) {
+                            DisplayCommand gradient(type);
+                            gradient.rect = {4, 4, 100, 100};
+                            gradient.color = gradient.color2 = fill.color;
+#if !JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
+                            // Cropped builds keep the first-color fallback while
+                            // retaining the command's independent ellipse axes.
+                            gradient.color2 = {231, 17, 41, 97};
+#endif
+                            gradient.basic_paint().border_radius = axis[0];
+                            gradient.basic_paint().border_radius_y = axis[1];
+                            if (inset) gradient.basic_paint().background_paint_clip = {4, 4, 92, 92};
+                            FrameBuffer actual(112, 112, background);
+                            render(gradient, actual);
+                            for (std::size_t i = 0; i < actual.pixels.size(); ++i) {
+                                const Color a = actual.pixels[i], b = expected.pixels[i];
+                                check(a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a,
+                                      "elliptical gradients match fill through direct, value clip and retained routes");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 void rasterizer_batches_consecutive_value_clip_commands() {
@@ -2273,6 +2434,7 @@ int main() {
         radial_gradient_keeps_diagonal_falloff_close_to_axis();
         positioned_radial_gradient_moves_highlight_center();
         soft_box_shadow_fades_outside_rounded_card();
+        rasterizer_refuses_elliptical_box_shadow_commands();
         circular_box_shadow_keeps_diagonal_falloff_close_to_axis();
         soft_box_shadow_row_path_matches_reference_pixels();
         rounded_stroke_keeps_corner_pixels_clear();
@@ -2291,6 +2453,8 @@ int main() {
         dirty_render_preserves_original_rounded_geometry();
         compositor_clips_children_to_rounded_overflow();
         rasterizer_applies_value_rounded_clip_chain();
+        elliptical_clip_fast_paths_match_per_pixel_coverage();
+        elliptical_gradient_commands_match_fill_routes();
         rasterizer_batches_consecutive_value_clip_commands();
         rasterizer_tracks_opaque_rounded_clip_compositing_without_changing_alpha();
         rasterizer_tracks_nested_rounded_clip_coverage_work();

@@ -119,6 +119,35 @@ void box_area_cases() {
           "zero positioning area remains distinct from positive painting area");
 }
 
+void elliptical_box_area_insets_preserve_packed_axes() {
+    BackgroundBoxAreasRequest request;
+    request.border_box = {0, 0, 100, 100};
+    request.border = {5, 5, 5, 5};
+    request.clip = BackgroundBoxArea::PaddingBox;
+    request.border_radius = encode_corner_radii({20, 10, 30, 15});
+    request.border_radius_y = encode_corner_radii({10, 30, 15, 20});
+    BackgroundBoxAreas result;
+    check(resolve_background_box_areas(request, result) == BackgroundBoxAreasStatus::Ready,
+          "canonical packed corner axes are valid background geometry");
+    check(result.painting_radius == encode_corner_radii({15, 5, 25, 10}) &&
+          result.painting_radius_y == encode_corner_radii({5, 25, 10, 15}),
+          "each packed corner axis is decoded before its clip inset is removed");
+    request.border = {20, 20, 20, 20};
+    request.border_radius = 10;
+    request.border_radius_y = 30;
+    check(resolve_background_box_areas(request, result) == BackgroundBoxAreasStatus::Ready &&
+          result.painting_radius == 0 && result.painting_radius_y == 10,
+          "zero horizontal inset radius retains its independently reduced vertical axis");
+    int x = 0, y = 0;
+    check(inset_background_radii(30, 20, {2, 12, 6, 4}, x, y) &&
+          x == encode_corner_radii({26, 18, 18, 26}) &&
+          y == encode_corner_radii({18, 18, 14, 14}),
+          "asymmetric physical sides reduce their corresponding corner axis only");
+    request.border_radius_y = 8192;
+    check(resolve_background_box_areas(request, result) == BackgroundBoxAreasStatus::DimensionLimit,
+          "vertical radius shares the bounded background dimension limit");
+}
+
 void compact_paint_clip_checks_relative_offset_range() {
     BackgroundPaintClip clip{7, 8, 9, 10};
     check(make_background_paint_clip({100, 200, 20, 20}, {92, 206, 16, 12}, clip),
@@ -139,6 +168,7 @@ void compact_paint_clip_checks_relative_offset_range() {
 int main() {
     try {
         box_area_cases();
+        elliptical_box_area_insets_preserve_packed_axes();
         compact_paint_clip_checks_relative_offset_range();
         auto request = fixture(BackgroundImageSizeMode::Intrinsic);
         expect(request, {124, 216, 48, 24}, "intrinsic auto matches wide Blink oracle dimensions");

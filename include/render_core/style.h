@@ -236,6 +236,11 @@ struct Style {
     Color border_color{0, 0, 0, 255};
     int border_radius = 0;
     int border_radius_percent = -1;
+    std::array<int, 4> border_radius_x_values{};
+    std::array<int, 4> border_radius_y_values{};
+    std::uint8_t border_radius_x_percent_mask = 0;
+    std::uint8_t border_radius_y_percent_mask = 0;
+    bool border_radius_axes_specified = false;
     int width = -1;
     int height = -1;
     int min_width = -1;

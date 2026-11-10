@@ -95,6 +95,12 @@ void check_value_copies() {
     move_assigned.image_paint().object_position.x_percent = 9;
     check(!display_commands_equal(original, move_assigned), "equality includes active image position");
     check(original.image_paint().object_position.x_percent == 50, "copied image position is independent");
+    original.image_paint().border_radius = 18;
+    original.image_paint().border_radius_y = 6;
+    DisplayCommand ellipse = original;
+    check(display_commands_equal(original, ellipse), "ellipse payload survives value copy");
+    ellipse.image_paint().border_radius_y = 7;
+    check(!display_commands_equal(original, ellipse), "equality observes the vertical radius axis");
     moved.text[0] = 'y';
     check(original.text[0] == 'x', "copied string is owned independently");
 }

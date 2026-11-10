@@ -109,6 +109,7 @@ struct SoftwareRasterizerStatistics {
 struct RasterClip {
     Rect rect;
     int border_radius = 0;
+    int border_radius_y = -1;
 };
 
 using TextPaintCallback = bool (*)(FrameBuffer& target,
@@ -153,6 +154,7 @@ struct ImagePaintRequest {
     ImageRendering image_rendering = ImageRendering::Auto;
     Rect background_painting_rect;
     int background_painting_radius = 0;
+    int background_painting_radius_y = -1;
 };
 
 using ImagePaintCallback = bool (*)(FrameBuffer& target,

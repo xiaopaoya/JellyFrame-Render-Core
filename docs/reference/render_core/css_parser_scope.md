@@ -57,6 +57,15 @@ layout behavior.
   `var(--token)` / `var(--token, fallback)`. Values inherit along the DOM path,
   `:root` tokens and inline tokens work, and unresolved values keep earlier
   fallback declarations alive.
+- `border-radius` accepts one to four nonnegative resolved lengths or
+  percentages per axis, with optional `/` separating horizontal and vertical
+  axes. Percentage axes use box width and height independently. All corners
+  share the overlap reduction; integer used radii are projected downward.
+  Invalid declarations preserve both previous axes. Functional radius values
+  and corner longhands are unsupported. Each nonuniform used axis is limited
+  to 127px per corner; uniform axes retain the positive integer range. A used
+  value outside this representation refuses both axes with a diagnostic.
+  Elliptical box shadows are refused separately; this does not omit the box.
 - `Style` represents background images as four value-semantic layer slots
   (slot zero is topmost) and one shared `background_color` painted below them.
   The default is one `none` image slot. `background-image` accepts a bounded

@@ -44,56 +44,51 @@ bool empty_rect(Rect rect) {
 }
 
 bool rounded_clip_affects_rect(const RasterRoundedRect& rounded, Rect rect) {
-    if (!rounded.rounded) {
-        return false;
-    }
-    const auto overlaps_corner = [rect](int x, int y, int radius) {
-        return radius > 0 && !empty_rect(intersect_rect(rect, Rect{x, y, radius, radius}));
+    if (!rounded.rounded) return false;
+    const auto overlaps_corner = [rect](int x, int y, int radius_x, int radius_y) {
+        return radius_x > 0 && radius_y > 0 &&
+            !empty_rect(intersect_rect(rect, Rect{x, y, radius_x, radius_y}));
     };
-    const CornerRadii& radii = rounded.radii;
-    return overlaps_corner(rounded.left, rounded.top, radii.top_left) ||
-        overlaps_corner(safe_add(rounded.right, safe_negate(radii.top_right)), rounded.top, radii.top_right) ||
-        overlaps_corner(safe_add(rounded.right, safe_negate(radii.bottom_right)),
-                        safe_add(rounded.bottom, safe_negate(radii.bottom_right)),
-                        radii.bottom_right) ||
-        overlaps_corner(rounded.left,
-                        safe_add(rounded.bottom, safe_negate(radii.bottom_left)),
-                        radii.bottom_left);
+    const CornerRadii& x = rounded.radii;
+    const CornerRadii& y = rounded.vertical_radii;
+    return overlaps_corner(rounded.left, rounded.top, x.top_left, y.top_left) ||
+        overlaps_corner(safe_add(rounded.right, -x.top_right), rounded.top, x.top_right, y.top_right) ||
+        overlaps_corner(safe_add(rounded.right, -x.bottom_right),
+                        safe_add(rounded.bottom, -y.bottom_right), x.bottom_right, y.bottom_right) ||
+        overlaps_corner(rounded.left, safe_add(rounded.bottom, -y.bottom_left),
+                        x.bottom_left, y.bottom_left);
 }
 
-bool rounded_clip_affects_row(const RasterRoundedRect& rounded, int y) {
-    if (!rounded.rounded) {
-        return false;
-    }
-    const CornerRadii& radii = rounded.radii;
-    return (radii.top_left > 0 && y >= rounded.top && y < safe_add(rounded.top, radii.top_left)) ||
-        (radii.top_right > 0 && y >= rounded.top && y < safe_add(rounded.top, radii.top_right)) ||
-        (radii.bottom_left > 0 && y >= safe_add(rounded.bottom, safe_negate(radii.bottom_left)) && y < rounded.bottom) ||
-        (radii.bottom_right > 0 && y >= safe_add(rounded.bottom, safe_negate(radii.bottom_right)) && y < rounded.bottom);
+bool rounded_clip_affects_row(const RasterRoundedRect& rounded, int row) {
+    if (!rounded.rounded) return false;
+    const CornerRadii& x = rounded.radii;
+    const CornerRadii& y = rounded.vertical_radii;
+    return (x.top_left > 0 && y.top_left > 0 && row >= rounded.top && row < safe_add(rounded.top, y.top_left)) ||
+        (x.top_right > 0 && y.top_right > 0 && row >= rounded.top && row < safe_add(rounded.top, y.top_right)) ||
+        (x.bottom_left > 0 && y.bottom_left > 0 && row >= safe_add(rounded.bottom, -y.bottom_left) && row < rounded.bottom) ||
+        (x.bottom_right > 0 && y.bottom_right > 0 && row >= safe_add(rounded.bottom, -y.bottom_right) && row < rounded.bottom);
 }
 
-// Returns the conservative horizontal span for which one rounded clip is
-// certainly fully covered on this row. Corner bounding boxes are excluded
-// even when some pixels inside them would also resolve to 255, so the
-// remaining coverage path stays byte-for-byte identical.
-Rect rounded_clip_known_full_row_span(const RasterRoundedRect& rounded, int y) {
+// Exclude the elliptical corner bounding boxes to retain only pixels whose
+// coverage is certainly full. Horizontal and vertical extents are independent.
+Rect rounded_clip_known_full_row_span(const RasterRoundedRect& rounded, int row) {
     int left = rounded.left;
     int right = rounded.right;
-    const CornerRadii& radii = rounded.radii;
-    if (radii.top_left > 0 && y >= rounded.top && y < safe_add(rounded.top, radii.top_left)) {
-        left = safe_add(rounded.left, radii.top_left);
-    } else if (radii.bottom_left > 0 &&
-               y >= safe_add(rounded.bottom, -radii.bottom_left) && y < rounded.bottom) {
-        left = safe_add(rounded.left, radii.bottom_left);
+    const CornerRadii& x = rounded.radii;
+    const CornerRadii& y = rounded.vertical_radii;
+    if (x.top_left > 0 && y.top_left > 0 && row >= rounded.top && row < safe_add(rounded.top, y.top_left)) {
+        left = safe_add(rounded.left, x.top_left);
+    } else if (x.bottom_left > 0 && y.bottom_left > 0 &&
+               row >= safe_add(rounded.bottom, -y.bottom_left) && row < rounded.bottom) {
+        left = safe_add(rounded.left, x.bottom_left);
     }
-    if (radii.top_right > 0 &&
-        y >= rounded.top && y < safe_add(rounded.top, radii.top_right)) {
-        right = safe_add(rounded.right, -radii.top_right);
-    } else if (radii.bottom_right > 0 &&
-               y >= safe_add(rounded.bottom, -radii.bottom_right) && y < rounded.bottom) {
-        right = safe_add(rounded.right, -radii.bottom_right);
+    if (x.top_right > 0 && y.top_right > 0 && row >= rounded.top && row < safe_add(rounded.top, y.top_right)) {
+        right = safe_add(rounded.right, -x.top_right);
+    } else if (x.bottom_right > 0 && y.bottom_right > 0 &&
+               row >= safe_add(rounded.bottom, -y.bottom_right) && row < rounded.bottom) {
+        right = safe_add(rounded.right, -x.bottom_right);
     }
-    return {left, y, safe_span(left, right), 1};
+    return {left, row, safe_span(left, right), 1};
 }
 
 void record_rounded_clip_replayed_command(SoftwareRasterizerStatistics* statistics,
@@ -566,12 +561,34 @@ void fill_rect_clipped(FrameBuffer& target, Rect rect, Rect clip, Color color, i
     }
 }
 
+void fill_rect_elliptical(FrameBuffer& target, Rect rect, Rect clip, Color color,
+                          int border_radius_x, int border_radius_y) {
+    const CornerRadii radii = decode_corner_radii(border_radius_x);
+    if (border_radius_x == border_radius_y && radii.top_left == radii.top_right &&
+        radii.top_left == radii.bottom_right && radii.top_left == radii.bottom_left) {
+        fill_rect_clipped(target, rect, clip, color, border_radius_x);
+        return;
+    }
+    const Rect clipped = clipped_target_rect(target, rect, clip);
+    if (empty_rect(clipped) || color.a == 0) return;
+    const RasterRoundedRect rounded = prepare_rounded_rect(rect, border_radius_x, border_radius_y);
+    const int y_end = safe_edge(clipped.y, clipped.height);
+    const int x_end = safe_edge(clipped.x, clipped.width);
+    for (int y = clipped.y; y < y_end; ++y) {
+        for (int x = clipped.x; x < x_end; ++x) {
+            const int coverage = rounded_rect_coverage(rounded, x, y);
+            if (coverage > 0) blend_pixel_unchecked(target, x, y, with_coverage(color, coverage));
+        }
+    }
+}
+
 void stroke_rounded_rect(FrameBuffer& target,
                          Rect rect,
                          Rect clip,
                          Color color,
                          int stroke_width,
-                         int border_radius) {
+                         int border_radius,
+                         int border_radius_y = -1) {
     Rect clipped = clipped_target_rect(target, rect, clip);
     if (empty_rect(clipped) || color.a == 0 || stroke_width <= 0) {
         return;
@@ -586,8 +603,10 @@ void stroke_rounded_rect(FrameBuffer& target,
         std::max(0, safe_add(rect.height, safe_negate(twice_stroke))),
     };
     const int inner_radius = expand_corner_radii(border_radius, -stroke_width);
-    const RasterRoundedRect outer = prepare_rounded_rect(rect, border_radius);
-    const RasterRoundedRect inner_geometry = prepare_rounded_rect(inner, inner_radius);
+    const int resolved_y = effective_vertical_radius(border_radius, border_radius_y);
+    const int inner_radius_y = expand_corner_radii(resolved_y, -stroke_width);
+    const RasterRoundedRect outer = prepare_rounded_rect(rect, border_radius, resolved_y);
+    const RasterRoundedRect inner_geometry = prepare_rounded_rect(inner, inner_radius, inner_radius_y);
     const int y_end = safe_edge(clipped.y, clipped.height);
     const int x_end = safe_edge(clipped.x, clipped.width);
     const int inner_right = safe_edge(inner.x, inner.width);
@@ -629,18 +648,18 @@ void stroke_rounded_rect(FrameBuffer& target,
             };
             add_span(clipped.x, safe_add(inner.x, 1));
             add_span(safe_add(inner_right, -1), x_end);
-            if (outer.radii.top_left > 0 && y < safe_add(outer.top, outer.radii.top_left)) {
+            if (outer.radii.top_left > 0 && y < safe_add(outer.top, outer.vertical_radii.top_left)) {
                 add_span(outer.left, safe_add(outer.left, outer.radii.top_left));
             }
-            if (outer.radii.top_right > 0 && y < safe_add(outer.top, outer.radii.top_right)) {
+            if (outer.radii.top_right > 0 && y < safe_add(outer.top, outer.vertical_radii.top_right)) {
                 add_span(safe_add(outer.right, safe_negate(outer.radii.top_right)), outer.right);
             }
             if (outer.radii.bottom_left > 0 &&
-                y >= safe_add(outer.bottom, safe_negate(outer.radii.bottom_left))) {
+                y >= safe_add(outer.bottom, safe_negate(outer.vertical_radii.bottom_left))) {
                 add_span(outer.left, safe_add(outer.left, outer.radii.bottom_left));
             }
             if (outer.radii.bottom_right > 0 &&
-                y >= safe_add(outer.bottom, safe_negate(outer.radii.bottom_right))) {
+                y >= safe_add(outer.bottom, safe_negate(outer.vertical_radii.bottom_right))) {
                 add_span(safe_add(outer.right, safe_negate(outer.radii.bottom_right)), outer.right);
             }
             // Keep this bounded, allocation-free sort local to the six possible
@@ -670,13 +689,15 @@ void stroke_rounded_rect(FrameBuffer& target,
     }
 }
 
-void stroke_rect(FrameBuffer& target, Rect rect, Color color, int stroke_width, int border_radius = 0) {
+void stroke_rect(FrameBuffer& target, Rect rect, Color color, int stroke_width, int border_radius = 0,
+                 int border_radius_y = -1) {
     Rect clipped = clipped_target_rect(target, rect);
     if (empty_rect(clipped) || color.a == 0 || stroke_width <= 0) {
         return;
     }
     stroke_width = std::min(stroke_width, std::max(1, std::min(rect.width, rect.height) / 2));
-    if (!has_corner_radius(border_radius)) {
+    if (!has_corner_radius(border_radius) &&
+        effective_vertical_radius(border_radius, border_radius_y) == border_radius) {
         fill_rect(target, Rect{rect.x, rect.y, rect.width, stroke_width}, color);
         fill_rect(target, Rect{rect.x, safe_edge(rect.y, safe_edge(rect.height, -stroke_width)), rect.width, stroke_width}, color);
         fill_rect(target, Rect{rect.x, rect.y, stroke_width, rect.height}, color);
@@ -684,16 +705,18 @@ void stroke_rect(FrameBuffer& target, Rect rect, Color color, int stroke_width, 
         return;
     }
 
-    stroke_rounded_rect(target, rect, target_rect(target), color, stroke_width, border_radius);
+    stroke_rounded_rect(target, rect, target_rect(target), color, stroke_width, border_radius, border_radius_y);
 }
 
-void stroke_rect_clipped(FrameBuffer& target, Rect rect, Rect clip, Color color, int stroke_width, int border_radius = 0) {
+void stroke_rect_clipped(FrameBuffer& target, Rect rect, Rect clip, Color color, int stroke_width,
+                         int border_radius = 0, int border_radius_y = -1) {
     Rect clipped = clipped_target_rect(target, rect, clip);
     if (empty_rect(clipped) || color.a == 0 || stroke_width <= 0) {
         return;
     }
     stroke_width = std::min(stroke_width, std::max(1, std::min(rect.width, rect.height) / 2));
-    if (!has_corner_radius(border_radius)) {
+    if (!has_corner_radius(border_radius) &&
+        effective_vertical_radius(border_radius, border_radius_y) == border_radius) {
         fill_rect_clipped(target, Rect{rect.x, rect.y, rect.width, stroke_width}, clip, color);
         fill_rect_clipped(target, Rect{rect.x, safe_edge(rect.y, safe_edge(rect.height, -stroke_width)), rect.width, stroke_width}, clip, color);
         fill_rect_clipped(target, Rect{rect.x, rect.y, stroke_width, rect.height}, clip, color);
@@ -701,7 +724,7 @@ void stroke_rect_clipped(FrameBuffer& target, Rect rect, Rect clip, Color color,
         return;
     }
 
-    stroke_rounded_rect(target, rect, clip, color, stroke_width, border_radius);
+    stroke_rounded_rect(target, rect, clip, color, stroke_width, border_radius, border_radius_y);
 }
 
 #if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
@@ -711,8 +734,8 @@ void fill_linear_gradient(FrameBuffer& target,
                           Color first,
                           Color second,
                           GradientAxis axis,
-                          int border_radius = 0) {
-    modern_paint_fill_linear_gradient(target, rect, target_rect(target), first, second, axis, border_radius);
+                          int border_radius = 0, int border_radius_y = -1) {
+    modern_paint_fill_linear_gradient(target, rect, target_rect(target), first, second, axis, border_radius, border_radius_y);
 }
 
 void fill_linear_gradient_clipped(FrameBuffer& target,
@@ -721,13 +744,15 @@ void fill_linear_gradient_clipped(FrameBuffer& target,
                                   Color first,
                                   Color second,
                                   GradientAxis axis,
-                                  int border_radius = 0) {
-    modern_paint_fill_linear_gradient(target, rect, clip, first, second, axis, border_radius);
+                                  int border_radius = 0, int border_radius_y = -1) {
+    modern_paint_fill_linear_gradient(target, rect, clip, first, second, axis, border_radius, border_radius_y);
 }
 
 void fill_linear_gradient_area_clipped(FrameBuffer& target, Rect rect, Rect paint_area, Rect clip,
-                                       Color first, Color second, GradientAxis axis, int border_radius) {
-    modern_paint_fill_linear_gradient_area(target, rect, paint_area, clip, first, second, axis, border_radius);
+                                       Color first, Color second, GradientAxis axis, int border_radius,
+                                       int border_radius_y = -1) {
+    modern_paint_fill_linear_gradient_area(target, rect, paint_area, clip, first, second, axis,
+                                           border_radius, border_radius_y);
 }
 
 void fill_conic_gradient_region(FrameBuffer& target,
@@ -736,8 +761,9 @@ void fill_conic_gradient_region(FrameBuffer& target,
                                 Color first,
                                 Color second,
                                 int stop_percent,
-                                int border_radius) {
-    modern_paint_fill_conic_gradient_region(target, rect, clipped, first, second, stop_percent, border_radius);
+                                int border_radius, int border_radius_y = -1) {
+    modern_paint_fill_conic_gradient_region(target, rect, clipped, first, second, stop_percent,
+                                            border_radius, border_radius_y);
 }
 
 void fill_conic_gradient(FrameBuffer& target,
@@ -745,14 +771,14 @@ void fill_conic_gradient(FrameBuffer& target,
                          Color first,
                          Color second,
                          int stop_percent,
-                         int border_radius = 0) {
+                         int border_radius = 0, int border_radius_y = -1) {
     fill_conic_gradient_region(target,
                                rect,
                                clipped_target_rect(target, rect),
                                first,
                                second,
                                stop_percent,
-                               border_radius);
+                               border_radius, border_radius_y);
 }
 
 void fill_conic_gradient_clipped(FrameBuffer& target,
@@ -761,20 +787,21 @@ void fill_conic_gradient_clipped(FrameBuffer& target,
                                  Color first,
                                  Color second,
                                  int stop_percent,
-                                 int border_radius = 0) {
+                                 int border_radius = 0, int border_radius_y = -1) {
     fill_conic_gradient_region(target,
                                rect,
                                clipped_target_rect(target, rect, clip),
                                first,
                                second,
                                stop_percent,
-                               border_radius);
+                               border_radius, border_radius_y);
 }
 
 void fill_conic_gradient_area_clipped(FrameBuffer& target, Rect rect, Rect paint_area, Rect clip,
-                                      Color first, Color second, int stop_percent, int border_radius) {
+                                      Color first, Color second, int stop_percent, int border_radius,
+                                      int border_radius_y = -1) {
     modern_paint_fill_conic_gradient_area(target, rect, clipped_target_rect(target, rect, clip), paint_area,
-                                          first, second, stop_percent, border_radius);
+                                          first, second, stop_percent, border_radius, border_radius_y);
 }
 
 void fill_radial_gradient_region(FrameBuffer& target,
@@ -784,7 +811,7 @@ void fill_radial_gradient_region(FrameBuffer& target,
                                  Color edge_color,
                                  GradientAxis axis,
                                  int packed_position,
-                                 int border_radius) {
+                                 int border_radius, int border_radius_y = -1) {
     modern_paint_fill_radial_gradient_region(target,
                                              rect,
                                              clipped,
@@ -792,7 +819,7 @@ void fill_radial_gradient_region(FrameBuffer& target,
                                              edge_color,
                                              axis,
                                              packed_position,
-                                             border_radius);
+                                             border_radius, border_radius_y);
 }
 
 void fill_radial_gradient(FrameBuffer& target,
@@ -801,7 +828,7 @@ void fill_radial_gradient(FrameBuffer& target,
                           Color edge_color,
                           GradientAxis axis,
                           int packed_position,
-                          int border_radius = 0) {
+                          int border_radius = 0, int border_radius_y = -1) {
     fill_radial_gradient_region(target,
                                 rect,
                                 clipped_target_rect(target, rect),
@@ -809,7 +836,7 @@ void fill_radial_gradient(FrameBuffer& target,
                                 edge_color,
                                 axis,
                                 packed_position,
-                                border_radius);
+                                border_radius, border_radius_y);
 }
 
 void fill_radial_gradient_clipped(FrameBuffer& target,
@@ -819,7 +846,7 @@ void fill_radial_gradient_clipped(FrameBuffer& target,
                                   Color edge_color,
                                   GradientAxis axis,
                                   int packed_position,
-                                  int border_radius = 0) {
+                                  int border_radius = 0, int border_radius_y = -1) {
     fill_radial_gradient_region(target,
                                 rect,
                                 clipped_target_rect(target, rect, clip),
@@ -827,14 +854,15 @@ void fill_radial_gradient_clipped(FrameBuffer& target,
                                 edge_color,
                                 axis,
                                 packed_position,
-                                border_radius);
+                                border_radius, border_radius_y);
 }
 
 void fill_radial_gradient_area_clipped(FrameBuffer& target, Rect rect, Rect paint_area, Rect clip,
                                        Color center_color, Color edge_color, GradientAxis axis,
-                                       int packed_position, int border_radius) {
+                                       int packed_position, int border_radius, int border_radius_y = -1) {
     modern_paint_fill_radial_gradient_area(target, rect, clipped_target_rect(target, rect, clip), paint_area,
-                                           center_color, edge_color, axis, packed_position, border_radius);
+                                           center_color, edge_color, axis, packed_position, border_radius,
+                                           border_radius_y);
 }
 
 void fill_soft_box_shadow(FrameBuffer& target, Rect rect, Rect clip, Color color, int outer_radius,
@@ -1072,37 +1100,24 @@ void composite_buffer_clipped(FrameBuffer& target, const FrameBuffer& source, in
     }
 }
 
-void apply_rounded_clip(FrameBuffer& surface, Rect clip, int border_radius) {
-    if (!has_corner_radius(border_radius)) {
-        return;
-    }
+void apply_rounded_clip(FrameBuffer& surface, Rect clip, int border_radius, int border_radius_y) {
     const Rect visible = intersect_rect(clip, target_rect(surface));
-    if (empty_rect(visible)) {
-        return;
-    }
-    const RasterRoundedRect rounded = prepare_rounded_rect(clip, border_radius);
+    if (empty_rect(visible)) return;
+    const RasterRoundedRect rounded = prepare_rounded_rect(clip, border_radius, border_radius_y);
     const int y_end = safe_edge(visible.y, visible.height);
     const int x_end = safe_edge(visible.x, visible.width);
     for (int y = visible.y; y < y_end; ++y) {
-        if (!rounded_clip_affects_row(rounded, y)) {
-            continue;
-        }
+        if (!rounded_clip_affects_row(rounded, y)) continue;
         const Rect known_full = rounded_clip_known_full_row_span(rounded, y);
-        const int full_left = std::max(visible.x, known_full.x);
-        const int full_right = std::min(x_end, safe_edge(known_full.x, known_full.width));
+        const int full_left = std::min(x_end, std::max(visible.x, known_full.x));
+        const int full_right = std::max(full_left, safe_edge(known_full.x, known_full.width));
         Color* surface_row = surface.pixels.data() + static_cast<std::size_t>(y) *
             static_cast<std::size_t>(surface.width);
         for (int x = visible.x; x < full_left; ++x) {
-            const int coverage = rounded_rect_coverage(rounded, x, y);
-            if (coverage != 255) {
-                surface_row[x] = with_coverage(surface_row[x], coverage);
-            }
+            surface_row[x] = with_coverage(surface_row[x], rounded_rect_coverage(rounded, x, y));
         }
         for (int x = full_right; x < x_end; ++x) {
-            const int coverage = rounded_rect_coverage(rounded, x, y);
-            if (coverage != 255) {
-                surface_row[x] = with_coverage(surface_row[x], coverage);
-            }
+            surface_row[x] = with_coverage(surface_row[x], rounded_rect_coverage(rounded, x, y));
         }
     }
 }
@@ -1557,18 +1572,18 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
 
     switch (command.type()) {
     case DisplayCommandType::FillRect:
-        if (contains_rect(clip, rect)) {
-            fill_rect(target, rect, effective_color, command.basic_paint().border_radius);
-        } else {
-            fill_rect_clipped(target, rect, clip, effective_color, command.basic_paint().border_radius);
-        }
+        fill_rect_elliptical(target, rect, clip, effective_color,
+                             command.basic_paint().border_radius,
+                             effective_vertical_radius(command.basic_paint().border_radius,
+                                                       command.basic_paint().border_radius_y));
         break;
     case DisplayCommandType::LinearGradient:
 #if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
         if (has_basic_clip) {
             fill_linear_gradient_area_clipped(target, rect, basic_paint_area, clip, effective_color,
                                               effective_color2, command.basic_paint().gradient_axis,
-                                              command.basic_paint().border_radius);
+                                              command.basic_paint().border_radius,
+                                              command.basic_paint().border_radius_y);
             break;
         }
         if (contains_rect(clip, rect)) {
@@ -1577,7 +1592,8 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                                  effective_color,
                                  effective_color2,
                                  command.basic_paint().gradient_axis,
-                                 command.basic_paint().border_radius);
+                                 command.basic_paint().border_radius,
+                                 command.basic_paint().border_radius_y);
         } else {
             fill_linear_gradient_clipped(target,
                                          rect,
@@ -1585,12 +1601,15 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                                          effective_color,
                                          effective_color2,
                                          command.basic_paint().gradient_axis,
-                                         command.basic_paint().border_radius);
+                                         command.basic_paint().border_radius,
+                                         command.basic_paint().border_radius_y);
         }
         break;
 #else
-        fill_rect_clipped(target, basic_paint_area, intersect_rect(clip, rect),
-                          effective_color, command.basic_paint().border_radius);
+        fill_rect_elliptical(target, basic_paint_area, intersect_rect(clip, rect),
+                            effective_color, command.basic_paint().border_radius,
+                            effective_vertical_radius(command.basic_paint().border_radius,
+                                                      command.basic_paint().border_radius_y));
         break;
 #endif
     case DisplayCommandType::ConicGradient:
@@ -1598,7 +1617,8 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         if (has_basic_clip) {
             fill_conic_gradient_area_clipped(target, rect, basic_paint_area, clip, effective_color,
                                              effective_color2, command.basic_paint().gradient_stop_percent,
-                                             command.basic_paint().border_radius);
+                                             command.basic_paint().border_radius,
+                                             command.basic_paint().border_radius_y);
             break;
         }
         if (contains_rect(clip, rect)) {
@@ -1607,7 +1627,8 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                                 effective_color,
                                 effective_color2,
                                 command.basic_paint().gradient_stop_percent,
-                                command.basic_paint().border_radius);
+                                command.basic_paint().border_radius,
+                                command.basic_paint().border_radius_y);
         } else {
             fill_conic_gradient_clipped(target,
                                         rect,
@@ -1615,12 +1636,15 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                                         effective_color,
                                         effective_color2,
                                         command.basic_paint().gradient_stop_percent,
-                                        command.basic_paint().border_radius);
+                                        command.basic_paint().border_radius,
+                                        command.basic_paint().border_radius_y);
         }
         break;
 #else
-        fill_rect_clipped(target, basic_paint_area, intersect_rect(clip, rect),
-                          effective_color, command.basic_paint().border_radius);
+        fill_rect_elliptical(target, basic_paint_area, intersect_rect(clip, rect),
+                            effective_color, command.basic_paint().border_radius,
+                            effective_vertical_radius(command.basic_paint().border_radius,
+                                                      command.basic_paint().border_radius_y));
         break;
 #endif
     case DisplayCommandType::RadialGradient:
@@ -1629,7 +1653,8 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
             fill_radial_gradient_area_clipped(target, rect, basic_paint_area, clip, effective_color,
                                               effective_color2, command.basic_paint().gradient_axis,
                                               command.basic_paint().gradient_stop_percent,
-                                              command.basic_paint().border_radius);
+                                              command.basic_paint().border_radius,
+                                              command.basic_paint().border_radius_y);
             break;
         }
         if (contains_rect(clip, rect)) {
@@ -1639,7 +1664,8 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                                  effective_color2,
                                  command.basic_paint().gradient_axis,
                                  command.basic_paint().gradient_stop_percent,
-                                 command.basic_paint().border_radius);
+                                 command.basic_paint().border_radius,
+                                 command.basic_paint().border_radius_y);
         } else {
             fill_radial_gradient_clipped(target,
                                          rect,
@@ -1648,15 +1674,26 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                                          effective_color2,
                                          command.basic_paint().gradient_axis,
                                          command.basic_paint().gradient_stop_percent,
-                                         command.basic_paint().border_radius);
+                                         command.basic_paint().border_radius,
+                                         command.basic_paint().border_radius_y);
         }
         break;
 #else
-        fill_rect_clipped(target, basic_paint_area, intersect_rect(clip, rect),
-                          effective_color, command.basic_paint().border_radius);
+        fill_rect_elliptical(target, basic_paint_area, intersect_rect(clip, rect),
+                            effective_color, command.basic_paint().border_radius,
+                            effective_vertical_radius(command.basic_paint().border_radius,
+                                                      command.basic_paint().border_radius_y));
         break;
 #endif
     case DisplayCommandType::BoxShadow:
+        if (effective_vertical_radius(command.basic_paint().border_radius,
+                                      command.basic_paint().border_radius_y) !=
+            command.basic_paint().border_radius) {
+            report_diagnostic(diagnostics_, DiagnosticStage::Paint, DiagnosticSeverity::Warning,
+                              "paint-elliptical-box-shadow-unsupported",
+                              "Box shadow commands with unequal radius axes are unsupported", {});
+            break;
+        }
 #if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
         fill_soft_box_shadow(target,
                              rect,
@@ -1671,9 +1708,11 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
 #endif
     case DisplayCommandType::StrokeRect:
         if (contains_rect(clip, rect)) {
-            stroke_rect(target, rect, effective_color, command.basic_paint().stroke_width, command.basic_paint().border_radius);
+            stroke_rect(target, rect, effective_color, command.basic_paint().stroke_width,
+                        command.basic_paint().border_radius, command.basic_paint().border_radius_y);
         } else {
-            stroke_rect_clipped(target, rect, clip, effective_color, command.basic_paint().stroke_width, command.basic_paint().border_radius);
+            stroke_rect_clipped(target, rect, clip, effective_color, command.basic_paint().stroke_width,
+                                command.basic_paint().border_radius, command.basic_paint().border_radius_y);
         }
         break;
     case DisplayCommandType::PreparedText: {
@@ -1773,6 +1812,10 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         request.background_painting_radius = has_background_clip
             ? command.image_paint().border_radius
             : 0;
+        request.background_painting_radius_y = has_background_clip
+            ? effective_vertical_radius(command.image_paint().border_radius,
+                                        command.image_paint().border_radius_y)
+            : 0;
         if (image_painter_.paint == nullptr ||
             rect.width <= 0 ||
             rect.height <= 0) {
@@ -1788,6 +1831,8 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
             break;
         }
         const int image_clip_radius = command.image_paint().border_radius;
+        const int image_clip_radius_y = effective_vertical_radius(
+            image_clip_radius, command.image_paint().border_radius_y);
         if (has_corner_radius(image_clip_radius)) {
             const Rect visible = intersect_rect(rect, image_clip);
             if (empty_rect(visible)) {
@@ -1824,7 +1869,8 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                           Color{226, 232, 240, 255});
             }
             const Rect rounded_rect = has_background_clip ? background_painting_rect : rect;
-            const RasterRoundedRect rounded = prepare_rounded_rect(rounded_rect, image_clip_radius);
+            const RasterRoundedRect rounded = prepare_rounded_rect(rounded_rect, image_clip_radius,
+                                                                   image_clip_radius_y);
             const int y_end = safe_edge(visible.y, visible.height);
             const int x_end = safe_edge(visible.x, visible.width);
             for (int y = visible.y; y < y_end; ++y) {
@@ -1932,7 +1978,9 @@ void SoftwareRasterizer::rasterize_clipped(const DisplayCommand& command,
         }
         if (has_corner_radius(clips[index].border_radius)) {
             rounded_clips.push_back(prepare_rounded_rect(clips[index].rect,
-                                                         clips[index].border_radius));
+                                                         clips[index].border_radius,
+                                                         effective_vertical_radius(clips[index].border_radius,
+                                                                                   clips[index].border_radius_y)));
         }
     }
     if (rounded_clips.empty()) {
@@ -2064,7 +2112,9 @@ void SoftwareRasterizer::rasterize_clipped(const DisplayCommand* commands,
         }
         if (has_corner_radius(clips[index].border_radius)) {
             rounded_clips.push_back(prepare_rounded_rect(clips[index].rect,
-                                                         clips[index].border_radius));
+                                                         clips[index].border_radius,
+                                                         effective_vertical_radius(clips[index].border_radius,
+                                                                                   clips[index].border_radius_y)));
         }
     }
     if (rounded_clips.empty()) {
@@ -2428,7 +2478,9 @@ void SoftwareCompositor::composite_layer(const LayerNode& layer,
                                     safe_add(rounded_clip.y, safe_negate(offscreen_bounds.y)),
                                     rounded_clip.width,
                                     rounded_clip.height},
-                               layer.clip_border_radius);
+                               layer.clip_border_radius,
+                               effective_vertical_radius(layer.clip_border_radius,
+                                                         layer.clip_border_radius_y));
         }
         if (has_scale_or_rotate) {
             composite_transformed_buffer(target,

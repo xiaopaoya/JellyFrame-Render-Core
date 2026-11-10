@@ -1410,6 +1410,51 @@ bool parse_box_edge_px(const std::string& value,
     return true;
 }
 
+bool parse_border_radius_axis(const std::string& value,
+                              std::array<int, 4>& expanded,
+                              std::uint8_t& percent_mask,
+                              int em_base,
+                              const LengthResolutionContext& context) {
+    const auto tokens = split_whitespace_components(value);
+    if (tokens.empty() || tokens.size() > 4) return false;
+    std::array<int, 4> values{};
+    percent_mask = 0;
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+        if (tokens[i].find('(') != std::string::npos || tokens[i].find(')') != std::string::npos)
+            return false;
+        int percent = -1;
+        double precise = 0;
+        if (!tokens[i].empty() && tokens[i].back() == '%') {
+            float percentage = 0;
+            if (!parse_float(tokens[i].substr(0, tokens[i].size() - 1), percentage) ||
+                percentage < 0 || !round_finite_float_to_int(percentage, percent)) return false;
+            values[i] = percent;
+            percent_mask |= static_cast<std::uint8_t>(1U << i);
+        } else if (!parse_length_px(tokens[i], values[i], em_base, context, &precise) ||
+                   precise < 0 || values[i] < 0) {
+            return false;
+        }
+    }
+    if (tokens.size() == 1) values = {values[0], values[0], values[0], values[0]};
+    else if (tokens.size() == 2) values = {values[0], values[1], values[0], values[1]};
+    else if (tokens.size() == 3) values = {values[0], values[1], values[2], values[1]};
+    expanded = values;
+    // Expand percentage-unit metadata with the same physical-corner mapping.
+    const std::uint8_t mask = percent_mask;
+    if (tokens.size() == 1) percent_mask = mask ? 0x0fU : 0U;
+    else if (tokens.size() == 2) percent_mask = mask == 0 ? 0U :
+        static_cast<std::uint8_t>((((mask & 1U) ? 1U : 0U) | ((mask & 2U) ? 2U : 0U)) * 5U);
+    else if (tokens.size() == 3) percent_mask = static_cast<std::uint8_t>(
+        ((mask & 1U) ? 1U : 0U) | ((mask & 2U) ? 2U : 0U) |
+        ((mask & 4U) ? 4U : 0U) | ((mask & 2U) ? 8U : 0U));
+    if (percent_mask == 0 &&
+        *std::max_element(expanded.begin(), expanded.end()) > 127 &&
+        !std::all_of(expanded.begin(), expanded.end(), [&](int item) { return item == expanded[0]; })) {
+        return false;
+    }
+    return true;
+}
+
 bool parse_margin_edge_px(const std::string& value,
                           EdgeSizes& output,
                           bool& left_auto,
@@ -3475,22 +3520,41 @@ DeclarationApplyResult apply_box_model_declaration(Style& style,
         return DeclarationApplyResult::Applied;
     }
     if (property == "border-radius") {
-        int percent = -1;
-        if (parse_percentage_int(value, percent)) {
+        const std::size_t slash = value.find('/');
+        const bool has_percent = value.find('%') != std::string::npos;
+        if (slash != std::string::npos || has_percent) {
+            if (slash != std::string::npos && value.find('/', slash + 1) != std::string::npos)
+                return DeclarationApplyResult::Invalid;
+            const std::string horizontal = trim(value.substr(0, slash == std::string::npos ? value.size() : slash));
+            const std::string vertical = slash == std::string::npos ? horizontal : trim(value.substr(slash + 1));
+            std::array<int, 4> x_values{}, y_values{};
+            std::uint8_t x_percent_mask = 0, y_percent_mask = 0;
+            if (horizontal.empty() || vertical.empty() ||
+                !parse_border_radius_axis(horizontal, x_values, x_percent_mask, style.font_size, context) ||
+                !parse_border_radius_axis(vertical, y_values, y_percent_mask, style.font_size, context)) {
+                return DeclarationApplyResult::Invalid;
+            }
+            style.border_radius_x_values = x_values;
+            style.border_radius_y_values = y_values;
+            style.border_radius_x_percent_mask = x_percent_mask;
+            style.border_radius_y_percent_mask = y_percent_mask;
             style.border_radius = 0;
-            style.border_radius_percent = std::max(0, percent);
+            style.border_radius_percent = -1;
+            style.border_radius_axes_specified = true;
             return DeclarationApplyResult::Applied;
         }
-        EdgeSizes radii;
-        if (!parse_box_edge_px(value, radii, style.font_size, context)) {
+        std::array<int, 4> radius_values{};
+        std::uint8_t radius_percent_mask = 0;
+        if (!parse_border_radius_axis(value, radius_values, radius_percent_mask, style.font_size, context)) {
             return DeclarationApplyResult::Invalid;
         }
-        if (radii.top > 127 || radii.right > 127 || radii.bottom > 127 || radii.left > 127 ||
-            radii.top < 0 || radii.right < 0 || radii.bottom < 0 || radii.left < 0) {
-            return DeclarationApplyResult::Invalid;
-        }
-        style.border_radius = encode_corner_radii(CornerRadii{radii.top, radii.right, radii.bottom, radii.left});
+        style.border_radius = encode_corner_radii(CornerRadii{
+            radius_values[0], radius_values[1], radius_values[2], radius_values[3]});
         style.border_radius_percent = -1;
+        style.border_radius_axes_specified = false;
+        style.border_radius_x_values = {};
+        style.border_radius_y_values = {};
+        style.border_radius_x_percent_mask = style.border_radius_y_percent_mask = 0;
         return DeclarationApplyResult::Applied;
     }
     return DeclarationApplyResult::Unhandled;

@@ -12,6 +12,7 @@
 #include "render_core/text_scan.h"
 
 #include <iostream>
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -1480,6 +1481,76 @@ void generated_after_and_percentage_radius_emit_commands() {
     check(found_after, "generated after content is painted after children");
 }
 
+void elliptical_percentage_radius_uses_css_axes_and_overlap_scaling() {
+    auto pipeline = build_pipeline(
+        "<body><section class='ellipse'></section><section class='overlap'></section></body>",
+        ".ellipse { width: 80px; height: 40px; background: #102030; border-radius: 50%; }"
+        ".overlap { width: 80px; height: 40px; background: #304050; "
+        "border-radius: 80% 80% 80% 80%; }");
+    LayerTreeBuilder builder;
+    const DisplayList flattened = builder.flatten(*pipeline.layer_tree);
+    int radius_x[2] = {-1, -1};
+    int radius_y[2] = {-1, -1};
+    int found = 0;
+    for (const DisplayCommand& command : flattened) {
+        if (command.type() != DisplayCommandType::FillRect) continue;
+        const int x = command.basic_paint().border_radius;
+        if (x == 0) continue;
+        if (found < 2) {
+            radius_x[found] = x;
+            radius_y[found] = effective_vertical_radius(x, command.basic_paint().border_radius_y);
+            ++found;
+        }
+    }
+    check(found == 2, "both authored percentage ellipse cases emit box background commands");
+    check(radius_x[0] == 40 && radius_y[0] == 20,
+          "50 percent resolves horizontal and vertical radii against width and height");
+    check(radius_x[1] == 40 && radius_y[1] == 20,
+          "over-constrained percentage corners share CSS overlap normalization");
+
+    auto large = build_pipeline(
+        "<body><section class='large'></section></body>",
+        ".large { width: 300px; height: 200px; background: #405060; border-radius: 50%; }");
+    const DisplayList large_flat = builder.flatten(*large.layer_tree);
+    bool large_radius = false;
+    for (const DisplayCommand& command : large_flat) {
+        if (command.type() == DisplayCommandType::FillRect && command.basic_paint().border_radius == 150 &&
+            effective_vertical_radius(command.basic_paint().border_radius,
+                                      command.basic_paint().border_radius_y) == 100) {
+            large_radius = true;
+        }
+    }
+    check(large_radius, "uniform 300 by 200 percentage ellipse retains 150 by 100 radii");
+}
+
+void pixel_corner_radii_match_equal_axis_slash_syntax() {
+    auto pipeline = build_pipeline(
+        "<body><section class='single'></section><section class='single slash'></section>"
+        "<section class='overlap'></section><section class='overlap slash'></section></body>",
+        "section { width: 100px; height: 100px; }"
+        ".single { background: #112233; border-radius: 80px 0 0 0; }"
+        ".single.slash { border-radius: 80px 0 0 0 / 80px 0 0 0; }"
+        ".overlap { background: #445566; border-radius: 80px 40px 0 0; }"
+        ".overlap.slash { border-radius: 80px 40px 0 0 / 80px 40px 0 0; }");
+    LayerTreeBuilder builder;
+    int single = 0, overlap = 0;
+    for (const auto& command : builder.flatten(*pipeline.layer_tree)) {
+        if (command.type() != DisplayCommandType::FillRect) continue;
+        int expected = 0;
+        if (command.color.r == 0x11) {
+            ++single;
+            expected = encode_corner_radii({80, 0, 0, 0});
+        } else if (command.color.r == 0x44) {
+            ++overlap;
+            expected = encode_corner_radii({66, 33, 0, 0});
+        } else continue;
+        check(command.basic_paint().border_radius == expected &&
+              effective_vertical_radius(expected, command.basic_paint().border_radius_y) == expected,
+              "ordinary and equal-axis slash pixel corners share common CSS overlap reduction");
+    }
+    check(single == 2 && overlap == 2, "both pixel radius syntaxes emit equivalent pipeline commands");
+}
+
 void conic_gradient_background_emits_progress_command() {
 #if !JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
     return;
@@ -1552,6 +1623,67 @@ void large_conic_gradient_reports_area_budget_diagnostic() {
 
     check(has_diagnostic_code(diagnostics, "layer-conic-gradient-area-budget"),
           "large conic-gradient emits area budget diagnostic");
+}
+
+void elliptical_radius_refuses_circular_box_shadow_fallback() {
+#if !JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
+    return;
+#endif
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse("<body><section class='ellipse'></section></body>");
+    Stylesheet stylesheet = css_parser.parse(
+        ".ellipse { width: 80px; height: 40px; border-radius: 50% 30% / 25% 10%; "
+        "box-shadow: 0 2px 6px rgba(0,0,0,.5); }");
+    StyleResolver resolver(stylesheet);
+    RenderTreeBuilder render_tree_builder(resolver);
+    auto render_tree = render_tree_builder.build(*document);
+    LayoutEngine layout_engine(resolver);
+    auto layout_tree = layout_engine.layout(*render_tree, 240);
+    VectorDiagnosticSink diagnostics;
+    LayerTreeBuilderOptions options;
+    options.diagnostics = &diagnostics;
+    LayerTreeBuilder builder(options);
+    const auto layers = builder.build(*layout_tree);
+    const DisplayList flattened = builder.flatten(*layers);
+    const bool found_shadow = std::any_of(flattened.begin(), flattened.end(), [](const DisplayCommand& command) {
+        return command.type() == DisplayCommandType::BoxShadow;
+    });
+    check(!found_shadow, "unsupported elliptical shadow is omitted instead of painted as a circle");
+    check(has_diagnostic_code(diagnostics, "layer-box-shadow-ellipse-unsupported"),
+          "unsupported elliptical shadow emits a diagnostic");
+}
+
+void unrepresentable_horizontal_axis_refuses_both_axes() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse("<body><section class='wide'></section></body>");
+    Stylesheet stylesheet = css_parser.parse(
+        ".wide { width: 300px; height: 40px; background: #405060; "
+        "border-radius: 80% 20% 80% 20% / 20%; }");
+    StyleResolver resolver(stylesheet);
+    RenderTreeBuilder render_tree_builder(resolver);
+    auto render_tree = render_tree_builder.build(*document);
+    LayoutEngine layout_engine(resolver);
+    auto layout_tree = layout_engine.layout(*render_tree, 360);
+    VectorDiagnosticSink diagnostics;
+    LayerTreeBuilderOptions options;
+    options.diagnostics = &diagnostics;
+    LayerTreeBuilder builder(options);
+    const auto layers = builder.build(*layout_tree);
+    const DisplayList flattened = builder.flatten(*layers);
+    bool painted_ellipse = false;
+    for (const DisplayCommand& command : flattened) {
+        if (command.type() == DisplayCommandType::FillRect &&
+            (has_corner_radius(command.basic_paint().border_radius) ||
+             has_corner_radius(effective_vertical_radius(command.basic_paint().border_radius,
+                                                         command.basic_paint().border_radius_y)))) {
+            painted_ellipse = true;
+        }
+    }
+    check(!painted_ellipse, "an unrepresentable horizontal axis cannot leave a vertical-only rounded result");
+    check(has_diagnostic_code(diagnostics, "layer-border-radius-range"),
+          "unrepresentable percentage ellipse is explicitly refused");
 }
 
 void large_radial_gradient_reports_area_budget_diagnostic() {
@@ -1827,6 +1959,63 @@ bool resolve_test_background_image(const Node&,
     return true;
 }
 
+void elliptical_background_and_outline_keep_semantic_axes() {
+    LayoutBox root;
+    root.rect = {0, 0, 100, 100};
+    root.style.background_color = {17, 34, 51, 255};
+    root.style.border_radius_axes_specified = true;
+    root.style.border_radius_x_values = {30, 30, 30, 30};
+    root.style.border_radius_y_values = {20, 20, 20, 20};
+    root.style.border_width = {2, 12, 6, 4};
+    root.style.background_layers[0].image.clip = BackgroundBox::PaddingBox;
+    root.style.outline_width = 2;
+    root.style.outline_color = {55, 66, 77, 255};
+    LayerTreeBuilder builder;
+    auto layer = builder.build(root);
+    bool color = false, outline = false;
+    for (const auto& command : builder.flatten(*layer)) {
+        if (command.type() == DisplayCommandType::FillRect && command.color.r == 17) {
+            color = true;
+            check(command.basic_paint().border_radius == encode_corner_radii({26, 18, 18, 26}) &&
+                  command.basic_paint().border_radius_y == encode_corner_radii({18, 18, 14, 14}),
+                  "inner background color receives physical per-axis inset radii");
+        }
+        if (command.type() == DisplayCommandType::StrokeRect && command.color.r == 55) {
+            outline = true;
+            check(command.basic_paint().border_radius == 32 && command.basic_paint().border_radius_y == 22,
+                  "expanded outline receives both outer corner axes at emission");
+        }
+    }
+    check(color && outline, "elliptical color clip and outline commands are present");
+}
+
+void inset_background_images_keep_zero_horizontal_radius() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse("<body><section></section></body>");
+    StyleResolver resolver(css_parser.parse(
+        "section { width: 100px; height: 100px; border: 20px solid black; "
+        "border-radius: 10px / 30px; background-image: url('/assets/inset.bmp'); "
+        "background-clip: padding-box; background-repeat: no-repeat; }"));
+    BackgroundImageResolveContext context{resolver.background_image_resource_id_for("/assets/inset.bmp"), 92};
+    RenderTreeBuilder render_builder(resolver);
+    auto render = render_builder.build(*document);
+    LayoutEngine layout_engine(resolver);
+    auto layout = layout_engine.layout(*render, 240);
+    LayerTreeBuilderOptions options;
+    options.image_resolver = {resolve_test_background_image, &context};
+    LayerTreeBuilder builder(options);
+    auto layer = builder.build(*layout);
+    bool found = false;
+    for (const auto& command : builder.flatten(*layer)) {
+        if (command.type() != DisplayCommandType::Image) continue;
+        found = true;
+        check(command.image_paint().border_radius == 0 && command.image_paint().border_radius_y == 10,
+              "image painting clip keeps inset axes rather than restoring outer box radii");
+    }
+    check(found, "inset elliptical background image is emitted");
+}
+
 void package_background_image_emits_image_display_command_when_surface_resolves() {
     HtmlParser html_parser;
     CssParser css_parser;
@@ -1989,10 +2178,16 @@ int main() {
         box_shadow_none_and_large_shadow_are_diagnosed();
         list_markers_and_generated_counters_emit_text();
         generated_after_and_percentage_radius_emit_commands();
+        elliptical_percentage_radius_uses_css_axes_and_overlap_scaling();
+        pixel_corner_radii_match_equal_axis_slash_syntax();
         package_background_image_emits_image_display_command_when_surface_resolves();
+        elliptical_background_and_outline_keep_semantic_axes();
+        inset_background_images_keep_zero_horizontal_radius();
         conic_gradient_background_emits_progress_command();
         radial_gradient_background_emits_center_circle_command();
         large_conic_gradient_reports_area_budget_diagnostic();
+        elliptical_radius_refuses_circular_box_shadow_fallback();
+        unrepresentable_horizontal_axis_refuses_both_axes();
         large_radial_gradient_reports_area_budget_diagnostic();
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
         fixed_grid_places_description_list_in_columns();
