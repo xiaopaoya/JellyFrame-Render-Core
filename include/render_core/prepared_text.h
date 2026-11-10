@@ -1,5 +1,8 @@
 #pragma once
 
+// Version of the canonical prepared-text packet byte contract.
+#define JELLYFRAME_RENDER_CORE_PREPARED_TEXT_PACKET_VERSION 1
+
 #include "render_core/text_system.h"
 
 #include <string>

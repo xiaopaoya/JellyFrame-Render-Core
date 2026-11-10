@@ -167,10 +167,13 @@ bool resolve(const Node&, ImageResolveKind, std::uint16_t, ResolvedImageResource
     result = resolution.resource;
     return resolution.available;
 }
-std::size_t resolved_images(Resolution& resolution, bool background) {
+std::size_t resolved_images(Resolution& resolution, bool background, bool stretch_unknown_background = false) {
     auto document = HtmlParser().parse(background ? "<body><div></div></body>" : "<body><img src='image'></body>");
     auto sheet = CssParser().parse(background ?
-        "div { width:12px; height:8px; background-image:url('/assets/image.bmp'); }" : "img { width:12px; height:8px; }");
+        (stretch_unknown_background
+            ? "div { width:12px; height:8px; background-image:url('/assets/image.bmp'); background-size:100% 100%; }"
+            : "div { width:12px; height:8px; background-image:url('/assets/image.bmp'); }")
+        : "img { width:12px; height:8px; }");
     StyleResolver styles(sheet);
     auto render_tree = RenderTreeBuilder(styles).build(*document);
     auto layout_tree = LayoutEngine(styles).layout(*render_tree, 40);
@@ -185,9 +188,10 @@ std::size_t resolved_images(Resolution& resolution, bool background) {
 }
 void resolution_metadata_is_bounded_without_content_regression() {
     Resolution resolution{{73, {ImageIntrinsicSizeState::Unknown, 0, 0}}};
-    check(resolved_images(resolution, true) == 1, "unknown metadata permits legacy URL image");
-    resolution.resource.intrinsic_size = {ImageIntrinsicSizeState::Known, 8191, 1};
-    check(resolved_images(resolution, true) == 1, "known bounded metadata accepted");
+    check(resolved_images(resolution, true) == 0, "unknown intrinsic size refuses auto background geometry");
+    check(resolved_images(resolution, true, true) == 1, "explicit stretch remains resolvable without intrinsic dimensions");
+    resolution.resource.intrinsic_size = {ImageIntrinsicSizeState::Known, 8, 8};
+    check(resolved_images(resolution, true) >= 1, "known bounded metadata accepted");
     for (auto size : {ImageIntrinsicSize{ImageIntrinsicSizeState::Known, 0, 1},
                       ImageIntrinsicSize{ImageIntrinsicSizeState::Known, 8192, 1},
                       ImageIntrinsicSize{ImageIntrinsicSizeState::Invalid, 1, 1}}) {

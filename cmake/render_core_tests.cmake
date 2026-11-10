@@ -173,3 +173,20 @@ add_test(NAME jellyframe_image_callback_contract_tests COMMAND jellyframe_image_
 if(COMMAND jellyframe_stage_sanitizer_runtime)
     jellyframe_stage_sanitizer_runtime(jellyframe_image_callback_contract_tests)
 endif()
+
+add_executable(jellyframe_background_multilayer_paint_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/background_multilayer_paint_tests.cpp")
+target_link_libraries(jellyframe_background_multilayer_paint_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_background_multilayer_paint_tests COMMAND jellyframe_background_multilayer_paint_tests)
+if(COMMAND jellyframe_stage_sanitizer_runtime)
+    jellyframe_stage_sanitizer_runtime(jellyframe_background_multilayer_paint_tests)
+endif()
+
+add_executable(jellyframe_background_multilayer_style_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/background_multilayer_style_tests.cpp")
+target_link_libraries(jellyframe_background_multilayer_style_tests PRIVATE jellyframe_render_core)
+target_include_directories(jellyframe_background_multilayer_style_tests PRIVATE "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/src")
+add_test(NAME jellyframe_background_multilayer_style_tests COMMAND jellyframe_background_multilayer_style_tests)
+if(COMMAND jellyframe_stage_sanitizer_runtime)
+    jellyframe_stage_sanitizer_runtime(jellyframe_background_multilayer_style_tests)
+endif()

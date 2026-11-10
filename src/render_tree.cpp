@@ -2,6 +2,7 @@
 
 #include "render_core/text_normalization.h"
 #include "css_aspect_ratio.h"
+#include "background_style_access.h"
 
 #include <algorithm>
 #include <utility>
@@ -127,12 +128,7 @@ void apply_style_override(Style& style, const Node& node, const std::vector<Styl
             style.color_specified = true;
         }
         if (override.has_background_color) {
-            style.background_paint = BackgroundPaintKind::Solid;
-            style.background_gradient_axis = GradientAxis::Vertical;
-            style.background_gradient_stop_percent = 100;
             style.background_color = override.background_color;
-            style.background_color2 = override.background_color;
-            style.background_overlay_packed = 0;
         }
         if (override.has_transform) {
             style.transform = override.transform;

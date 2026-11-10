@@ -1,6 +1,6 @@
 # CSS Parser Scope
 
-> Last updated: 2026-07-22; Applies to: 0.5.0
+> Last updated: 2026-11-10; Applies to: 0.9.0-dev / ABI4 candidate
 
 Last checked against CSS Syntax Module Level 3, Media Queries and browser
 parser source layout on 2026-06-16:
@@ -57,17 +57,30 @@ layout behavior.
   `var(--token)` / `var(--token, fallback)`. Values inherit along the DOM path,
   `:root` tokens and inline tokens work, and unresolved values keep earlier
   fallback declarations alive.
-- `background` accepts solid colors and a style-resolution subset of
-  `linear-gradient(<color>, <color>)`,
-  `linear-gradient(to bottom/top/right/left, ...)`, two-segment `conic-gradient()`
-  progress rings and two-color center-circle `radial-gradient()` highlights.
-  Unsupported angles, stops, focal points, ellipses or image values are reported
-  without replacing earlier supported fallbacks.
-- `background-image` accepts the same gradient subset, but not solid colors. It
-  also accepts one package-absolute `url("/assets/image.bmp")`, which is handed
-  to the host image resolver and fills the element background paint area. The
-  parser rejects remote/data URLs, relative paths, traversal, query/fragment,
-  multiple URL layers and background repeat/position/size syntax.
+- `Style` represents background images as four value-semantic layer slots
+  (slot zero is topmost) and one shared `background_color` painted below them.
+  The default is one `none` image slot. `background-image` accepts a bounded
+  comma list of one to four `none`, supported gradient, or package-absolute
+  URL items. URLs such as `url("/assets/image.bmp")` go through the host image
+  resolver; remote/data URLs, relative paths, traversal, query and fragment
+  paths are rejected. `background` accepts the same image items and a shared
+  color on the final layer; a color-only shorthand sets the shared color and
+  resets the image list to `none`.
+- Supported gradient values include two-color `linear-gradient()` with the
+  bounded directions/angles, two-segment progress-ring `conic-gradient()`, and
+  two-color circular `radial-gradient()` with center or percentage positioning.
+  Unsupported stops, angles/directions, radial shapes/positions or malformed
+  items are diagnosed and do not replace earlier supported declarations.
+- `background-repeat`, `background-position`, `background-size`,
+  `background-origin` and `background-clip` accept bounded lists and repeat
+  cyclically across the image list. Supported geometry includes repeat/no-repeat
+  combinations, keyword/percentage positions, `cover`/`contain`/`auto` or
+  `100% 100%` sizing, and the supported border/padding/content
+  boxes. Shorthand resets image geometry; image, geometry and shared-color
+  longhands cascade independently, and the shorthand color applies only as the
+  shared color beneath all image layers. Invalid declarations preserve earlier
+  winners. This does not implement the full CSS background grammar, arbitrary
+  gradient stops, image types or unbounded lists.
 - Type/class/id/attribute compound selectors, descendant and child combinators,
   and adjacent/general sibling combinators.
 - Dynamic pseudo-classes `:hover`, `:active`, `:focus`, `:focus-within`,

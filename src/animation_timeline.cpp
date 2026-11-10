@@ -1,4 +1,5 @@
 #include "render_core/animation_timeline.h"
+#include "background_style_access.h"
 
 #include <algorithm>
 #include <cmath>
@@ -198,7 +199,8 @@ bool AnimationTimeline::start_transitions(const Node& node,
         append(active);
     }
     if (const StyleTransition* transition = transition_for_property(to_style, AnimatedTransitionProperty::BackgroundColor);
-        transition != nullptr && !color_equal(from_style.background_color, to_style.background_color)) {
+        transition != nullptr && !detail::background_colors_equal(
+            detail::computed_background_color(from_style), detail::computed_background_color(to_style))) {
         ActiveTransition active;
         active.node = &node;
         active.property = AnimatedTransitionProperty::BackgroundColor;
@@ -207,8 +209,8 @@ bool AnimationTimeline::start_transitions(const Node& node,
         active.delay_ms = transition->delay_ms;
         active.timing = transition->timing;
         active.cubic_bezier = transition->cubic_bezier;
-        active.from_color = from_style.background_color;
-        active.to_color = to_style.background_color;
+        active.from_color = detail::computed_background_color(from_style);
+        active.to_color = detail::computed_background_color(to_style);
         append(active);
     }
     if (const StyleTransition* transition = transition_for_property(to_style, AnimatedTransitionProperty::Color);
@@ -308,7 +310,8 @@ bool AnimationTimeline::ensure_keyframe_animation(const Node& node,
     }
 
     active.animates_opacity = std::abs(active.from_style.opacity - active.to_style.opacity) >= 0.001F;
-    active.animates_background_color = !color_equal(active.from_style.background_color, active.to_style.background_color);
+    active.animates_background_color = !detail::background_colors_equal(
+        detail::computed_background_color(active.from_style), detail::computed_background_color(active.to_style));
     active.animates_color = !color_equal(active.from_style.color, active.to_style.color);
     active.animates_transform =
         parse_css_transform_2d(active.from_style.transform, active.from_transform) &&
@@ -405,7 +408,8 @@ bool AnimationTimeline::sample(std::uint64_t now_ms, std::vector<StyleOverride>&
         }
         if (active.animates_background_color) {
             override.has_background_color = true;
-            override.background_color = mix_color(active.from_style.background_color, active.to_style.background_color, eased);
+            override.background_color = mix_color(detail::computed_background_color(active.from_style),
+                                                  detail::computed_background_color(active.to_style), eased);
         }
         if (active.animates_color) {
             override.has_color = true;

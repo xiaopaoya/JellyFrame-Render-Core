@@ -1,6 +1,7 @@
 #include "render_core/style_repaint.h"
 
 #include "render_core/text_layout_reuse.h"
+#include "background_style_access.h"
 
 #include <algorithm>
 #include <utility>
@@ -26,7 +27,7 @@ bool layout_fields_equal(const Style& left, const Style& right) {
         left.margin_right_auto == right.margin_right_auto &&
         edge_sizes_equal(left.padding, right.padding) &&
         edge_sizes_equal(left.border_width, right.border_width) &&
-        left.background_overlay_packed == right.background_overlay_packed &&
+        detail::computed_background_images_equal(left, right) &&
         left.width == right.width &&
         left.height == right.height &&
         left.min_width == right.min_width &&
@@ -168,7 +169,8 @@ void apply_styles_iterative(const RenderObject& render, LayoutBox& layout) {
 bool style_override_needed(const Style& previous, const Style& next) {
     return previous.transform != next.transform ||
         previous.opacity != next.opacity ||
-        !color_equal(previous.background_color, next.background_color) ||
+        !detail::background_colors_equal(detail::computed_background_color(previous),
+                                         detail::computed_background_color(next)) ||
         !color_equal(previous.color, next.color);
 }
 
@@ -193,7 +195,7 @@ void append_style_override(const RenderObject& object,
     }
     if (use_background_color) {
         override.has_background_color = true;
-        override.background_color = object.style.background_color;
+        override.background_color = detail::computed_background_color(object.style);
     }
     if (use_color) {
         override.has_color = true;
@@ -216,7 +218,9 @@ void collect_style_overrides_iterative(const RenderObject& previous,
         if (previous_node.node == next_node.node && style_override_needed(previous_node.style, next_node.style)) {
             const bool transform = previous_node.style.transform != next_node.style.transform;
             const bool opacity = previous_node.style.opacity != next_node.style.opacity;
-            const bool background = !color_equal(previous_node.style.background_color, next_node.style.background_color);
+            const bool background = !detail::background_colors_equal(
+                detail::computed_background_color(previous_node.style),
+                detail::computed_background_color(next_node.style));
             const bool color = !color_equal(previous_node.style.color, next_node.style.color);
             append_style_override(previous_node, previous_overrides, transform, opacity, background, color);
             append_style_override(next_node, current_overrides, transform, opacity, background, color);
