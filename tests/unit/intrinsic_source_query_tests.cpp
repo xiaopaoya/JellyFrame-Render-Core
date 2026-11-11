@@ -1084,7 +1084,7 @@ void layout_pass_intrinsic_budget(const TextSystem& system) {
         "*{margin:0;padding:0;border:0;font-size:16px}"
         "#outer{display:grid;width:100px;grid-template-columns:100px}"
         ".f{display:flex;width:5px;align-items:flex-start}.item{display:block;flex:0 1 0px}"
-        ".g{display:grid;width:100px;grid-template-columns:auto}"));
+        ".g{display:grid;width:100px;grid-template-columns:auto auto}.g>div{display:block}"));
     LayoutIntrinsicQueryStatistics statistics;
     LayoutEngineOptions options;
     options.text_system = &system;
@@ -1102,6 +1102,14 @@ void layout_pass_intrinsic_budget(const TextSystem& system) {
     check(same_rectangles(*limited, *repeated) && statistics.work == first_pass.work &&
           statistics.queries == first_pass.queries && statistics.resource_refusals == first_pass.resource_refusals,
           "reusing the same engine resets the intrinsic allowance once for the next public pass");
+    MonotonicArena arena;
+    auto arena_layout = engine.layout(*document, 120, 80, arena);
+    check(same_rectangles(*limited, *arena_layout) && statistics.work == first_pass.work,
+          "arena-backed public layout uses the same once-per-pass ledger lifetime");
+    auto render_tree = RenderTreeBuilder(styles).build(*document);
+    auto render_layout = engine.layout(*render_tree, 120, 80);
+    check(same_rectangles(*limited, *render_layout) && statistics.work == first_pass.work,
+          "public RenderObject layout starts a fresh ledger without a Node-overload reset");
     options.intrinsic_query_limits.max_work = 65536;
     options.intrinsic_query_limits.max_boxes = 4096;
     auto complete = LayoutEngine(styles, {}, options).layout(*document, 120, 80);
@@ -1121,16 +1129,27 @@ void layout_pass_intrinsic_budget(const TextSystem& system) {
           statistics.resource_refusals > 0 && statistics.work <= pair_work - 1,
           "late Flex query refusal publishes the whole consumer legacy geometry atomically");
 
-    auto grid_pair = HtmlParser{}.parse("<div class='g'><div>AB AB</div><div>AB CD</div></div>");
+    auto grid_pair = HtmlParser{}.parse("<div id='gp' class='g'><div id='ga'>AB AB</div><div id='gb'>AB CD</div></div>");
     options.intrinsic_query_limits.max_work = 65536;
     auto grid_normal = LayoutEngine(styles, {}, options).layout(*grid_pair, 120, 80);
     const auto grid_work = statistics.work;
+    check(statistics.queries == 2 && grid_work > 0, "Grid boundary fixture issues two source queries");
     options.intrinsic_query_limits.max_work = grid_work - 1;
     auto grid_refused = LayoutEngine(styles, {}, options).layout(*grid_pair, 120, 80);
     options.intrinsic_query_limits.max_work = 0;
     auto grid_legacy = LayoutEngine(styles, {}, options).layout(*grid_pair, 120, 80);
     check(same_rectangles(*grid_refused, *grid_legacy),
           "late Grid query refusal discards all staged track contributions");
+    options.intrinsic_query_limits.max_work = 65536;
+    options.intrinsic_query_limits.max_scratch_bytes = 13; // Two int tracks + five source bytes.
+    auto grid_scratch_exact = LayoutEngine(styles, {}, options).layout(*grid_pair, 120, 80);
+    check(same_rectangles(*grid_scratch_exact, *grid_normal) && statistics.peak_scratch_bytes == 13,
+          "Grid staging and query payload share the exact simultaneous scratch allowance");
+    options.intrinsic_query_limits.max_scratch_bytes = 12;
+    auto grid_scratch_short = LayoutEngine(styles, {}, options).layout(*grid_pair, 120, 80);
+    check(same_rectangles(*grid_scratch_short, *grid_legacy) && statistics.resource_refusals > 0 &&
+          statistics.peak_scratch_bytes <= 12,
+          "one-below Grid scratch allowance refuses before publishing track contributions");
     std::cout << "nested query ledger: work=" << first_pass.work << "/180, queries="
               << first_pass.queries << ", resource refusals=" << first_pass.resource_refusals
               << "; ledger=" << sizeof(IntrinsicSourceQueryLedger) << "B, engine="

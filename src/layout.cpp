@@ -740,10 +740,10 @@ void finalize_grid_columns(GridColumns& columns,
     const auto scratch_bytes = placements.size() <= std::numeric_limits<std::size_t>::max() / sizeof(int)
         ? placements.size() * sizeof(int) : std::numeric_limits<std::size_t>::max();
     detail::IntrinsicSourceQueryScratch source_scratch(intrinsic_queries, text_system ? scratch_bytes : 0);
-    std::vector<int> source_widths;
+    std::unique_ptr<int[]> source_widths;
     bool source_queries_complete = text_system != nullptr && static_cast<bool>(source_scratch);
     if (source_queries_complete) {
-        try { source_widths.assign(placements.size(), -1); }
+        try { source_widths.reset(new int[placements.size()]); }
         catch (const std::bad_alloc&) { source_queries_complete = false; }
     }
     for (std::size_t index = 0; index < placements.size(); ++index) {

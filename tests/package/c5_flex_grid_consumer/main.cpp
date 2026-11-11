@@ -106,7 +106,8 @@ struct LayoutResult {
 };
 
 LayoutResult layout(const std::string& html, const std::string& css,
-                    TextSystem* text_system, bool enable_intrinsic = true) {
+                    TextSystem* text_system, bool enable_intrinsic = true,
+                    LayoutIntrinsicQueryLimits limits = {}, LayoutIntrinsicQueryStatistics* statistics = nullptr) {
     LayoutResult result;
     result.document = HtmlParser{}.parse(html);
     require(static_cast<bool>(result.document), "HTML fixture parse failed");
@@ -117,6 +118,8 @@ LayoutResult layout(const std::string& html, const std::string& css,
     provider.context = text_system;
     LayoutEngineOptions options;
     options.text_system = enable_intrinsic ? text_system : nullptr;
+    options.intrinsic_query_limits = limits;
+    options.intrinsic_query_statistics = statistics;
     result.boxes = LayoutEngine(styles, provider, options).layout(*result.document, 120, 80);
     return result;
 }
@@ -173,6 +176,25 @@ void check_calc_refusal(TextSystem& text_system) {
             queried_item->rect.height == legacy_item->rect.height,
             "Unsupported computed calc min-width must retain whole Flex legacy geometry");
 }
+
+void check_pass_budget(TextSystem& text_system) {
+    const std::string html = "<body><main><div id='p'><div id='item'>AB CD</div></div></main></body>";
+    const std::string css = "main{display:grid;grid-template-columns:100px}"
+        "#p{display:flex;width:5px;align-items:flex-start}"
+        "#item{display:block;flex:0 1 0px;font-family:'Core Test';font-size:16px}";
+    LayoutIntrinsicQueryStatistics statistics;
+    LayoutIntrinsicQueryLimits limits;
+    limits.max_work = 0;
+    auto refused = layout(html, css, &text_system, true, limits, &statistics);
+    require(find_box(*refused.boxes, "item")->rect.width == 0 && statistics.work == 0 &&
+            statistics.resource_refusals > 0,
+            "Installed zero-work pass budget must preserve legacy Flex allocation");
+    limits.max_work = 65536;
+    auto normal = layout(html, css, &text_system, true, limits, &statistics);
+    require(find_box(*normal.boxes, "item")->rect.width == 18 && statistics.work > 0 &&
+            statistics.work <= limits.max_work && statistics.resource_refusals == 0,
+            "Installed next public pass must replace statistics and restore intrinsic allocation");
+}
 } // namespace
 
 int main() {
@@ -191,6 +213,7 @@ int main() {
         check_percentage_minimum(text_system);
         check_grid_max_content(text_system);
         check_calc_refusal(text_system);
+        check_pass_budget(text_system);
         std::cout << "Installed ABI4 Flex auto-min, percentage min, Grid max-content and calc refusal passed\n";
 #else
         std::cout << "Installed ABI4 cropped profile has Flex/Grid disabled; package and font binding passed\n";

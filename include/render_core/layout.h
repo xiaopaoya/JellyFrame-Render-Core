@@ -109,8 +109,9 @@ struct LayoutBox {
     std::vector<LayoutBoxPtr> children;
 };
 
-// Cumulative allowance for added intrinsic-query/planning work in one public
-// layout call. Legacy layout/paint work is outside this budget. Individual
+// Cumulative allowance for source queries and explicit intrinsic planner
+// charges in one public layout call. Other layout/paint work is outside this
+// budget. Individual
 // source queries also retain their own safety ceilings. Scratch is a peak of
 // simultaneously live query/planner payload, not an accumulated byte count.
 struct LayoutIntrinsicQueryLimits {
