@@ -3,6 +3,7 @@
 #include "render_core/render_tree.h"
 #include "render_core/style_repaint.h"
 #include "../../src/computed_size_values.h"
+#include "../../src/computed_size_geometry.h"
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -157,8 +158,14 @@ int main() {
                   mixed.table_properties == mixed_before_invalid.table_properties,
                   "invalid mixed publication leaves state unchanged");
         }
-        check(!apply_computed_length_percentage(mixed,SizeProperty::FlexBasis,10,20) &&
-              !apply_computed_length_percentage(mixed,SizeProperty::InsetTop,10,20),
+        check(apply_computed_length_percentage(mixed,SizeProperty::FlexBasis,10,25) &&
+              mixed.flex_basis == -1 && mixed.flex_basis_kind == FlexBasisKind::Length &&
+              mixed.computed_sizes.read_typed(SizeProperty::FlexBasis,mixed_kind,mixed_length,mixed_percent) &&
+              mixed_kind == SizeKind::LengthPercentage && mixed_length == 10000 && mixed_percent == 25000,
+              "mixed FlexBasis publishes typed components and disables its scalar proxy");
+        check(computed_size_units(mixed,SizeProperty::FlexBasis,100250) == 35063,
+              "mixed FlexBasis resolves against its definite main-axis basis");
+        check(!apply_computed_length_percentage(mixed,SizeProperty::InsetTop,10,20),
               "mixed publisher refuses non-dimension properties");
         auto mixed_copy = mixed;
         fail_allocation = true;
