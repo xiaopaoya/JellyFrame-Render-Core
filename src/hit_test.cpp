@@ -2,6 +2,7 @@
 
 #include "render_core/dom.h"
 #include "render_core/raster_primitives.h"
+#include "layout_clip_geometry.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -30,6 +31,24 @@ Rect intersect_rect(Rect left, Rect right) {
 
 bool empty_rect(Rect rect) {
     return rect.width <= 0 || rect.height <= 0;
+}
+
+bool owned_by_child_layer(const LayerNode* owner, const LayoutBox& box) {
+    if (owner == nullptr) return false;
+    for (const auto& child : owner->children) {
+        if (child != nullptr && child->box == &box &&
+            (child->reasons & LayerReasonTransientOverlay) == 0U) return true;
+    }
+    return false;
+}
+
+bool outside_overflow_clip(const LayoutBox& box, int x, int y) {
+    if (!detail::has_overflow_clip(box.style)) return false;
+    if (!contains(box.rect, x, y)) return true;
+    const int radius = detail::resolved_border_radius(box);
+    const int radius_y = detail::resolved_border_radius_y(box);
+    return (has_corner_radius(radius) || has_corner_radius(radius_y)) &&
+        rounded_rect_coverage(box.rect, radius, radius_y, x, y) == 0;
 }
 
 const Node* event_target_for(const Node* node) {
@@ -66,19 +85,24 @@ HitTestResult HitTester::hit_test(const LayerNode& root, int x, int y) const {
     return hit_test_layer(root, x, y, Rect{}, false, 0, 0);
 }
 
-HitTestResult HitTester::hit_test_box(const LayoutBox& box, int x, int y) const {
-    if (!contains(box.rect, x, y)) {
+HitTestResult HitTester::hit_test_box(const LayoutBox& box, int x, int y,
+                                    const LayerNode* owner) const {
+    // A separate layer has already handled its subtree with its own clip,
+    // transform and scroll mapping. Do not resurrect a rejected subtree through
+    // its ancestor's untransformed layout fallback.
+    if (owned_by_child_layer(owner, box) ||
+        (!(owner != nullptr && owner->box == &box) && outside_overflow_clip(box, x, y))) {
         return {};
     }
 
     for (auto it = box.children.rbegin(); it != box.children.rend(); ++it) {
-        HitTestResult child_result = hit_test_box(**it, x, y);
+        HitTestResult child_result = hit_test_box(**it, x, y, owner);
         if (child_result) {
             return child_result;
         }
     }
 
-    if (box.node == nullptr) {
+    if (box.node == nullptr || !contains(box.rect, x, y)) {
         return {};
     }
     if (box.style.visibility_hidden) {
@@ -125,55 +149,39 @@ HitTestResult HitTester::hit_test_layer(const LayerNode& layer,
         }
     }
 
-    // A clipped layer can reject a point before the fallback DOM walk below.
-    // Keep that layer's DOM subtree from becoming hittable through the parent
-    // fallback, especially at rounded corners.
-    bool blocked_by_rounded_child = false;
-    for (const auto& child : layer.children) {
-        if (child == nullptr || !child->has_clip) {
-            continue;
-        }
-        Rect translated_clip = child->clip_rect;
-        translated_clip.x = safe_add(translated_clip.x, layer_offset_x);
-        translated_clip.y = safe_add(translated_clip.y, layer_offset_y);
-        if (contains(translated_clip, x, y) &&
-            has_corner_radius(child->clip_border_radius) &&
-            rounded_rect_coverage(translated_clip, child->clip_border_radius,
-                                  effective_vertical_radius(child->clip_border_radius,
-                                                            child->clip_border_radius_y),
-                                  x, y) == 0) {
-            blocked_by_rounded_child = true;
-            break;
-        }
-    }
-    if (blocked_by_rounded_child && layer.box != nullptr && !layer.box->style.visibility_hidden) {
-        const int document_x = safe_add(x, safe_negate(layer_offset_x));
-        const int document_y = safe_add(safe_add(y, safe_negate(layer_offset_y)), layer.scroll_y);
-        return make_result(*layer.box, document_x, safe_add(document_y, safe_negate(layer.scroll_y)));
-    }
-
     Rect visual_bounds = layer.bounds;
     visual_bounds.x = safe_add(visual_bounds.x, layer_offset_x);
     visual_bounds.y = safe_add(visual_bounds.y, layer_offset_y);
-    if (layer.box == nullptr || !contains(visual_bounds, x, y) || layer.box->style.visibility_hidden) {
+    if (layer.box == nullptr) {
         return {};
     }
     const int document_x = safe_add(x, safe_negate(layer_offset_x));
     const int document_y = safe_add(safe_add(y, safe_negate(layer_offset_y)), layer.scroll_y);
+    // Popup paint shares the control's box but owns only its separate bounds.
+    // Walking that box here would reuse unscrolled normal-flow coordinates.
+    if ((layer.reasons & LayerReasonTransientOverlay) != 0U) {
+        return contains(visual_bounds, x, y) && !layer.box->style.visibility_hidden
+            ? make_result(*layer.box, document_x, document_y) : HitTestResult{};
+    }
     if (layer.scroll_y > 0) {
         for (auto it = layer.box->children.rbegin(); it != layer.box->children.rend(); ++it) {
-            HitTestResult child_result = hit_test_box(**it, document_x, document_y);
+            HitTestResult child_result = hit_test_box(**it, document_x, document_y, &layer);
             if (child_result) {
                 return child_result;
             }
         }
-        return make_result(*layer.box, document_x, safe_add(document_y, safe_negate(layer.scroll_y)));
+        if (contains(visual_bounds, x, y) && !layer.box->style.visibility_hidden)
+            return make_result(*layer.box, document_x, safe_add(document_y, safe_negate(layer.scroll_y)));
+        return {};
     }
-    HitTestResult result = hit_test_box(*layer.box, document_x, document_y);
+    HitTestResult result = hit_test_box(*layer.box, document_x, document_y, &layer);
     if (result) {
         return result;
     }
-    return make_result(*layer.box, document_x, document_y);
+    // No descendant hit: retain the visible layer owner as the final target.
+    if (contains(visual_bounds, x, y) && !layer.box->style.visibility_hidden)
+        return make_result(*layer.box, document_x, document_y);
+    return {};
 }
 
 } // namespace jellyframe
