@@ -23,7 +23,8 @@ public:
     HitTestResult hit_test(const LayerNode& root, int x, int y) const;
 
 private:
-    HitTestResult hit_test_box(const LayoutBox& box, int x, int y) const;
+    HitTestResult hit_test_box(const LayoutBox& box, int x, int y,
+                              const LayerNode* owner = nullptr) const;
     HitTestResult hit_test_layer(const LayerNode& layer,
                                  int x,
                                  int y,

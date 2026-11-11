@@ -1,5 +1,6 @@
 ﻿#include "render_core/css_parser.h"
 #include "render_core/hit_test.h"
+#include "render_core/form_control.h"
 #include "render_core/html_parser.h"
 #include "render_core/layer_tree.h"
 #include "render_core/layout.h"
@@ -146,15 +147,140 @@ void scroll_container_hit_test_uses_scrolled_content_coordinates() {
           "scroll container hit test targets visible scrolled child");
 }
 
+void visible_overflow_descendants_remain_hittable_outside_ancestor_rectangles() {
+    for (const char* css : {
+        "*{margin:0;padding:0}#parent{width:20px;height:20px}#child{width:80px;height:40px}",
+        "*{margin:0;padding:0}#parent{width:20px;height:0}#child{position:absolute;left:0;top:0;width:80px;height:40px}"}) {
+        auto pipeline = build_pipeline(
+            "<body><section id='parent'><button id='child'>x</button></section></body>", css);
+        HitTester hit;
+        for (const auto result : {hit.hit_test(*pipeline.layout_tree, 60, 30),
+                                  hit.hit_test(*pipeline.layer_tree, 60, 30)}) {
+            check(result.node != nullptr && result.node->attribute("id") == "child",
+                  "visible overflow remains hittable through narrow/zero-height ancestors");
+            check(result.local_x == 60 && result.local_y == 30,
+                  "overflow local coordinates remain relative to the actual target");
+        }
+        check(!hit.hit_test(*pipeline.layout_tree, 200, 200) &&
+              !hit.hit_test(*pipeline.layer_tree, 200, 200),
+              "searching overflow does not create an ancestor hit outside every rectangle");
+    }
+}
+
+void all_overflow_clip_modes_prune_descendants_in_both_entry_points() {
+    for (const char* mode : {"hidden", "clip", "scroll", "auto"}) {
+        const std::string css = std::string("*{margin:0;padding:0}#parent{width:20px;height:20px;overflow:") +
+            mode + "}#child{width:80px;height:40px}";
+        auto pipeline = build_pipeline(
+            "<body><section id='parent'><button id='child'>x</button></section></body>", css.c_str());
+        HitTester hit;
+        for (const auto result : {hit.hit_test(*pipeline.layout_tree, 60, 30),
+                                  hit.hit_test(*pipeline.layer_tree, 60, 30)}) {
+            check(!result || result.node->attribute("id") != "child",
+                  "overflow clip mode blocks child outside clip in both entry points");
+        }
+    }
+}
+
+void rounded_clip_rejection_keeps_unrelated_lower_sibling_hittable() {
+    for (const char* radius : {"12px", "50%", "20px / 10px"}) {
+        const std::string css = std::string("*{margin:0;padding:0}#back{width:40px;height:40px}") +
+            "#clip{position:absolute;left:0;top:0;width:40px;height:40px;overflow:hidden;border-radius:" + radius +
+            "}#front{width:40px;height:40px}";
+        auto pipeline = build_pipeline(
+            "<body><button id='back'>back</button><section id='clip'><button id='front'>front</button></section></body>",
+            css.c_str());
+        HitTester hit;
+        for (const auto result : {hit.hit_test(*pipeline.layout_tree, 0, 0),
+                                  hit.hit_test(*pipeline.layer_tree, 0, 0)}) {
+            check(result.node != nullptr && result.node->attribute("id") == "back",
+                  "rejected rounded subtree does not suppress an unrelated underlying sibling");
+        }
+        const auto center = hit.hit_test(*pipeline.layer_tree, 20, 20);
+        check(center.node != nullptr && center.node->attribute("id") == "front",
+              "rounded clip still admits center in front layer");
+    }
+}
+
+void transformed_layer_does_not_reappear_at_untransformed_fallback_position() {
+    auto pipeline = build_pipeline(
+        "<body><button id='back'>back</button><button id='front'>front</button></body>",
+        "*{margin:0;padding:0;border:0}#back{width:20px;height:20px}"
+        "#front{position:absolute;top:0;left:0;width:20px;height:20px;transform:translate(40px,0)}");
+    HitTester hit;
+    const auto old_position = hit.hit_test(*pipeline.layer_tree, 5, 5);
+    const auto translated = hit.hit_test(*pipeline.layer_tree, 45, 5);
+    check(old_position.node != nullptr && old_position.node->attribute("id") == "back",
+          "translated child cannot be rediscovered at its old layout position");
+    check(translated.node != nullptr && translated.node->attribute("id") == "front" &&
+          translated.local_x == 5 && translated.local_y == 5,
+          "translated child hit and local coordinates are preserved");
+}
+
+
+#if JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED
+Node* find_hit_node(Node& node, const char* id) {
+    if (node.attribute("id") == id) return &node;
+    for (auto& child : node.children) {
+        if (auto* found = find_hit_node(*child, id)) return found;
+    }
+    return nullptr;
+}
+const LayerNode* find_hit_popup(const LayerNode& layer) {
+    if ((layer.reasons & LayerReasonTransientOverlay) != 0U) return &layer;
+    for (const auto& child : layer.children) {
+        if (const auto* found = find_hit_popup(*child)) return found;
+    }
+    return nullptr;
+}
+int popup_test_scroll(const Node& node, int maximum, void*) {
+    return node.attribute("id") == "list" ? std::min(100, maximum) : 0;
+}
+void scrolled_popup_owns_only_popup_bounds_and_keeps_control_hittable() {
+    LayerTreeBuilderOptions options;
+    options.scroll_resolver = ScrollOffsetResolver{popup_test_scroll, nullptr};
+    auto pipeline = build_pipeline(
+        "<body><section id='list'><div id='before'></div><select id='choice'>"
+        "<option>One</option></select><div id='gap'></div><button id='back'>back</button>"
+        "<div id='tail'></div></section></body>",
+        "*{margin:0;padding:0;border:0}body{height:300px}"
+        "#list{width:120px;height:160px;overflow:auto}#before{height:100px}"
+        "select{display:block;width:100px;height:20px}#gap{height:80px}"
+        "#back{display:block;width:100px;height:20px}#tail{height:200px}", 240, options);
+    Node* select = find_hit_node(*pipeline.document, "choice");
+    check(select != nullptr && set_select_popup_open(*select, true), "scrolled select opens");
+    LayerTreeBuilder builder(options);
+    pipeline.layer_tree = builder.build(*pipeline.layout_tree);
+    const LayerNode* popup = find_hit_popup(*pipeline.layer_tree);
+    check(popup != nullptr, "scrolled select creates actual popup layer");
+    HitTester hit;
+    const auto popup_hit = hit.hit_test(*pipeline.layer_tree, popup->bounds.x + 5, popup->bounds.y + 5);
+    check(popup_hit.node == select, "popup bounds target the select");
+    const auto control_hit = hit.hit_test(*pipeline.layer_tree, 5, 5);
+    check(control_hit.node == select && control_hit.local_y == 5,
+          "open popup does not exclusively own normal scrolled control");
+    const auto stale_hit = hit.hit_test(*pipeline.layer_tree, 5, 105);
+    check(stale_hit.node != nullptr && stale_hit.node->attribute("id") == "back",
+          "popup cannot steal sibling hit at select unscrolled coordinates");
+}
+#endif
+
 } // namespace
 
 int main() {
     try {
         basic_hit_test_returns_deepest_element();
+#if JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED
+        scrolled_popup_owns_only_popup_bounds_and_keeps_control_hittable();
+#endif
         layer_order_prefers_higher_z_index();
         overflow_clip_blocks_outside_hits();
         rounded_overflow_clip_blocks_corner_hits();
         scroll_container_hit_test_uses_scrolled_content_coordinates();
+        visible_overflow_descendants_remain_hittable_outside_ancestor_rectangles();
+        all_overflow_clip_modes_prune_descendants_in_both_entry_points();
+        rounded_clip_rejection_keeps_unrelated_lower_sibling_hittable();
+        transformed_layer_does_not_reappear_at_untransformed_fallback_position();
     } catch (const std::exception& error) {
         std::cerr << "hit test failed: " << error.what() << '\n';
         return 1;
