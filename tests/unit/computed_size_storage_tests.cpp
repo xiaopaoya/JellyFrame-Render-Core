@@ -63,10 +63,16 @@ void signed_inset_storage_contract() {
         "legacy getter refuses mixed percentage without changing outputs");
     const auto refused_allocations=allocations;
     for (unsigned index=0;index<7;++index) {
-        check(!storage.set_length_percentage(static_cast<SizeProperty>(index),1.25,25) && storage.equals(saved),
-            "original dimension slots refuse unsupported mixed units without changing state");
+        ComputedSizeStorage dimension;
+        check(dimension.set_length_percentage(static_cast<SizeProperty>(index),1.25,25),
+            "dimension slots accept bounded mixed units");
+        SizeKind typed_kind; std::int64_t length=0, percent=0;
+        check(dimension.read_typed(static_cast<SizeProperty>(index),typed_kind,length,percent) &&
+            typed_kind == SizeKind::LengthPercentage && length == 1250 && percent == 25000,
+            "typed mixed presence survives for dimensions");
+        check(!dimension.get(static_cast<SizeProperty>(index),typed_kind,length) && length == 1250,
+            "legacy getter continues to hide mixed dimensions");
     }
-    check(allocations==refused_allocations,"unsupported mixed dimension writes allocate nothing");
     check(!storage.set_length_percentage(SizeProperty::InsetTop,2147483648.0,0) && storage.equals(saved),"mixed length overflow refuses atomically");
     const auto copies=allocations;
     auto copy=storage;
