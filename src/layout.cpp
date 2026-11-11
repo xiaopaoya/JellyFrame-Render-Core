@@ -44,29 +44,51 @@ struct SizeOverrideRestore {
     detail::ComputedSizeStorage sizes;
     bool saved_sizes = false;
     std::uint32_t table_properties;
-    int width, width_percent, height, height_percent;
+    int scalars[7];
+    int percentages[6];
+    FlexBasisKind flex_basis_kind;
     bool box_sizing_border_box;
     SizeOverrideRestore(Style& style, detail::SizeProperty first,
                         detail::SizeProperty second = detail::SizeProperty::InsetTop)
         : target(style), table_properties(style.table_properties),
-          width(style.width), width_percent(style.width_percent), height(style.height),
-          height_percent(style.height_percent), box_sizing_border_box(style.box_sizing_border_box) {
-        detail::SizeKind kind = detail::SizeKind::Pixels;
-        std::int64_t units = 0, percentage = 0;
-        saved_sizes = style.computed_sizes.read_typed(first, kind, units, percentage) ||
-            (second != detail::SizeProperty::InsetTop &&
-             style.computed_sizes.read_typed(second, kind, units, percentage));
+          scalars{style.width, style.height, style.min_width, style.min_height,
+              style.max_width, style.max_height, style.flex_basis},
+          percentages{style.width_percent, style.height_percent, style.min_width_percent,
+              style.min_height_percent, style.max_width_percent, style.max_height_percent},
+          flex_basis_kind(style.flex_basis_kind), box_sizing_border_box(style.box_sizing_border_box) {
+        saved_sizes = !style.computed_sizes.empty();
         if (saved_sizes) sizes = style.computed_sizes;
+        (void)first;
+        (void)second;
     }
     ~SizeOverrideRestore() noexcept {
-        target.width = width;
-        target.width_percent = width_percent;
-        target.height = height;
-        target.height_percent = height_percent;
+        target.width = scalars[0];
+        target.height = scalars[1];
+        target.min_width = scalars[2];
+        target.min_height = scalars[3];
+        target.max_width = scalars[4];
+        target.max_height = scalars[5];
+        target.flex_basis = scalars[6];
+        target.width_percent = percentages[0];
+        target.height_percent = percentages[1];
+        target.min_width_percent = percentages[2];
+        target.min_height_percent = percentages[3];
+        target.max_width_percent = percentages[4];
+        target.max_height_percent = percentages[5];
+        target.flex_basis_kind = flex_basis_kind;
         target.box_sizing_border_box = box_sizing_border_box;
         target.table_properties = table_properties;
         if (saved_sizes) target.computed_sizes = std::move(sizes);
     }
+};
+
+struct StyleReplayRestore {
+    std::vector<std::pair<Style*, Style>> snapshots;
+    ~StyleReplayRestore() noexcept {
+        for (auto it = snapshots.rbegin(); it != snapshots.rend(); ++it)
+            *it->first = std::move(it->second);
+    }
+    void capture(Style& style) { snapshots.emplace_back(&style, style); }
 };
 
 TextSystemStatus measure_core_text(const TextSystem& text_system, std::string_view text,
@@ -1143,6 +1165,8 @@ void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box,
         const RenderObject* object = nullptr;
         LayoutBox* box = nullptr;
         bool parent_block_path = true;
+        bool parent_qualified_flex = false;
+        bool parent_qualified_grid = false;
         std::size_t depth = 1;
     };
 
@@ -1150,7 +1174,7 @@ void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box,
     std::size_t layout_box_count = 1;
     bool budget_reported = false;
     std::vector<PendingObject> pending;
-    pending.push_back(PendingObject{&object, &box, true, 1});
+    pending.push_back(PendingObject{&object, &box, true, false, false, 1});
     while (!pending.empty()) {
         const PendingObject current = pending.back();
         pending.pop_back();
@@ -1159,6 +1183,59 @@ void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box,
         const bool block_path = current.parent_block_path && render_object.style.display == Display::Block &&
             render_object.style.position_type == PositionType::Static && render_object.node &&
             render_object.node->type != NodeType::Text && !is_form_control(*render_object.node);
+        bool qualified_flex = false;
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+        const auto& flex_style = render_object.style;
+        const bool definite_flex_main = flex_style.flex_direction == FlexDirection::Row
+            ? flex_style.width >= 0
+            : flex_style.height >= 0;
+        const bool qualified_nowrap_flex = flex_style.display == Display::Flex && flex_style.flex_wrap == 0 &&
+            flex_style.position_type == PositionType::Static && render_object.node &&
+            render_object.node->type == NodeType::Element && !is_form_control(*render_object.node) &&
+            (definite_flex_main || (flex_style.flex_direction == FlexDirection::Column &&
+                flex_style.height < 0 && flex_style.height_percent < 0)) && !render_object.children.empty();
+        const bool qualified_wrapped_flex = flex_style.display == Display::Flex && flex_style.flex_wrap == 1 &&
+            flex_style.flex_direction == FlexDirection::Row && flex_style.justify_content == JustifyContent::Start &&
+            flex_style.align_content == JustifyContent::Start && !has_aspect_ratio(flex_style) &&
+            options_.text_system != nullptr && flex_style.width >= 0 && render_object.node &&
+            render_object.node->type == NodeType::Element && !is_form_control(*render_object.node) &&
+            !render_object.children.empty() && render_object.children.size() <= 128;
+        qualified_flex = qualified_nowrap_flex || qualified_wrapped_flex;
+        for (const auto& child : render_object.children) {
+            const bool simple_item = child && child->node && child->node->type == NodeType::Element &&
+                child->style.display == Display::Block && child->style.position_type == PositionType::Static &&
+                !is_form_control(*child->node) && child->children.empty();
+            const bool wrapped_item = qualified_wrapped_flex && child && child->node &&
+                child->node->type == NodeType::Element && child->style.display == Display::Block &&
+                child->style.position_type == PositionType::Static && !is_form_control(*child->node) &&
+                !has_aspect_ratio(child->style) && !child->style.margin_left_auto &&
+                !child->style.margin_right_auto && child->style.margin.left >= 0 &&
+                child->style.margin.right >= 0 && child->style.margin.top >= 0 &&
+                child->style.margin.bottom >= 0 && child->children.size() <= 1 &&
+                (child->children.empty() || (child->children[0]->node &&
+                    child->children[0]->node->type == NodeType::Text && child->children[0]->children.empty()));
+            if (!simple_item && !wrapped_item) {
+                qualified_flex = false;
+                break;
+            }
+        }
+#endif
+        bool qualified_grid = render_object.style.display == Display::Grid &&
+            render_object.style.position_type == PositionType::Static && render_object.style.width >= 0 &&
+            render_object.node && render_object.node->type == NodeType::Element &&
+            !is_form_control(*render_object.node) && !render_object.children.empty();
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+        for (const auto& child : render_object.children) {
+            if (!child || !child->node || child->node->type != NodeType::Element ||
+                child->style.display != Display::Block || child->style.position_type != PositionType::Static ||
+                is_form_control(*child->node) || !child->children.empty()) {
+                qualified_grid = false;
+                break;
+            }
+        }
+#else
+        qualified_grid = false;
+#endif
         if (!unsupported_mixed_dimension && current.depth <=
                 std::max<std::size_t>(1, options_.max_layout_depth) &&
             !render_object.style.computed_sizes.empty()) {
@@ -1170,7 +1247,23 @@ void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box,
                 if (!render_object.style.computed_sizes.read_typed(
                         static_cast<SizeProperty>(index), kind, units, percentage) ||
                     kind != SizeKind::LengthPercentage) continue;
-                if (!block_path || index >= 6) {
+                const bool admitted_block_dimension = block_path && index < 6;
+                const bool admitted_flex_container_dimension = qualified_flex && index < 6;
+                const bool admitted_flex_item_dimension = current.parent_qualified_flex &&
+                    render_object.style.display == Display::Block && render_object.node &&
+                    render_object.node->type == NodeType::Element &&
+                    render_object.style.position_type == PositionType::Static &&
+                    (render_object.children.empty() || (render_object.children.size() == 1 &&
+                        render_object.children[0]->node &&
+                        render_object.children[0]->node->type == NodeType::Text &&
+                        render_object.children[0]->children.empty())) && index < 7;
+                const bool admitted_grid_item_dimension = current.parent_qualified_grid &&
+                    render_object.style.display == Display::Block && render_object.node &&
+                    render_object.node->type == NodeType::Element &&
+                    render_object.style.position_type == PositionType::Static &&
+                    render_object.children.empty() && (index == 0 || index == 2 || index == 4);
+                if (!admitted_block_dimension && !admitted_flex_container_dimension &&
+                    !admitted_flex_item_dimension && !admitted_grid_item_dimension) {
                     unsupported_mixed_dimension = true;
                     break;
                 }
@@ -1199,7 +1292,8 @@ void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box,
             child_box->viewport_width = box.viewport_width;
             child_box->viewport_height = box.viewport_height;
             layout_box.children.push_back(std::move(child_box));
-            child_work.push_back(PendingObject{child.get(), child_box_raw, block_path, current.depth + 1});
+            child_work.push_back(PendingObject{child.get(), child_box_raw, block_path,
+                qualified_flex, qualified_grid, current.depth + 1});
         }
         for (auto it = child_work.rbegin(); it != child_work.rend(); ++it) {
             pending.push_back(*it);
@@ -1631,8 +1725,95 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
     std::int64_t children_units = 0;
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
     if (style.display == Display::Flex) {
-        if (!layout_precise_flex(box,content_width_units,fixed_height_units,context,content_x_units,content_y_units,
-                                height,depth,children_units)) {
+        const auto has_mixed = [](const Style& candidate) {
+            for (unsigned index = 0; index < 7; ++index) {
+                SizeKind kind = SizeKind::Pixels;
+                std::int64_t value = 0, percentage = 0;
+                if (candidate.computed_sizes.read_typed(static_cast<SizeProperty>(index),
+                        kind, value, percentage) && kind == SizeKind::LengthPercentage) return true;
+            }
+            return false;
+        };
+        bool mixed_flex = has_mixed(style);
+        for (const auto& child : box.children) mixed_flex = mixed_flex || has_mixed(child->style);
+        detail::LayoutMutationJournal flex_transaction;
+        if (mixed_flex && flex_transaction.capture(box, options_.max_layout_boxes) !=
+                detail::LayoutMutationJournalStatus::Ready) {
+            report_diagnostic(options_.diagnostics, DiagnosticStage::Layout,
+                DiagnosticSeverity::Warning, "unsupported-mixed-dimension-layout",
+                "Mixed Flex sizing could not reserve a complete rollback snapshot",
+                "Use a supported mixed Flex sizing context.");
+            if (flow_units) *flow_units = 0;
+            return 0;
+        }
+        const bool precise_flex_succeeded = layout_precise_flex(box,content_width_units,fixed_height_units,
+            context,content_x_units,content_y_units,height,depth,children_units);
+        if (precise_flex_succeeded) {
+            flex_transaction.commit();
+        } else if (mixed_flex) {
+            flex_transaction.rollback();
+            StyleReplayRestore replay;
+            bool replay_ready = false;
+            try {
+                replay.snapshots.reserve(box.children.size() + 1);
+                replay.capture(box.style);
+                for (auto& child : box.children) replay.capture(child->style);
+                const auto materialize = [](Style& candidate, std::int64_t width_basis,
+                                            std::int64_t height_basis, std::int64_t main_basis) {
+                    constexpr int Style::* scalars[] = {&Style::width, &Style::height,
+                        &Style::min_width, &Style::min_height, &Style::max_width,
+                        &Style::max_height, &Style::flex_basis};
+                    constexpr int Style::* percentages[] = {&Style::width_percent, &Style::height_percent,
+                        &Style::min_width_percent, &Style::min_height_percent,
+                        &Style::max_width_percent, &Style::max_height_percent};
+                    for (unsigned index = 0; index < 7; ++index) {
+                        const auto property = static_cast<SizeProperty>(index);
+                        SizeKind kind = SizeKind::Pixels;
+                        std::int64_t value = 0, percentage = 0;
+                        if (!candidate.computed_sizes.read_typed(property, kind, value, percentage) ||
+                            kind != SizeKind::LengthPercentage) continue;
+                        const auto basis = index == 6 ? main_basis : (index % 2 == 0 ? width_basis : height_basis);
+                        const auto used = computed_size_units(candidate, property, basis);
+                        if (used < -1) return false;
+                        candidate.*scalars[index] = used < 0 ? -1 : project_size_edge(used);
+                        if (index < 6) {
+                            candidate.*percentages[index] = -1;
+                            candidate.table_properties &= ~table_sizing_provenance_bit(property);
+                        } else {
+                            candidate.flex_basis_kind = basis < 0
+                                ? FlexBasisKind::Percentage : FlexBasisKind::Length;
+                        }
+                        candidate.computed_sizes.clear(property);
+                    }
+                    return true;
+                };
+                const auto container_main_basis = style.flex_direction == FlexDirection::Row
+                    ? content_width_units : fixed_height_units;
+                replay_ready = materialize(box.style, context.width, context.height, container_main_basis);
+                for (auto& child : box.children) {
+                    const auto item_main_basis = style.flex_direction == FlexDirection::Row
+                        ? content_width_units : fixed_height_units;
+                    replay_ready = replay_ready && materialize(child->style, content_width_units,
+                        fixed_height_units, item_main_basis);
+                }
+            } catch (const std::bad_alloc&) {
+                replay_ready = false;
+            } catch (const std::length_error&) {
+                replay_ready = false;
+            }
+            if (!replay_ready) {
+                report_diagnostic(options_.diagnostics, DiagnosticStage::Layout,
+                    DiagnosticSeverity::Warning, "unsupported-mixed-dimension-layout",
+                    "Mixed Flex sizing could not be materialized for ordinary replay",
+                    "Use a supported mixed Flex sizing context.");
+                if (flow_units) *flow_units = 0;
+                return 0;
+            }
+            const auto result = layout_box(box,project_size_edge(context.x),project_size_edge(context.y),
+                project_size_edge(context.width),height,depth);
+            if (flow_units) *flow_units = static_cast<std::int64_t>(result)*1000;
+            return result;
+        } else {
             const auto result = layout_box(box,project_size_edge(context.x),project_size_edge(context.y),
                 project_size_edge(context.width),height,depth);
             if (flow_units) *flow_units = static_cast<std::int64_t>(result)*1000;
@@ -2616,7 +2797,13 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
 
         for_each_in_flow_child([&](LayoutBox& child) {
             const int basis=resolved_flex_basis_pixels(child.style,fixed_height);
-            const bool content_basis=fixed_height<0 && child.style.flex_basis_kind==FlexBasisKind::Percentage;
+            detail::SizeKind typed_basis_kind = detail::SizeKind::Pixels;
+            std::int64_t typed_basis_length = 0, typed_basis_percentage = 0;
+            const bool mixed_basis = child.style.computed_sizes.read_typed(detail::SizeProperty::FlexBasis,
+                typed_basis_kind, typed_basis_length, typed_basis_percentage) &&
+                typed_basis_kind == detail::SizeKind::LengthPercentage;
+            const bool content_basis=fixed_height<0 &&
+                (child.style.flex_basis_kind==FlexBasisKind::Percentage || mixed_basis);
             const bool use_basis = basis >= 0;
             const bool flexible_zero_basis = !use_basis && !content_basis && child.style.flex_grow > 0 && child.style.height < 0;
             const int probe_height = use_basis ? basis : 0;
@@ -3034,6 +3221,29 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
         const int row_span = placement.row_span;
         const int item_width = grid_item_width(columns, placement.column, column_span);
         SizeOverrideRestore restore(child.style, detail::SizeProperty::Width);
+        const auto install_grid_mixed_width = [&](detail::SizeProperty property, int& scalar) {
+            detail::SizeKind kind = detail::SizeKind::Pixels;
+            std::int64_t value = 0, percentage = 0;
+            if (!child.style.computed_sizes.read_typed(property, kind, value, percentage) ||
+                kind != detail::SizeKind::LengthPercentage) return true;
+            const auto used = detail::computed_size_units(child.style, property,
+                static_cast<std::int64_t>(item_width) * 1000);
+            if (used < -1) return false;
+            scalar = used < 0 ? -1 : detail::project_size_edge(used);
+            if (property == detail::SizeProperty::Width) child.style.width_percent = -1;
+            child.style.computed_sizes.clear(property);
+            child.style.table_properties &= ~table_sizing_provenance_bit(property);
+            return true;
+        };
+        if (!install_grid_mixed_width(detail::SizeProperty::Width, child.style.width) ||
+            !install_grid_mixed_width(detail::SizeProperty::MinWidth, child.style.min_width) ||
+            !install_grid_mixed_width(detail::SizeProperty::MaxWidth, child.style.max_width)) {
+            report_diagnostic(options_.diagnostics, DiagnosticStage::Layout,
+                DiagnosticSeverity::Warning, "unsupported-mixed-dimension-layout",
+                "Grid item mixed width could not resolve against its assigned track",
+                "Use a supported definite-width Grid item.");
+            return 0;
+        }
         if (child.style.width < 0 && child.style.width_percent < 0) {
             child.style.computed_sizes.clear(detail::SizeProperty::Width);
             child.style.table_properties &= ~table_sizing_provenance_bit(detail::SizeProperty::Width);
@@ -3142,7 +3352,19 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
         shift_box(*placement.child,
                   bounded_subtract(target_x, placement.child->rect.x),
                   bounded_subtract(target_y, placement.child->rect.y));
-        placement.child->rect.width = grid_item_width(columns, placement.column, placement.column_span);
+        bool authored_horizontal_size = placement.child->style.width >= 0 ||
+            placement.child->style.width_percent >= 0 || placement.child->style.min_width >= 0 ||
+            placement.child->style.min_width_percent >= 0 || placement.child->style.max_width >= 0 ||
+            placement.child->style.max_width_percent >= 0;
+        for (const auto property : {detail::SizeProperty::Width, detail::SizeProperty::MinWidth,
+                                    detail::SizeProperty::MaxWidth}) {
+            detail::SizeKind kind = detail::SizeKind::Pixels;
+            std::int64_t value = 0, percentage = 0;
+            authored_horizontal_size = authored_horizontal_size ||
+                placement.child->style.computed_sizes.read_typed(property, kind, value, percentage);
+        }
+        if (!authored_horizontal_size)
+            placement.child->rect.width = grid_item_width(columns, placement.column, placement.column_span);
     }
 
     return has_fallback ? std::max(total_height, fallback_y - row_gap) : total_height;

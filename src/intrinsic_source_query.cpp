@@ -74,7 +74,13 @@ bool has_only_cyclic_width_sizes(const Style& style) {
         const bool has_computed = style.computed_sizes.read_typed(
             horizontal[i], kind, value, percentage);
         if (has_computed) {
-            if (kind == SizeKind::LengthPercentage) return false;
+            if (kind == SizeKind::LengthPercentage) {
+                // A cyclic preferred width is wholly auto; its percentage-bearing
+                // provenance must not make the independent length term a width.
+                if (i != 0 || style.*horizontal_scalar[i] != -1 ||
+                    style.*horizontal_percent[i] != -1) return false;
+                continue;
+            }
             // StyleResolver publishes retained precision with a rounded legacy proxy.
             const auto rounded_percent =
                 (value + kDimensionPrecisionScale / 2) / kDimensionPrecisionScale;
