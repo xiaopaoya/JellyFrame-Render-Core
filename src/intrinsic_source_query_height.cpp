@@ -43,7 +43,8 @@ bool has_authored_size(const Style& style) {
              SizeProperty::MaxWidth, SizeProperty::MaxHeight}) {
         SizeKind kind = SizeKind::Pixels;
         std::int64_t value = 0;
-        if (style.computed_sizes.get(property, kind, value)) return true;
+        std::int64_t percentage = 0;
+        if (style.computed_sizes.read_typed(property, kind, value, percentage)) return true;
     }
     return false;
 }
@@ -67,7 +68,8 @@ bool has_authored_block_size(const Style& style) {
                                   SizeProperty::MaxHeight}) {
         SizeKind kind = SizeKind::Pixels;
         std::int64_t value = 0;
-        if (style.computed_sizes.get(property, kind, value)) return true;
+        std::int64_t percentage = 0;
+        if (style.computed_sizes.read_typed(property, kind, value, percentage)) return true;
     }
     return false;
 }

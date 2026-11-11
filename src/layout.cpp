@@ -1,4 +1,4 @@
-﻿#include "render_core/layout.h"
+#include "render_core/layout.h"
 
 #include "render_core/form_control.h"
 #include "computed_size_geometry.h"
@@ -38,6 +38,68 @@ int clamp_layout_value(std::int64_t value) {
 int q1000_ceil_pixels(std::int32_t value) {
     return value <= 0 ? 0 : clamp_layout_value((static_cast<std::int64_t>(value) + 999) / 1000);
 }
+
+enum class MixedLayoutPreflight { None, Supported, Unsupported };
+
+MixedLayoutPreflight preflight_mixed_layout(const RenderObject& root, std::size_t max_depth) {
+    using detail::SizeKind;
+    using detail::SizeProperty;
+    bool found = false;
+    const auto scan = [&](const auto& self, const RenderObject& object,
+                          bool parent_block_path, std::size_t depth) -> bool {
+        if (depth > std::max<std::size_t>(1, max_depth)) return true;
+        const bool block_path = parent_block_path && object.style.display == Display::Block &&
+            object.style.position_type == PositionType::Static && object.node &&
+            object.node->type != NodeType::Text && !is_form_control(*object.node);
+        if (!object.style.computed_sizes.empty()) {
+            for (unsigned index = 0; index < 7; ++index) {
+                SizeKind kind = SizeKind::Pixels;
+                std::int64_t units = 0, percentage = 0;
+                if (!object.style.computed_sizes.read_typed(
+                        static_cast<SizeProperty>(index), kind, units, percentage) ||
+                    kind != SizeKind::LengthPercentage) continue;
+                if (index >= 7) continue;
+                found = true;
+                if (!block_path || index >= 6) return false;
+            }
+        }
+        for (const auto& child : object.children)
+            if (!self(self, *child, block_path, depth + 1)) return false;
+        return true;
+    };
+    if (!scan(scan, root, true, 1)) return MixedLayoutPreflight::Unsupported;
+    return found ? MixedLayoutPreflight::Supported : MixedLayoutPreflight::None;
+}
+
+struct SizeOverrideRestore {
+    Style& target;
+    detail::ComputedSizeStorage sizes;
+    bool saved_sizes = false;
+    std::uint32_t table_properties;
+    int width, width_percent, height, height_percent;
+    bool box_sizing_border_box;
+    SizeOverrideRestore(Style& style, detail::SizeProperty first,
+                        detail::SizeProperty second = detail::SizeProperty::InsetTop)
+        : target(style), table_properties(style.table_properties),
+          width(style.width), width_percent(style.width_percent), height(style.height),
+          height_percent(style.height_percent), box_sizing_border_box(style.box_sizing_border_box) {
+        detail::SizeKind kind = detail::SizeKind::Pixels;
+        std::int64_t units = 0, percentage = 0;
+        saved_sizes = style.computed_sizes.read_typed(first, kind, units, percentage) ||
+            (second != detail::SizeProperty::InsetTop &&
+             style.computed_sizes.read_typed(second, kind, units, percentage));
+        if (saved_sizes) sizes = style.computed_sizes;
+    }
+    ~SizeOverrideRestore() noexcept {
+        target.width = width;
+        target.width_percent = width_percent;
+        target.height = height;
+        target.height_percent = height_percent;
+        target.box_sizing_border_box = box_sizing_border_box;
+        target.table_properties = table_properties;
+        if (saved_sizes) target.computed_sizes = std::move(sizes);
+    }
+};
 
 TextSystemStatus measure_core_text(const TextSystem& text_system, std::string_view text,
                                    const Style& style, TextRunMetrics& metrics) {
@@ -250,7 +312,7 @@ ResolvedInset resolve_inset(const Style& style, detail::SizeProperty property,
     if (index >= 4 || !(style.*specified[index])) return {};
     detail::SizeKind kind;
     std::int64_t length = 0, percentage = 0;
-    if (!style.computed_sizes.get(property, kind, length, percentage))
+    if (!style.computed_sizes.read_typed(property, kind, length, percentage))
         return {static_cast<std::int64_t>(style.*pixels[index]) * 1000, true};
     if (kind == detail::SizeKind::Pixels) return {length, true};
     // Relative vertical percentages compute to auto when the containing
@@ -453,9 +515,13 @@ int flex_stretch_dimension(const Style& style, int outer_size, bool vertical) {
 
 void set_flex_stretch_cross_size(Style& style, int outer_size, bool row_direction) {
     if (row_direction) {
+        style.computed_sizes.clear(detail::SizeProperty::Height);
+        style.table_properties &= ~table_sizing_provenance_bit(detail::SizeProperty::Height);
         style.height = flex_stretch_dimension(style, outer_size, true);
         style.height_percent = -1;
     } else {
+        style.computed_sizes.clear(detail::SizeProperty::Width);
+        style.table_properties &= ~table_sizing_provenance_bit(detail::SizeProperty::Width);
         style.width = flex_stretch_dimension(style, outer_size, false);
         style.width_percent = -1;
     }
@@ -547,12 +613,9 @@ int layout_wrapped_flex_children(LayoutBox& box,
         for (LayoutBox* child : line.children) {
             const AlignItems alignment = flex_cross_axis_alignment(*child, box.style.align_items);
             if (alignment == AlignItems::Stretch && flex_cross_size_is_auto(child->style, true)) {
-                const int old_height = child->style.height;
-                const int old_height_percent = child->style.height_percent;
+                SizeOverrideRestore restore(child->style, detail::SizeProperty::Height);
                 set_flex_stretch_cross_size(child->style, line_cross_size, true);
                 layout_child_for_width(*child, std::max(0, child->rect.width), false);
-                child->style.height = old_height;
-                child->style.height_percent = old_height_percent;
             }
             const int child_outer_height = flex_outer_cross_size(*child, true);
             int target_y = line.y;
@@ -727,7 +790,8 @@ bool grid_source_query_has_unconstrained_root(const LayoutBox& box) {
     for (SizeProperty property : {SizeProperty::Width, SizeProperty::MinWidth, SizeProperty::MaxWidth}) {
         SizeKind kind = SizeKind::Pixels;
         std::int64_t value = 0;
-        if (box.style.computed_sizes.get(property, kind, value)) return false;
+        std::int64_t percentage = 0;
+        if (box.style.computed_sizes.read_typed(property, kind, value, percentage)) return false;
     }
     return true;
 }
@@ -1087,6 +1151,13 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
     root_box->viewport_width = viewport_width;
     root_box->viewport_height = viewport_height;
     build_layout_tree(render_tree, *root_box, arena);
+    if (preflight_mixed_layout(render_tree, options_.max_layout_depth) == MixedLayoutPreflight::Unsupported) {
+        report_diagnostic(options_.diagnostics, DiagnosticStage::Layout,
+            DiagnosticSeverity::Warning, "unsupported-mixed-dimension-layout",
+            "Mixed dimensions require a normal precise Block layout context",
+            "Use a supported normal Block layout context.");
+        return root_box;
+    }
     const PreciseBoxContext precision{static_cast<std::int64_t>(std::max(0,viewport_width))*1000,
         static_cast<std::int64_t>(std::max(0,viewport_height))*1000,0,0};
     pass_engine.layout_box(*root_box, 0, 0, viewport_width, viewport_height, 1, &precision);
@@ -1169,7 +1240,8 @@ bool LayoutEngine::layout_wrapped_row_flex(LayoutBox& box, std::int64_t content_
         box.children.empty() || box.children.size() > 128) return false;
     for (const auto property : {SizeProperty::Height, SizeProperty::MinHeight, SizeProperty::MaxHeight}) {
         SizeKind kind; std::int64_t value;
-        if (box.style.computed_sizes.get(property, kind, value)) return false;
+        std::int64_t percentage = 0;
+        if (box.style.computed_sizes.read_typed(property, kind, value, percentage)) return false;
     }
     struct Line { std::size_t first = 0, count = 0; std::int64_t height = 0; };
     const auto plan_bytes = box.children.size() * (sizeof(FlexLengthPrecisionItem) + sizeof(Line));
@@ -1624,7 +1696,8 @@ int LayoutEngine::layout_fixed_table(LayoutBox& box, int x, int y, int available
     const auto has_retained = [](const Style& style, SizeProperty property) {
         SizeKind kind = SizeKind::Pixels;
         std::int64_t value = 0;
-        return style.computed_sizes.get(property, kind, value);
+        std::int64_t percentage = 0;
+        return style.computed_sizes.read_typed(property, kind, value, percentage);
     };
     const auto integral_pixel_sizing = [](const Style& style) {
         constexpr int Style::* scalars[] = {&Style::width, &Style::height, &Style::min_width,
@@ -1637,7 +1710,9 @@ int LayoutEngine::layout_fixed_table(LayoutBox& box, int x, int y, int available
             SizeKind kind = SizeKind::Pixels;
             std::int64_t value = 0;
             if (style.*percentages[index] >= 0) return false;
-            if (style.computed_sizes.get(static_cast<SizeProperty>(index), kind, value) &&
+            std::int64_t percentage = 0;
+            if (style.computed_sizes.read_typed(static_cast<SizeProperty>(index), kind, value,
+                    percentage) &&
                 (kind != SizeKind::Pixels || value < 0 || value % 1000 != 0 ||
                  value != static_cast<std::int64_t>(style.*scalars[index]) * 1000)) return false;
         }
@@ -1789,6 +1864,7 @@ int LayoutEngine::layout_fixed_table(LayoutBox& box, int x, int y, int available
             // Width is owned by the qualified track for this call. Keep the
             // retained representation consistent, then restore the full Style.
             cell.style.computed_sizes.clear(SizeProperty::Width);
+            cell.style.table_properties &= ~table_sizing_provenance_bit(SizeProperty::Width);
             cell.style.box_sizing_border_box = true;
             cell.style.width = tracks[index];
             cell.style.width_percent = -1;
@@ -2398,29 +2474,18 @@ void LayoutEngine::layout_positioned_children(LayoutBox& box,
                 vertical_margins-decoration(false), 0, kDimensionPrecisionMaximum);
             context.allocated_height = computed_content_axis(style, true, area.height(), fallback, decoration(false));
         }
-        const auto original_sizes = style.computed_sizes;
-        const int original_width = style.width, original_width_percent = style.width_percent;
-        const int original_height = style.height, original_height_percent = style.height_percent;
-        struct RestoreSizes {
-            Style& style;
-            ComputedSizeStorage sizes;
-            int width, width_percent, height, height_percent;
-            ~RestoreSizes() noexcept {
-                style.width = width; style.width_percent = width_percent;
-                style.height = height; style.height_percent = height_percent;
-                style.computed_sizes = std::move(sizes);
-            }
-        } restore{box.style, original_sizes, original_width, original_width_percent,
-                  original_height, original_height_percent};
+        SizeOverrideRestore restore(box.style, SizeProperty::Width, SizeProperty::Height);
         // Legacy modes receive the same allocation through scalar proxies.
         if (stretch_width) {
             box.style.computed_sizes.clear(SizeProperty::Width);
+            box.style.table_properties &= ~table_sizing_provenance_bit(SizeProperty::Width);
             box.style.width = project_size_edge(context.allocated_width +
                 (style.box_sizing_border_box ? decoration(true) : 0));
             box.style.width_percent = -1;
         }
         if (stretch_height) {
             box.style.computed_sizes.clear(SizeProperty::Height);
+            box.style.table_properties &= ~table_sizing_provenance_bit(SizeProperty::Height);
             box.style.height = project_size_edge(context.allocated_height +
                 (style.box_sizing_border_box ? decoration(false) : 0));
             box.style.height_percent = -1;
@@ -2477,7 +2542,7 @@ void LayoutEngine::layout_positioned_children(LayoutBox& box,
     if (!out_of_flow && !parent.parent.height_definite()) {
         SizeKind kind; std::int64_t units = 0, percentage = 0;
         if (style.height_percent >= 0 ||
-            (style.computed_sizes.get(SizeProperty::Height, kind, units, percentage) && kind != SizeKind::Pixels))
+            (style.computed_sizes.read_typed(SizeProperty::Height, kind, units, percentage) && kind != SizeKind::Pixels))
             content.set_height_definite(false);
     }
     PositionedContext descendants{parent.containing, content};
@@ -2533,21 +2598,21 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
         const int minimum_height = std::max(0, specified_content_min_height(box.style, containing_height));
         const int child_containing_height = fixed_height >= 0 ? fixed_height : 0;
         const auto layout_child_for_size = [&](LayoutBox& child, int target_height, bool force_height) {
-            const int old_height = child.style.height;
-            const int old_height_percent = child.style.height_percent;
+            SizeOverrideRestore restore(child.style, detail::SizeProperty::Height);
             if (force_height) {
+                child.style.computed_sizes.clear(detail::SizeProperty::Height);
+                child.style.table_properties &= ~table_sizing_provenance_bit(detail::SizeProperty::Height);
                 child.style.height = std::max(0, target_height);
                 child.style.height_percent = -1;
             } else if (fixed_height<0 && child.style.flex_basis_kind==FlexBasisKind::Percentage) {
                 // An unresolved percentage is content, not auto: ignore the
                 // preferred main size during every natural-size probe/layout.
+                child.style.computed_sizes.clear(detail::SizeProperty::Height);
+                child.style.table_properties &= ~table_sizing_provenance_bit(detail::SizeProperty::Height);
                 child.style.height = -1;
                 child.style.height_percent = -1;
             }
-            const int child_height = layout_box(child, 0, 0, content_width, child_containing_height, depth + 1);
-            child.style.height = old_height;
-            child.style.height_percent = old_height_percent;
-            return child_height;
+            return layout_box(child, 0, 0, content_width, child_containing_height, depth + 1);
         };
 
         std::vector<ColumnFlexItem> items;
@@ -2653,12 +2718,9 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
             LayoutBox* child = item.child;
             const AlignItems alignment = flex_cross_axis_alignment(*child, box.style.align_items);
             if (alignment == AlignItems::Stretch && flex_cross_size_is_auto(child->style, false)) {
-                const int old_width = child->style.width;
-                const int old_width_percent = child->style.width_percent;
+                SizeOverrideRestore restore(child->style, detail::SizeProperty::Width);
                 set_flex_stretch_cross_size(child->style, content_width, false);
                 layout_child_for_size(*child, item.target_height, item.force_height);
-                child->style.width = old_width;
-                child->style.width_percent = old_width_percent;
             }
             const int target_x = flex_aligned_x(alignment,
                                                 content_x,
@@ -2681,16 +2743,14 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
     }
 
     const auto layout_child_for_width = [&](LayoutBox& child, int target_width, bool force_width) {
-        const int old_width = child.style.width;
-        const int old_width_percent = child.style.width_percent;
+        SizeOverrideRestore restore(child.style, detail::SizeProperty::Width);
         if (force_width) {
+            child.style.computed_sizes.clear(detail::SizeProperty::Width);
+            child.style.table_properties &= ~table_sizing_provenance_bit(detail::SizeProperty::Width);
             child.style.width = std::max(0, target_width);
             child.style.width_percent = -1;
         }
-        const int height = layout_box(child, 0, 0, std::max(0, target_width), 0, depth + 1);
-        child.style.width = old_width;
-        child.style.width_percent = old_width_percent;
-        return height;
+        return layout_box(child, 0, 0, std::max(0, target_width), 0, depth + 1);
     };
 
     if (box.style.flex_wrap) {
@@ -2728,14 +2788,16 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
             detail::SizeProperty::MinWidth, static_cast<std::int64_t>(content_width) * 1000);
         detail::SizeKind minimum_kind = detail::SizeKind::Pixels;
         std::int64_t minimum_value = 0;
-        const bool retained_minimum = child.style.computed_sizes.get(
-            detail::SizeProperty::MinWidth, minimum_kind, minimum_value);
+        std::int64_t minimum_percentage = 0;
+        const bool retained_minimum = child.style.computed_sizes.read_typed(
+            detail::SizeProperty::MinWidth, minimum_kind, minimum_value, minimum_percentage);
         const bool unsupported_minimum = declared_minimum < -1 ||
             (retained_minimum && minimum_kind == detail::SizeKind::LengthPercentage);
         const auto has_mixed_constraint = [&](detail::SizeProperty property) {
             detail::SizeKind kind = detail::SizeKind::Pixels;
             std::int64_t value = 0;
-            return child.style.computed_sizes.get(property, kind, value) &&
+            std::int64_t percentage = 0;
+            return child.style.computed_sizes.read_typed(property, kind, value, percentage) &&
                 kind == detail::SizeKind::LengthPercentage;
         };
         const bool unsupported_intrinsic_constraints = unsupported_minimum ||
@@ -2857,12 +2919,9 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
         LayoutBox* child = item.child;
         const AlignItems alignment = flex_cross_axis_alignment(*child, box.style.align_items);
         if (alignment == AlignItems::Stretch && flex_cross_size_is_auto(child->style, true)) {
-            const int old_height = child->style.height;
-            const int old_height_percent = child->style.height_percent;
+            SizeOverrideRestore restore(child->style, detail::SizeProperty::Height);
             set_flex_stretch_cross_size(child->style, container_height, true);
             layout_child_for_width(*child, item.target_width, item.force_width);
-            child->style.height = old_height;
-            child->style.height_percent = old_height_percent;
         }
         const int child_outer_height = flex_outer_cross_size(*child, true);
         const int target_y = bounded_add(
@@ -2982,18 +3041,15 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
         const int column_span = placement.column_span;
         const int row_span = placement.row_span;
         const int item_width = grid_item_width(columns, placement.column, column_span);
-        const int original_width = child.style.width;
-        const int original_width_percent = child.style.width_percent;
-        const bool original_box_sizing = child.style.box_sizing_border_box;
+        SizeOverrideRestore restore(child.style, detail::SizeProperty::Width);
         if (child.style.width < 0 && child.style.width_percent < 0) {
+            child.style.computed_sizes.clear(detail::SizeProperty::Width);
+            child.style.table_properties &= ~table_sizing_provenance_bit(detail::SizeProperty::Width);
             child.style.width = item_width;
             child.style.width_percent = -1;
             child.style.box_sizing_border_box = true;
         }
         const int child_height = layout_box(child, 0, 0, item_width, 0, depth + 1);
-        child.style.width = original_width;
-        child.style.width_percent = original_width_percent;
-        child.style.box_sizing_border_box = original_box_sizing;
         const int min_allocated_height = bounded_add(
             bounded_non_negative_multiply(box.style.grid_auto_row_min, row_span),
             bounded_non_negative_multiply(row_gap, row_span - 1));

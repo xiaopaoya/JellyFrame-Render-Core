@@ -40,7 +40,8 @@ bool has_authored_size(const Style& style) {
              SizeProperty::MaxWidth, SizeProperty::MaxHeight}) {
         SizeKind kind = SizeKind::Pixels;
         std::int64_t value = 0;
-        if (style.computed_sizes.get(property, kind, value)) return true;
+        std::int64_t percentage = 0;
+        if (style.computed_sizes.read_typed(property, kind, value, percentage)) return true;
     }
     return false;
 }
@@ -69,9 +70,11 @@ bool has_only_cyclic_width_sizes(const Style& style) {
     for (std::size_t i = 0; i < 3; ++i) {
         if (style.*horizontal_percent[i] < -1) return false;
         SizeKind kind = SizeKind::Pixels;
-        std::int64_t value = 0;
-        const bool has_computed = style.computed_sizes.get(horizontal[i], kind, value);
+        std::int64_t value = 0, percentage = 0;
+        const bool has_computed = style.computed_sizes.read_typed(
+            horizontal[i], kind, value, percentage);
         if (has_computed) {
+            if (kind == SizeKind::LengthPercentage) return false;
             // StyleResolver publishes retained precision with a rounded legacy proxy.
             const auto rounded_percent =
                 (value + kDimensionPrecisionScale / 2) / kDimensionPrecisionScale;
@@ -88,8 +91,8 @@ bool has_only_cyclic_width_sizes(const Style& style) {
     for (SizeProperty property : {SizeProperty::Height, SizeProperty::MinHeight,
                                   SizeProperty::MaxHeight}) {
         SizeKind kind = SizeKind::Pixels;
-        std::int64_t value = 0;
-        if (style.computed_sizes.get(property, kind, value)) return false;
+        std::int64_t value = 0, percentage = 0;
+        if (style.computed_sizes.read_typed(property, kind, value, percentage)) return false;
     }
     return true;
 }
