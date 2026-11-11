@@ -237,10 +237,12 @@ void unsupported_context_refuses_before_geometry() {
     auto* basis = find(*basis_tree, "basis");
     check(basis && basis->style.computed_sizes.set_length_percentage(
         SizeProperty::FlexBasis, 10, 25), "typed FlexBasis can be constructed for refusal test");
-    diagnostics.clear();
-    auto basis_layout = LayoutEngine(basis_resolver, {}, options).layout(*basis_tree, 320, 240);
+    VectorDiagnosticSink basis_diagnostics;
+    LayoutEngineOptions basis_options;
+    basis_options.diagnostics = &basis_diagnostics;
+    auto basis_layout = LayoutEngine(basis_resolver, {}, basis_options).layout(*basis_tree, 320, 240);
     check(find(*basis_layout, "basis")->rect.width == 0 &&
-        !diagnostics.diagnostics().empty(),
+        !basis_diagnostics.diagnostics().empty(),
         "FlexBasis outside a qualified Flex item is explicitly refused");
 }
 
