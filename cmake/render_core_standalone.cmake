@@ -19,6 +19,9 @@ jellyframe_compute_render_core_source_hash("${JELLYFRAME_RENDER_CORE_SOURCE_ROOT
 include("${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/cmake/render_core_build.cmake")
 
 if(JELLYFRAME_BUILD_TESTS)
+    target_sources(jellyframe_render_core PRIVATE
+        "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/src/style_resolver_test_hooks.cpp")
+    target_compile_definitions(jellyframe_render_core PRIVATE JELLYFRAME_RENDER_CORE_TEST_HOOKS=1)
     enable_testing()
     include("${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/cmake/render_core_tests.cmake")
 endif()

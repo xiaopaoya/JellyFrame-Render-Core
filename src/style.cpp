@@ -1,6 +1,9 @@
 ﻿#include "render_core/style.h"
 
 #include "render_core/form_control.h"
+#if defined(JELLYFRAME_RENDER_CORE_TEST_HOOKS)
+#include "style_resolver_test_hooks.h"
+#endif
 #include "render_core/feature_config.h"
 #include "render_core/text_backend.h"
 #include "css_aspect_ratio.h"
@@ -5968,6 +5971,12 @@ CustomPropertyMap StyleResolver::custom_properties_for(const Node& node) const {
 }
 
 Style StyleResolver::resolve(const Node& node) const {
+    if (node.type == NodeType::Text) {
+#if defined(JELLYFRAME_RENDER_CORE_TEST_HOOKS)
+        detail::test::record_text_style_fast_path();
+#endif
+        return default_style_for(node);
+    }
     const CustomPropertyMap custom_properties = custom_properties_for(node);
     return resolve_with_custom_properties(node, custom_properties, nullptr, LengthResolutionContext{});
 }
@@ -6046,6 +6055,12 @@ const CustomPropertyMap& StyleResolver::custom_properties_for(const Node& node, 
 }
 
 Style StyleResolver::resolve(const Node& node, StyleResolveContext& context) const {
+    if (node.type == NodeType::Text) {
+#if defined(JELLYFRAME_RENDER_CORE_TEST_HOOKS)
+        detail::test::record_text_style_fast_path();
+#endif
+        return default_style_for(node);
+    }
     prepare_context(context, node);
     const CustomPropertyMap& custom_properties = custom_properties_for(node, context);
     const std::vector<const CssRule*>* matched_rules = has_custom_property_declarations_

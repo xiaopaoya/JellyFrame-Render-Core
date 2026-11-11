@@ -1,7 +1,10 @@
 #include "render_core/css_parser.h"
+#include "render_core/hit_test.h"
 #include "render_core/html_parser.h"
+#include "render_core/layer_tree.h"
 #include "render_core/layout.h"
 #include "render_core/render_tree.h"
+#include "../../src/style_resolver_test_hooks.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -39,6 +42,14 @@ const RenderObject* find_first_text(const RenderObject& object) {
         if (found != nullptr) {
             return found;
         }
+    }
+    return nullptr;
+}
+
+const LayoutBox* find_layout_box_for_node(const LayoutBox& box, const Node* node) {
+    if (box.node == node) return &box;
+    for (const auto& child : box.children) {
+        if (const LayoutBox* found = find_layout_box_for_node(*child, node)) return found;
     }
     return nullptr;
 }
@@ -354,13 +365,13 @@ void separator_filter_preserves_context_overrides_and_budget() {
         "<wbr> <br><pre><span> \t\n</span></pre></main></body>");
     StyleResolver resolver(CssParser{}.parse(":root{--fg:#123456}main{color:var(--fg)}"));
     auto tree = RenderTreeBuilder(resolver).build(*document);
-    const auto fast_statistics = resolver.statistics();
+    const auto fast_text_calls = detail::test::text_style_fast_path_counters().calls;
     std::vector<StyleOverride> overrides(1);
     RenderTreeOptions fallback_options;
     fallback_options.style_overrides = &overrides;
     MonotonicArena arena(256);
     auto fallback = RenderTreeBuilder(resolver, fallback_options).build(*document, arena);
-    const auto fallback_statistics = resolver.statistics();
+    const auto fallback_text_calls = detail::test::text_style_fast_path_counters().calls;
     check(count_render_objects(*tree) == count_render_objects(*fallback),
           "early separators preserve fallback object count with arena and overrides");
     check(render_text_exists(*tree, " leading ") && render_text_exists(*tree, " trailing ") &&
@@ -370,10 +381,8 @@ void separator_filter_preserves_context_overrides_and_budget() {
     check(find_first_text(*tree)->style.color.r == 0x12 &&
               find_first_text(*fallback)->style.color.r == 0x12,
           "custom properties still reach nonseparator text on both paths");
-    const auto fast_calls = fast_statistics.candidate_cache_hits + fast_statistics.candidate_cache_misses;
-    const auto fallback_calls = fallback_statistics.candidate_cache_hits + fallback_statistics.candidate_cache_misses;
-    check(fallback_calls - fast_calls > fast_calls,
-          "separator shortcut avoids selector preparation while overrides retain the fallback");
+    check(fallback_text_calls > fast_text_calls,
+          "separator shortcut avoids resolving discarded text while overrides retain the fallback");
 
     auto budget_document = make_element("document");
     auto separator = std::make_unique<Node>(NodeType::Text);
@@ -386,6 +395,90 @@ void separator_filter_preserves_context_overrides_and_budget() {
     auto bounded = RenderTreeBuilder(resolver, budget_options).build(*budget_document);
     check(count_render_objects(*bounded) == 1 && has_diagnostic_code(diagnostics, "render-object-limit"),
           "separator filtering preserves exhausted object budget diagnostics");
+}
+
+void text_style_fast_path_preserves_inheritance_and_overrides() {
+    auto document = HtmlParser{}.parse(
+        "<body><main style='--ink:#234567;color:var(--ink);font-size:22px'>"
+        "Alpha<strong>Beta</strong></main></body>");
+    StyleResolver resolver(CssParser{}.parse(
+        ":root{--ink:#123456}main{font-size:22px}strong{font-weight:700}"));
+    RenderTreeOptions options;
+    std::vector<StyleOverride> overrides(1);
+    StyleOverride text_override;
+    const auto find_dom_text = [&](const Node& node, const auto& self) -> const Node* {
+        if (node.type == NodeType::Text) return &node;
+        for (const auto& child : node.children)
+            if (const Node* found = self(*child, self)) return found;
+        return nullptr;
+    };
+    text_override.node = find_dom_text(*document, find_dom_text);
+    text_override.has_color = true;
+    text_override.color = Color{0x91, 0x32, 0x45, 255};
+    overrides[0] = text_override;
+    options.style_overrides = &overrides;
+    detail::test::reset_text_style_fast_path_calls();
+    auto tree = RenderTreeBuilder(resolver, options).build(*document);
+
+    const auto fast_path = detail::test::text_style_fast_path_counters();
+    check(fast_path.calls == 2 && fast_path.custom_property_walks_skipped == 2 &&
+              fast_path.selector_lookups_skipped == 2 && fast_path.cascade_slot_sets_skipped == 2,
+          "each text node takes the direct default-style path and skips element-only work");
+    const auto* main = find_first_by_tag(*tree, "main");
+    const auto* strong = find_first_by_tag(*tree, "strong");
+    const auto* first_text = find_first_text(*tree);
+    check(main && strong && first_text, "text fast path retains the complete render tree");
+    check(main->style.color.r == 0x23 && main->style.color.g == 0x45 &&
+              main->style.color.b == 0x67 && first_text->style.color.r == 0x91 &&
+              first_text->style.color.g == 0x32 && first_text->style.font_size == 22,
+          "custom-property-resolved parent values inherit and host text overrides still apply");
+    const auto* nested_text = find_first_text(*strong);
+    check(nested_text && nested_text->style.color.r == 0x23 &&
+              nested_text->style.font_size == 22 && nested_text->style.font_weight == 700,
+          "nested text receives inherited color, font size, and explicit element weight");
+
+    auto layout = LayoutEngine(resolver).layout(*tree, 320, 120);
+    check(layout != nullptr && !layout->children.empty(), "text fast path produces layout geometry");
+    const LayoutBox* text_box = find_layout_box_for_node(*layout, first_text->node);
+    check(text_box && text_box->rect.width > 0 && text_box->rect.height > 0,
+          "text geometry remains attached to its source node");
+    const auto layers = LayerTreeBuilder{}.build(*layout);
+    const int hit_x = text_box->rect.x + text_box->rect.width / 2;
+    const int hit_y = text_box->rect.y + text_box->rect.height / 2;
+    const auto layout_hit = HitTester{}.hit_test(*layout, hit_x, hit_y);
+    const auto layer_hit = HitTester{}.hit_test(*layers, hit_x, hit_y);
+    check(static_cast<bool>(layout_hit) && static_cast<bool>(layer_hit) &&
+              layout_hit.node == layer_hit.node && layout_hit.local_x == layer_hit.local_x &&
+              layout_hit.local_y == layer_hit.local_y,
+          "layout and layer hit results remain equivalent at text geometry");
+    check(count_layer_display_commands(*layers) > 0, "text fast path retains display commands");
+}
+
+void text_resolver_overloads_skip_element_resolution_work() {
+    Node parent(NodeType::Element);
+    parent.tag_name = "main";
+    parent.attributes["style"] = "--ink:#234567";
+    auto text = std::make_unique<Node>(NodeType::Text);
+    text->text = "direct";
+    Node* text_node = text.get();
+    parent.append_child(std::move(text));
+    StyleResolver resolver(CssParser{}.parse("main{--tone:var(--ink);color:var(--tone)}"));
+    StyleResolveContext context;
+    const auto before = resolver.statistics();
+    detail::test::reset_text_style_fast_path_calls();
+
+    const Style plain = resolver.resolve(*text_node);
+    const Style contextual = resolver.resolve(*text_node, context);
+    const auto after = resolver.statistics();
+    const auto counters = detail::test::text_style_fast_path_counters();
+    check(plain.display == Display::Inline && contextual.display == Display::Inline,
+          "both direct Text resolver overloads retain the Text default style");
+    check(counters.calls == 2 && counters.custom_property_walks_skipped == 2 &&
+              counters.selector_lookups_skipped == 2 && counters.cascade_slot_sets_skipped == 2,
+          "both direct Text resolver overloads skip custom properties, selectors, and cascade slots");
+    check(before.candidate_cache_hits == after.candidate_cache_hits &&
+              before.candidate_cache_misses == after.candidate_cache_misses,
+          "direct Text resolution leaves the element candidate cache untouched");
 }
 
 void render_tree_reports_object_budget_diagnostic() {
@@ -432,6 +525,8 @@ int main() {
         formatting_whitespace_text_is_skipped();
         inheritance_preserves_local_style_and_parent_values();
         separator_filter_preserves_context_overrides_and_budget();
+        text_style_fast_path_preserves_inheritance_and_overrides();
+        text_resolver_overloads_skip_element_resolution_work();
         render_tree_respects_object_budget();
         render_tree_reports_object_budget_diagnostic();
         render_tree_can_use_monotonic_arena();
