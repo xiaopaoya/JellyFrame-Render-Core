@@ -424,19 +424,42 @@ void qualified_grid_item_resolves_mixed_width_constraints() {
     check(pixel_item && item->rect.width == pixel_item->rect.width,
           "Grid mixed item width matches the equivalent pixel constraint");
 
-    auto vertical_dom = HtmlParser{}.parse("<div id='grid'><div id='mixed'></div></div>");
-    auto vertical_tree = RenderTreeBuilder(resolver).build(*vertical_dom);
-    auto* vertical_item = find(*vertical_tree, "mixed");
-    check(vertical_item && apply_computed_length_percentage(
-        vertical_item->style, SizeProperty::Height, 20, 50),
-        "Grid vertical mixed refusal fixture publishes");
-    VectorDiagnosticSink vertical_diagnostics;
-    LayoutEngineOptions vertical_options;
-    vertical_options.diagnostics = &vertical_diagnostics;
-    auto vertical_layout = LayoutEngine(resolver, {}, vertical_options).layout(*vertical_tree, 320, 240);
-    check(find(*vertical_layout, "mixed")->rect.width == 0 &&
-          !vertical_diagnostics.diagnostics().empty(),
-          "Grid refuses mixed height with an indefinite row basis before mutation");
+    const auto verify_vertical_refusal = [](SizeProperty property, bool on_grid) {
+        auto vertical_dom = HtmlParser{}.parse(
+            "<div id='grid'><div id='mixed'></div><div id='other'></div></div>");
+        StyleResolver vertical_resolver(CssParser{}.parse(
+            "*{margin:0;padding:0;border:0}"
+            "#grid{display:grid;width:200px;grid-template-columns:100px 100px}"
+            "#mixed,#other{height:10px}"));
+        auto vertical_tree = RenderTreeBuilder(vertical_resolver).build(*vertical_dom);
+        auto* grid_source = find(*vertical_tree, "grid");
+        auto* item_source = find(*vertical_tree, "mixed");
+        auto* target = on_grid ? grid_source : item_source;
+        check(target && apply_computed_length_percentage(target->style, property, 20, 50),
+              "Grid vertical mixed refusal fixture publishes");
+
+        VectorDiagnosticSink vertical_diagnostics;
+        LayoutEngineOptions vertical_options;
+        vertical_options.diagnostics = &vertical_diagnostics;
+        auto vertical_layout = LayoutEngine(vertical_resolver, {}, vertical_options)
+            .layout(*vertical_tree, 320, 240);
+        const auto* grid = find(*vertical_layout, "grid");
+        const auto* mixed = find(*vertical_layout, "mixed");
+        const auto* other = find(*vertical_layout, "other");
+        check(grid && mixed && other &&
+              grid->rect.width == 0 && grid->rect.height == 0 &&
+              mixed->rect.width == 0 && mixed->rect.height == 0 &&
+              other->rect.width == 0 && other->rect.height == 0,
+              "Grid vertical mixed sizing refuses before assigning any geometry");
+        check(!vertical_diagnostics.diagnostics().empty() &&
+              vertical_diagnostics.diagnostics().back().code ==
+                  "unsupported-mixed-dimension-layout",
+              "Grid vertical mixed sizing reports the explicit unsupported-context diagnostic");
+    };
+    for (const auto property : {SizeProperty::Height, SizeProperty::MinHeight, SizeProperty::MaxHeight}) {
+        verify_vertical_refusal(property, false);
+        verify_vertical_refusal(property, true);
+    }
 #endif
 }
 
