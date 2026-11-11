@@ -209,7 +209,8 @@ private:
                                   int viewport_width,
                                   int viewport_height,
                                   MonotonicArena* arena) const;
-    void build_layout_tree(const RenderObject& object, LayoutBox& box, MonotonicArena* arena) const;
+    void build_layout_tree(const RenderObject& object, LayoutBox& box, MonotonicArena* arena,
+                           bool& unsupported_mixed_dimension) const;
     LayoutBoxPtr make_layout_box(MonotonicArena* arena) const;
 };
 

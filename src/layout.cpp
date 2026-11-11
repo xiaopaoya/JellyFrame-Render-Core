@@ -39,38 +39,6 @@ int q1000_ceil_pixels(std::int32_t value) {
     return value <= 0 ? 0 : clamp_layout_value((static_cast<std::int64_t>(value) + 999) / 1000);
 }
 
-enum class MixedLayoutPreflight { None, Supported, Unsupported };
-
-MixedLayoutPreflight preflight_mixed_layout(const RenderObject& root, std::size_t max_depth) {
-    using detail::SizeKind;
-    using detail::SizeProperty;
-    bool found = false;
-    const auto scan = [&](const auto& self, const RenderObject& object,
-                          bool parent_block_path, std::size_t depth) -> bool {
-        if (depth > std::max<std::size_t>(1, max_depth)) return true;
-        const bool block_path = parent_block_path && object.style.display == Display::Block &&
-            object.style.position_type == PositionType::Static && object.node &&
-            object.node->type != NodeType::Text && !is_form_control(*object.node);
-        if (!object.style.computed_sizes.empty()) {
-            for (unsigned index = 0; index < 7; ++index) {
-                SizeKind kind = SizeKind::Pixels;
-                std::int64_t units = 0, percentage = 0;
-                if (!object.style.computed_sizes.read_typed(
-                        static_cast<SizeProperty>(index), kind, units, percentage) ||
-                    kind != SizeKind::LengthPercentage) continue;
-                if (index >= 7) continue;
-                found = true;
-                if (!block_path || index >= 6) return false;
-            }
-        }
-        for (const auto& child : object.children)
-            if (!self(self, *child, block_path, depth + 1)) return false;
-        return true;
-    };
-    if (!scan(scan, root, true, 1)) return MixedLayoutPreflight::Unsupported;
-    return found ? MixedLayoutPreflight::Supported : MixedLayoutPreflight::None;
-}
-
 struct SizeOverrideRestore {
     Style& target;
     detail::ComputedSizeStorage sizes;
@@ -1150,8 +1118,9 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
     root_box->style = render_tree.style;
     root_box->viewport_width = viewport_width;
     root_box->viewport_height = viewport_height;
-    build_layout_tree(render_tree, *root_box, arena);
-    if (preflight_mixed_layout(render_tree, options_.max_layout_depth) == MixedLayoutPreflight::Unsupported) {
+    bool unsupported_mixed_dimension = false;
+    build_layout_tree(render_tree, *root_box, arena, unsupported_mixed_dimension);
+    if (unsupported_mixed_dimension) {
         report_diagnostic(options_.diagnostics, DiagnosticStage::Layout,
             DiagnosticSeverity::Warning, "unsupported-mixed-dimension-layout",
             "Mixed dimensions require a normal precise Block layout context",
@@ -1168,22 +1137,45 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
     return root_box;
 }
 
-void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box, MonotonicArena* arena) const {
+void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box, MonotonicArena* arena,
+                                    bool& unsupported_mixed_dimension) const {
     struct PendingObject {
         const RenderObject* object = nullptr;
         LayoutBox* box = nullptr;
+        bool parent_block_path = true;
+        std::size_t depth = 1;
     };
 
     const std::size_t max_layout_boxes = std::max<std::size_t>(1, options_.max_layout_boxes);
     std::size_t layout_box_count = 1;
     bool budget_reported = false;
     std::vector<PendingObject> pending;
-    pending.push_back(PendingObject{&object, &box});
+    pending.push_back(PendingObject{&object, &box, true, 1});
     while (!pending.empty()) {
         const PendingObject current = pending.back();
         pending.pop_back();
         const RenderObject& render_object = *current.object;
         LayoutBox& layout_box = *current.box;
+        const bool block_path = current.parent_block_path && render_object.style.display == Display::Block &&
+            render_object.style.position_type == PositionType::Static && render_object.node &&
+            render_object.node->type != NodeType::Text && !is_form_control(*render_object.node);
+        if (!unsupported_mixed_dimension && current.depth <=
+                std::max<std::size_t>(1, options_.max_layout_depth) &&
+            !render_object.style.computed_sizes.empty()) {
+            using detail::SizeKind;
+            using detail::SizeProperty;
+            for (unsigned index = 0; index < 7; ++index) {
+                SizeKind kind = SizeKind::Pixels;
+                std::int64_t units = 0, percentage = 0;
+                if (!render_object.style.computed_sizes.read_typed(
+                        static_cast<SizeProperty>(index), kind, units, percentage) ||
+                    kind != SizeKind::LengthPercentage) continue;
+                if (!block_path || index >= 6) {
+                    unsupported_mixed_dimension = true;
+                    break;
+                }
+            }
+        }
         std::vector<PendingObject> child_work;
         child_work.reserve(render_object.children.size());
         for (const auto& child : render_object.children) {
@@ -1207,7 +1199,7 @@ void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box,
             child_box->viewport_width = box.viewport_width;
             child_box->viewport_height = box.viewport_height;
             layout_box.children.push_back(std::move(child_box));
-            child_work.push_back(PendingObject{child.get(), child_box_raw});
+            child_work.push_back(PendingObject{child.get(), child_box_raw, block_path, current.depth + 1});
         }
         for (auto it = child_work.rbegin(); it != child_work.rend(); ++it) {
             pending.push_back(*it);
