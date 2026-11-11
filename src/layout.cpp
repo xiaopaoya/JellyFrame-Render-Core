@@ -2,9 +2,7 @@
 
 #include "render_core/form_control.h"
 #include "computed_size_geometry.h"
-#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
 #include "intrinsic_source_query.h"
-#endif
 #include "layout_mutation_journal.h"
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
 #include "flex_length_resolution.h"
@@ -737,11 +735,17 @@ void finalize_grid_columns(GridColumns& columns,
                            const std::vector<GridPlacement>& placements,
                            const TextMeasureProvider& text_measure,
                            const TextSystem* text_system,
-                           int content_width) {
-    std::vector<int> source_widths(placements.size(), -1);
-    detail::IntrinsicSourceQueryLimits source_limits;
-    detail::IntrinsicSourceQueryUsage source_usage;
-    bool source_queries_complete = text_system != nullptr;
+                            int content_width,
+                            detail::IntrinsicSourceQueryLedger& intrinsic_queries) {
+    const auto scratch_bytes = placements.size() <= std::numeric_limits<std::size_t>::max() / sizeof(int)
+        ? placements.size() * sizeof(int) : std::numeric_limits<std::size_t>::max();
+    detail::IntrinsicSourceQueryScratch source_scratch(intrinsic_queries, text_system ? scratch_bytes : 0);
+    std::vector<int> source_widths;
+    bool source_queries_complete = text_system != nullptr && static_cast<bool>(source_scratch);
+    if (source_queries_complete) {
+        try { source_widths.assign(placements.size(), -1); }
+        catch (const std::bad_alloc&) { source_queries_complete = false; }
+    }
     for (std::size_t index = 0; index < placements.size(); ++index) {
         const GridPlacement& placement = placements[index];
         if (placement.fallback_block || placement.column_span != 1 ||
@@ -753,15 +757,9 @@ void finalize_grid_columns(GridColumns& columns,
             source_queries_complete = false;
             continue;
         }
-        auto remaining = source_limits;
-        remaining.max_boxes -= source_usage.boxes;
-        remaining.max_source_bytes -= source_usage.source_bytes;
-        remaining.max_measurements -= source_usage.measurements;
-        remaining.max_work -= source_usage.work;
-        const auto source = detail::query_intrinsic_source_width(*placement.child, *text_system,
-            {detail::IntrinsicPercentageBasisKind::CyclicSameAxis, -1}, remaining);
-        if (!source_usage.consume(source, source_limits) ||
-            source.status != detail::IntrinsicSourceStatus::Complete) {
+        const auto source = intrinsic_queries.query_width(*placement.child, *text_system,
+            {detail::IntrinsicPercentageBasisKind::CyclicSameAxis, -1});
+        if (source.status != detail::IntrinsicSourceStatus::Complete) {
             source_queries_complete = false;
             break;
         }
@@ -1076,6 +1074,12 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
                                             int viewport_width,
                                             int viewport_height,
                                             MonotonicArena* arena) const {
+    detail::IntrinsicSourceQueryLedger intrinsic_queries(options_.intrinsic_query_limits);
+    // The caller's engine remains immutable and reusable. Only this synchronous
+    // worker borrows the stack ledger, so nested layout/probes share one budget
+    // while independent or reentrant public calls start independent ledgers.
+    LayoutEngine pass_engine(*this);
+    pass_engine.intrinsic_queries_ = &intrinsic_queries;
     auto root_box = make_layout_box(arena);
     root_box->node = render_tree.node;
     root_box->style = render_tree.style;
@@ -1084,9 +1088,11 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
     build_layout_tree(render_tree, *root_box, arena);
     const PreciseBoxContext precision{static_cast<std::int64_t>(std::max(0,viewport_width))*1000,
         static_cast<std::int64_t>(std::max(0,viewport_height))*1000,0,0};
-    layout_box(*root_box, 0, 0, viewport_width, viewport_height, 1, &precision);
+    pass_engine.layout_box(*root_box, 0, 0, viewport_width, viewport_height, 1, &precision);
     const LayoutContentGeometry viewport{0, 0, precision.width, precision.height, true};
-    layout_positioned_children(*root_box, PositionedContext{viewport, viewport}, 1);
+    pass_engine.layout_positioned_children(*root_box, PositionedContext{viewport, viewport}, 1);
+    if (options_.intrinsic_query_statistics)
+        *options_.intrinsic_query_statistics = intrinsic_queries.snapshot();
     return root_box;
 }
 
@@ -2496,8 +2502,6 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
     int max_child_height = 0;
     int total_grow = 0;
     std::int64_t total_shrink_weight = 0;
-    detail::IntrinsicSourceQueryLimits intrinsic_limits;
-    detail::IntrinsicSourceQueryUsage intrinsic_usage;
     bool intrinsic_queries_complete = true;
 
     for_each_in_flow_child([&](LayoutBox& child) {
@@ -2553,15 +2557,9 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
         if (intrinsic_queries_complete && !unsupported_intrinsic_constraints && declared_minimum < 0 &&
             options_.text_system != nullptr &&
             auto_min_kind == detail::FlexAutoMinKind::Content && !has_aspect_ratio(child.style)) {
-            auto remaining = intrinsic_limits;
-            remaining.max_boxes -= intrinsic_usage.boxes;
-            remaining.max_source_bytes -= intrinsic_usage.source_bytes;
-            remaining.max_measurements -= intrinsic_usage.measurements;
-            remaining.max_work -= intrinsic_usage.work;
-            const auto measured = detail::query_intrinsic_source_width(child, *options_.text_system,
-                {detail::IntrinsicPercentageBasisKind::CyclicSameAxis, -1}, remaining);
-            const bool accounted = intrinsic_usage.consume(measured, intrinsic_limits);
-            if (!accounted || measured.status != detail::IntrinsicSourceStatus::Complete) {
+            const auto measured = intrinsic_queries_->query_width(child, *options_.text_system,
+                {detail::IntrinsicPercentageBasisKind::CyclicSameAxis, -1});
+            if (measured.status != detail::IntrinsicSourceStatus::Complete) {
                 intrinsic_queries_complete = false;
             } else {
             if (measured.status == detail::IntrinsicSourceStatus::Complete) {
@@ -2769,7 +2767,8 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
         placements.push_back(placement);
     }
 
-    finalize_grid_columns(columns, placements, text_measure_, options_.text_system, content_width);
+    finalize_grid_columns(columns, placements, text_measure_, options_.text_system, content_width,
+        *intrinsic_queries_);
 
     for (const GridPlacement& placement : placements) {
         LayoutBox& child = *placement.child;

@@ -3,6 +3,7 @@
 #include "render_core/layout.h"
 
 #include <atomic>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 
@@ -51,6 +52,7 @@ struct IntrinsicSourceWidthResult {
     std::size_t source_bytes = 0;
     std::size_t measurements = 0;
     std::size_t work = 0;
+    std::size_t peak_scratch_bytes = 0;
 };
 
 struct IntrinsicSourceQueryUsage {
@@ -59,7 +61,8 @@ struct IntrinsicSourceQueryUsage {
     std::size_t measurements = 0;
     std::size_t work = 0;
 
-    bool consume(const IntrinsicSourceWidthResult& result, const IntrinsicSourceQueryLimits& limits) noexcept {
+    template<class Result>
+    bool consume(const Result& result, const IntrinsicSourceQueryLimits& limits) noexcept {
         const auto fits = [](std::size_t used, std::size_t amount, std::size_t maximum) {
             return used <= maximum && amount <= maximum - used;
         };
@@ -87,5 +90,100 @@ IntrinsicSourceWidthResult query_intrinsic_source_width(
     const LayoutBox& box, const TextSystem& text_system,
     IntrinsicPercentageBasis percentage_basis,
     IntrinsicSourceQueryLimits limits = {}) noexcept;
+
+struct IntrinsicSourceHeightResult;
+
+// One ledger lives on the public layout-call stack. Layout recursion, retries
+// and speculative transactions share it and cannot refund consumed work.
+class IntrinsicSourceQueryLedger {
+public:
+    explicit IntrinsicSourceQueryLedger(LayoutIntrinsicQueryLimits limits = {}) noexcept : limits_(limits) {}
+
+    bool cancelled() const noexcept {
+        return limits_.cancellation && limits_.cancellation->load(std::memory_order_relaxed);
+    }
+    IntrinsicSourceQueryLimits remaining_limits(std::size_t live_scratch = 0) const noexcept {
+        IntrinsicSourceQueryLimits result;
+        const auto remaining = [](std::size_t maximum, std::size_t used) {
+            return maximum - std::min(maximum, used);
+        };
+        result.max_boxes = std::min(result.max_boxes, remaining(limits_.max_boxes, usage_.boxes));
+        result.max_depth = std::min(result.max_depth, limits_.max_depth);
+        result.max_source_bytes = std::min(result.max_source_bytes,
+            remaining(limits_.max_source_bytes, usage_.source_bytes));
+        result.max_measurements = std::min(result.max_measurements,
+            remaining(limits_.max_measurements, usage_.measurements));
+        result.max_work = std::min(result.max_work, remaining(limits_.max_work, usage_.work));
+        result.max_scratch_bytes = std::min(result.max_scratch_bytes,
+            remaining(remaining(limits_.max_scratch_bytes, scratch_live_), live_scratch));
+        result.cancellation = limits_.cancellation;
+        return result;
+    }
+    template<class Result>
+    bool consume(const Result& result) noexcept {
+        IntrinsicSourceQueryLimits aggregate;
+        aggregate.max_boxes = limits_.max_boxes;
+        aggregate.max_source_bytes = limits_.max_source_bytes;
+        aggregate.max_measurements = limits_.max_measurements;
+        aggregate.max_work = limits_.max_work;
+        ++queries_;
+        peak_scratch_ = std::max(peak_scratch_, scratch_live_ + result.peak_scratch_bytes);
+        if (result.status == IntrinsicSourceStatus::ResourceLimit) ++resource_refusals_;
+        return usage_.consume(result, aggregate);
+    }
+    bool charge(std::size_t amount) noexcept {
+        if (cancelled()) return false;
+        if (usage_.work > limits_.max_work || amount > limits_.max_work - usage_.work) {
+            ++resource_refusals_;
+            return false;
+        }
+        usage_.work += amount;
+        return true;
+    }
+    bool reserve_scratch(std::size_t bytes) noexcept {
+        if (cancelled()) return false;
+        if (scratch_live_ > limits_.max_scratch_bytes || bytes > limits_.max_scratch_bytes - scratch_live_) {
+            ++resource_refusals_;
+            return false;
+        }
+        scratch_live_ += bytes;
+        peak_scratch_ = std::max(peak_scratch_, scratch_live_);
+        return true;
+    }
+    void release_scratch(std::size_t bytes) noexcept {
+        scratch_live_ -= std::min(scratch_live_, bytes);
+    }
+    LayoutIntrinsicQueryStatistics snapshot() const noexcept {
+        return {usage_.boxes, usage_.source_bytes, usage_.measurements, usage_.work,
+            queries_, resource_refusals_, peak_scratch_};
+    }
+    bool can_query(const IntrinsicSourceQueryLimits& limits) const noexcept {
+        return limits.max_boxes && limits.max_depth && limits.max_source_bytes &&
+            limits.max_measurements && limits.max_work && limits.max_scratch_bytes;
+    }
+    IntrinsicSourceWidthResult query_width(const LayoutBox& box, const TextSystem& text_system,
+        IntrinsicPercentageBasis basis) noexcept;
+    IntrinsicSourceHeightResult query_height(const LayoutBox& box, const TextSystem& text_system,
+        std::int64_t inline_size) noexcept;
+
+private:
+    LayoutIntrinsicQueryLimits limits_;
+    IntrinsicSourceQueryUsage usage_;
+    std::size_t scratch_live_ = 0, peak_scratch_ = 0, queries_ = 0, resource_refusals_ = 0;
+};
+
+class IntrinsicSourceQueryScratch {
+public:
+    IntrinsicSourceQueryScratch(IntrinsicSourceQueryLedger& ledger, std::size_t bytes) noexcept
+        : ledger_(ledger), bytes_(bytes), reserved_(ledger.reserve_scratch(bytes)) {}
+    ~IntrinsicSourceQueryScratch() { if (reserved_) ledger_.release_scratch(bytes_); }
+    IntrinsicSourceQueryScratch(const IntrinsicSourceQueryScratch&) = delete;
+    IntrinsicSourceQueryScratch& operator=(const IntrinsicSourceQueryScratch&) = delete;
+    explicit operator bool() const noexcept { return reserved_; }
+private:
+    IntrinsicSourceQueryLedger& ledger_;
+    std::size_t bytes_;
+    bool reserved_;
+};
 
 } // namespace jellyframe::detail

@@ -10,6 +10,7 @@
 #include "render_core/text_system.h"
 
 #include <memory>
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -108,12 +109,43 @@ struct LayoutBox {
     std::vector<LayoutBoxPtr> children;
 };
 
+// Cumulative allowance for added intrinsic-query/planning work in one public
+// layout call. Legacy layout/paint work is outside this budget. Individual
+// source queries also retain their own safety ceilings. Scratch is a peak of
+// simultaneously live query/planner payload, not an accumulated byte count.
+struct LayoutIntrinsicQueryLimits {
+    std::size_t max_boxes = 256;
+    std::size_t max_depth = 32;
+    std::size_t max_source_bytes = 8192;
+    std::size_t max_measurements = 512;
+    std::size_t max_work = 65536;
+    std::size_t max_scratch_bytes = 32768;
+    const std::atomic_bool* cancellation = nullptr;
+};
+
+struct LayoutIntrinsicQueryStatistics {
+    std::size_t boxes = 0;
+    std::size_t source_bytes = 0;
+    std::size_t measurements = 0;
+    std::size_t work = 0;
+    std::size_t queries = 0;
+    std::size_t resource_refusals = 0;
+    std::size_t peak_scratch_bytes = 0;
+};
+
+namespace detail { class IntrinsicSourceQueryLedger; }
+
 struct LayoutEngineOptions {
     std::size_t max_layout_boxes = 4096;
     DiagnosticSink* diagnostics = nullptr;
     std::size_t max_layout_depth = 64;
     const TextSystem* text_system = nullptr;
     std::size_t max_prepared_text_glyphs = 128;
+    LayoutIntrinsicQueryLimits intrinsic_query_limits;
+    // Borrowed synchronous output, replaced once at the end of each public
+    // layout call. Includes failed queries and speculative probes; rollback
+    // never refunds work already performed.
+    LayoutIntrinsicQueryStatistics* intrinsic_query_statistics = nullptr;
 };
 
 class LayoutEngine {
@@ -135,6 +167,7 @@ private:
     const StyleResolver& style_resolver_;
     TextMeasureProvider text_measure_;
     LayoutEngineOptions options_;
+    detail::IntrinsicSourceQueryLedger* intrinsic_queries_ = nullptr;
 
     int layout_fixed_table(LayoutBox& box, int x, int y, int available_width, int height, std::size_t depth) const;
     struct PreciseBoxContext;

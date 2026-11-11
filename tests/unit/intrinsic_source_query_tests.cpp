@@ -1,4 +1,5 @@
 #include "../../src/intrinsic_source_query.h"
+#include "../../src/intrinsic_source_query_height.h"
 #include "render_core/css_parser.h"
 #include "render_core/html_parser.h"
 
@@ -1011,6 +1012,134 @@ void shared_query_usage_saturates_atomically() {
           "shared query usage refuses one-over without partially updating counters");
 }
 
+void pass_ledger_query_and_scratch_limits(const TextSystem& system) {
+    Fixture f;
+    f.append_text(f.root_box, f.root_node, "AB CD");
+    const auto reference = query(f, system);
+    LayoutIntrinsicQueryLimits limits;
+    limits.max_work = reference.work;
+    IntrinsicSourceQueryLedger exact(limits);
+    check(exact.query_width(f.root_box, system,
+              {IntrinsicPercentageBasisKind::CyclicSameAxis, -1}).status == IntrinsicSourceStatus::Complete,
+          "pass ledger permits a width query at its exact work boundary");
+    const auto height = exact.query_height(f.root_box, system, 20000);
+    check(height.status == IntrinsicSourceStatus::ResourceLimit && height.border_box_block_size_units == -1 &&
+          exact.snapshot().work == reference.work,
+          "width and height source consumers share the same nonrefundable pass work allowance");
+    --limits.max_work;
+    IntrinsicSourceQueryLedger short_budget(limits);
+    const auto refused = short_budget.query_width(f.root_box, system,
+        {IntrinsicPercentageBasisKind::CyclicSameAxis, -1});
+    check(refused.status == IntrinsicSourceStatus::ResourceLimit &&
+          refused.min_content_border_box_units == -1 && short_budget.snapshot().work <= limits.max_work,
+          "one-below cumulative work refuses without publishing a width");
+
+    limits = {};
+    limits.max_scratch_bytes = 66;
+    IntrinsicSourceQueryLedger scratch(limits);
+    {
+        IntrinsicSourceQueryScratch outer(scratch, 64);
+        IntrinsicSourceQueryScratch inner(scratch, 1);
+        check(outer && inner && scratch.remaining_limits().max_scratch_bytes == 1,
+              "nested planner payload reservations reduce query scratch simultaneously");
+        const auto partial = scratch.query_width(f.root_box, system,
+            {IntrinsicPercentageBasisKind::CyclicSameAxis, -1});
+        check(partial.status == IntrinsicSourceStatus::ResourceLimit &&
+              scratch.snapshot().peak_scratch_bytes == 66,
+              "query stream and nested planner buffers fit the same simultaneous scratch cap");
+    }
+    check(scratch.remaining_limits().max_scratch_bytes == 66 &&
+          scratch.query_width(f.root_box, system,
+              {IntrinsicPercentageBasisKind::CyclicSameAxis, -1}).status == IntrinsicSourceStatus::Complete,
+          "released scratch can be reused while already consumed work remains charged");
+    std::atomic_bool cancellation{true};
+    limits.cancellation = &cancellation;
+    IntrinsicSourceQueryLedger cancelled(limits);
+    check(cancelled.query_width(f.root_box, system,
+              {IntrinsicPercentageBasisKind::CyclicSameAxis, -1}).status == IntrinsicSourceStatus::Cancelled &&
+          cancelled.snapshot().work == 0 && !cancelled.charge(1),
+          "cancelled pass ledger declines query and planner work");
+}
+
+bool same_rectangles(const LayoutBox& left, const LayoutBox& right) {
+    if (left.rect.x != right.rect.x || left.rect.y != right.rect.y ||
+        left.rect.width != right.rect.width || left.rect.height != right.rect.height ||
+        left.children.size() != right.children.size()) return false;
+    for (std::size_t index = 0; index < left.children.size(); ++index)
+        if (!same_rectangles(*left.children[index], *right.children[index])) return false;
+    return true;
+}
+
+void layout_pass_intrinsic_budget(const TextSystem& system) {
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    // The outer Grid has fixed tracks; its descendants contain independent
+    // Flex and auto-track Grid consumers. They cannot each reset the allowance.
+    std::string html = "<main id='outer'><section><div class='f'><div id='first' class='item'>AB CD</div></div></section>";
+    for (int index = 0; index < 24; ++index)
+        html += "<section><div class='g'><div>AB AB</div></div>"
+            "<div class='f'><div class='item'>AB CD</div></div></section>";
+    html += "<section><div class='f'><div id='tail' class='item'>AB CD</div></div></section></main>";
+    auto document = HtmlParser{}.parse(html);
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0;font-size:16px}"
+        "#outer{display:grid;width:100px;grid-template-columns:100px}"
+        ".f{display:flex;width:5px;align-items:flex-start}.item{display:block;flex:0 1 0px}"
+        ".g{display:grid;width:100px;grid-template-columns:auto}"));
+    LayoutIntrinsicQueryStatistics statistics;
+    LayoutEngineOptions options;
+    options.text_system = &system;
+    options.intrinsic_query_statistics = &statistics;
+    options.intrinsic_query_limits.max_work = 180;
+    LayoutEngine engine(styles, {}, options);
+    auto limited = engine.layout(*document, 120, 80);
+    const auto first_pass = statistics;
+    check(first_pass.work <= 180 && first_pass.queries > 2 && first_pass.resource_refusals > 0,
+          "all nested Flex/Grid consumers share one bounded cumulative work ledger");
+    check(find(*limited, "first") && find(*limited, "first")->rect.width == 18 &&
+          find(*limited, "tail") && find(*limited, "tail")->rect.width == 0,
+          "earlier completed consumers publish while a later exhausted Flex consumer uses legacy sizing");
+    auto repeated = engine.layout(*document, 120, 80);
+    check(same_rectangles(*limited, *repeated) && statistics.work == first_pass.work &&
+          statistics.queries == first_pass.queries && statistics.resource_refusals == first_pass.resource_refusals,
+          "reusing the same engine resets the intrinsic allowance once for the next public pass");
+    options.intrinsic_query_limits.max_work = 65536;
+    options.intrinsic_query_limits.max_boxes = 4096;
+    auto complete = LayoutEngine(styles, {}, options).layout(*document, 120, 80);
+    check(statistics.work > first_pass.work && find(*complete, "tail")->rect.width == 18,
+          "larger pass allowance restores normal nested automatic-minimum results");
+
+    // Refusal on a second item must discard the first item's staged minimum.
+    auto pair = HtmlParser{}.parse("<div class='f'><div class='item'>AB CD</div><div class='item'>AB CD</div></div>");
+    options.intrinsic_query_limits.max_work = 0;
+    auto legacy = LayoutEngine(styles, {}, options).layout(*pair, 120, 80);
+    options.intrinsic_query_limits.max_work = 65536;
+    auto normal = LayoutEngine(styles, {}, options).layout(*pair, 120, 80);
+    const auto pair_work = statistics.work;
+    options.intrinsic_query_limits.max_work = pair_work - 1;
+    auto one_below = LayoutEngine(styles, {}, options).layout(*pair, 120, 80);
+    check(!same_rectangles(*normal, *legacy) && same_rectangles(*one_below, *legacy) &&
+          statistics.resource_refusals > 0 && statistics.work <= pair_work - 1,
+          "late Flex query refusal publishes the whole consumer legacy geometry atomically");
+
+    auto grid_pair = HtmlParser{}.parse("<div class='g'><div>AB AB</div><div>AB CD</div></div>");
+    options.intrinsic_query_limits.max_work = 65536;
+    auto grid_normal = LayoutEngine(styles, {}, options).layout(*grid_pair, 120, 80);
+    const auto grid_work = statistics.work;
+    options.intrinsic_query_limits.max_work = grid_work - 1;
+    auto grid_refused = LayoutEngine(styles, {}, options).layout(*grid_pair, 120, 80);
+    options.intrinsic_query_limits.max_work = 0;
+    auto grid_legacy = LayoutEngine(styles, {}, options).layout(*grid_pair, 120, 80);
+    check(same_rectangles(*grid_refused, *grid_legacy),
+          "late Grid query refusal discards all staged track contributions");
+    std::cout << "nested query ledger: work=" << first_pass.work << "/180, queries="
+              << first_pass.queries << ", resource refusals=" << first_pass.resource_refusals
+              << "; ledger=" << sizeof(IntrinsicSourceQueryLedger) << "B, engine="
+              << sizeof(LayoutEngine) << "B, options=" << sizeof(LayoutEngineOptions) << "B\n";
+#else
+    (void)system;
+#endif
+}
+
 void flex_auto_min_consumer(const TextSystem& system) {
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
     auto dom = HtmlParser{}.parse("<div id='p'><div id='a'>AB CD</div></div>");
@@ -1127,6 +1256,8 @@ int main() {
         auto text_system = bind_font(font, face);
         exact_limits_and_cancellation(text_system);
         shared_query_usage_saturates_atomically();
+        pass_ledger_query_and_scratch_limits(text_system);
+        layout_pass_intrinsic_budget(text_system);
         flex_auto_min_consumer(text_system);
         percentage_basis_contract(text_system);
         grid_auto_track_consumes_complete_source_width(text_system);

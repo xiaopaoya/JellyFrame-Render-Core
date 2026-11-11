@@ -11,6 +11,7 @@ struct IntrinsicSourceHeightResult {
     std::size_t source_bytes = 0;
     std::size_t measurements = 0;
     std::size_t work = 0;
+    std::size_t peak_scratch_bytes = 0;
 };
 
 // Measures an admitted horizontal LTR block source at an explicit content

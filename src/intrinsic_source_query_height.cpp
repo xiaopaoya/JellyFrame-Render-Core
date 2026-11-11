@@ -181,7 +181,7 @@ public:
                 content_height > kDimensionPrecisionMaximum - decoration)
                 return result(IntrinsicSourceStatus::ResourceLimit);
             return {IntrinsicSourceStatus::Complete, content_height + decoration,
-                    boxes_, source_bytes_, measurements_, work_};
+                boxes_, source_bytes_, measurements_, work_, peak_scratch_};
         } catch (const std::bad_alloc&) {
             return result(IntrinsicSourceStatus::ResourceLimit);
         }
@@ -197,7 +197,7 @@ private:
     };
 
     IntrinsicSourceHeightResult result(IntrinsicSourceStatus status) const {
-        return {status, -1, boxes_, source_bytes_, measurements_, work_};
+        return {status, -1, boxes_, source_bytes_, measurements_, work_, peak_scratch_};
     }
 
     bool admit_context(const Node& node) {
@@ -255,6 +255,7 @@ private:
                 status_ = IntrinsicSourceStatus::ResourceLimit;
                 return false;
             }
+            peak_scratch_ = std::max(peak_scratch_, stream_capacity_ + capacity);
             std::unique_ptr<char[]> next(new char[capacity]);
             if (stream_size_) std::memcpy(next.get(), stream_.get(), stream_size_);
             stream_ = std::move(next);
@@ -548,6 +549,7 @@ private:
     IntrinsicSourceQueryLimits limits_;
     std::unique_ptr<char[]> stream_;
     std::size_t stream_size_ = 0, stream_capacity_ = 0;
+    std::size_t peak_scratch_ = 0;
     std::size_t boxes_ = 0, source_bytes_ = 0, measurements_ = 0, work_ = 0;
     bool pending_space_ = false;
     bool pending_hyphen_ = false;
@@ -563,6 +565,17 @@ IntrinsicSourceHeightResult query_intrinsic_source_height(
     IntrinsicSourceQueryLimits limits) noexcept {
     SourceHeightQuery query(box, text_system, available_inline_size_units, limits);
     return query.run();
+}
+
+IntrinsicSourceHeightResult IntrinsicSourceQueryLedger::query_height(
+    const LayoutBox& box, const TextSystem& text_system, std::int64_t inline_size) noexcept {
+    const auto remaining = remaining_limits();
+    IntrinsicSourceHeightResult result;
+    if (cancelled()) result.status = IntrinsicSourceStatus::Cancelled;
+    else if (!can_query(remaining)) result.status = IntrinsicSourceStatus::ResourceLimit;
+    else result = query_intrinsic_source_height(box, text_system, inline_size, remaining);
+    if (!consume(result)) return {IntrinsicSourceStatus::ResourceLimit};
+    return result;
 }
 
 } // namespace jellyframe::detail
