@@ -3,6 +3,7 @@
 #include "render_core/form_control.h"
 #include "computed_size_geometry.h"
 #include "intrinsic_source_query.h"
+#include "intrinsic_source_query_height.h"
 #include "layout_mutation_journal.h"
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
 #include "flex_length_resolution.h"
@@ -1151,11 +1152,213 @@ LayoutBoxPtr LayoutEngine::make_layout_box(MonotonicArena* arena) const {
 }
 
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+bool LayoutEngine::layout_wrapped_row_flex(LayoutBox& box, std::int64_t content_x, std::int64_t content_y,
+    std::int64_t content_width, int containing_height, std::size_t depth, std::int64_t& natural_height) const {
+    using namespace detail;
+    // The first consumer admits ordinary row/wrap, natural cross size and start
+    // packing. Source queries, never previous rectangles, determine all lines.
+    if (!intrinsic_queries_ || !options_.text_system || box.style.flex_wrap != 1 ||
+        box.style.flex_direction != FlexDirection::Row || box.style.justify_content != JustifyContent::Start ||
+        box.style.align_content != JustifyContent::Start || has_aspect_ratio(box.style) ||
+        computed_size_units(box.style, SizeProperty::Height, -1) != -1 ||
+        computed_size_units(box.style, SizeProperty::MinHeight, -1) != -1 ||
+        computed_size_units(box.style, SizeProperty::MaxHeight, -1) != -1 || content_width <= 0)
+        return false;
+    auto& ledger = *intrinsic_queries_;
+    if (!ledger.charge(1) || depth >= std::min<std::size_t>(64, options_.intrinsic_query_limits.max_depth) ||
+        box.children.empty() || box.children.size() > 128) return false;
+    for (const auto property : {SizeProperty::Height, SizeProperty::MinHeight, SizeProperty::MaxHeight}) {
+        SizeKind kind; std::int64_t value;
+        if (box.style.computed_sizes.get(property, kind, value)) return false;
+    }
+    struct Line { std::size_t first = 0, count = 0; std::int64_t height = 0; };
+    const auto plan_bytes = box.children.size() * (sizeof(FlexLengthPrecisionItem) + sizeof(Line));
+    if (!ledger.reserve_scratch(plan_bytes)) return false;
+    struct Release {
+        IntrinsicSourceQueryLedger& ledger; std::size_t bytes;
+        ~Release() { ledger.release_scratch(bytes); }
+    } release{ledger, plan_bytes};
+    try {
+        // Exact arrays avoid implementation-defined vector growth in the
+        // pre-allocation payload check above.
+        std::unique_ptr<FlexLengthPrecisionItem[]> items(new FlexLengthPrecisionItem[box.children.size()]);
+        std::unique_ptr<Line[]> lines(new Line[box.children.size()]);
+        std::size_t item_count = 0, line_count = 1;
+        const auto gap = static_cast<std::int64_t>(std::max(0, box.style.column_gap)) * 1000;
+        const auto row_gap = static_cast<std::int64_t>(std::max(0, box.style.row_gap)) * 1000;
+        const auto decoration = [](const Style& s, bool horizontal) {
+            return (horizontal ? static_cast<std::int64_t>(s.padding.left) + s.padding.right +
+                s.border_width.left + s.border_width.right : static_cast<std::int64_t>(s.padding.top) +
+                s.padding.bottom + s.border_width.top + s.border_width.bottom) * 1000;
+        };
+        const auto main_size = content_width;
+        if (main_size <= 0 || main_size > kDimensionPrecisionMaximum) return false;
+        for (auto& owned : box.children) {
+            if (!ledger.charge(1)) return false;
+            auto& child = *owned; const auto& s = child.style;
+            // Keep the initial text consumer's final-layout proof small: an
+            // empty Block or one direct Core Text run, with no positioned work.
+            if (!child.node || child.node->type != NodeType::Element || s.display != Display::Block ||
+                s.position_type != PositionType::Static || is_form_control(*child.node) || has_aspect_ratio(s) ||
+                s.margin_left_auto || s.margin_right_auto || s.margin.left < 0 || s.margin.right < 0 ||
+                s.margin.top < 0 || s.margin.bottom < 0 || child.children.size() > 1 ||
+                (child.children.size() == 1 && (!child.children[0]->node ||
+                    child.children[0]->node->type != NodeType::Text || !child.children[0]->children.empty()))) return false;
+            if (depth + (child.children.empty() ? 1 : 2) >
+                std::min<std::size_t>(64, options_.intrinsic_query_limits.max_depth)) return false;
+            if (!child.children.empty() && !ledger.charge(1)) return false;
+            const auto source = ledger.query_width(child, *options_.text_system,
+                {IntrinsicPercentageBasisKind::CyclicSameAxis, -1});
+            if (source.status != IntrinsicSourceStatus::Complete) return false;
+            const auto edges = decoration(s, true);
+            const auto cross_edges = decoration(s, false);
+            if (edges < 0 || cross_edges < 0) return false;
+            const auto outer = [&](std::int64_t value) {
+                return value < 0 ? value : s.box_sizing_border_box ? std::max(edges, value) : value + edges;
+            };
+            const auto preferred = computed_size_units(s, SizeProperty::Width, main_size);
+            const auto basis = computed_size_units(s, SizeProperty::FlexBasis, main_size);
+            const auto minimum = computed_size_units(s, SizeProperty::MinWidth, main_size);
+            const auto maximum = computed_size_units(s, SizeProperty::MaxWidth, main_size);
+            if (preferred < -1 || basis < -1 || minimum < -1 || maximum < -1 ||
+                computed_size_units(s, SizeProperty::Height, -1) < -1 ||
+                computed_size_units(s, SizeProperty::MinHeight, -1) < -1 ||
+                computed_size_units(s, SizeProperty::MaxHeight, -1) < -1) return false;
+            FlexLengthPrecisionItem item;
+            item.child = &child;
+            item.base = basis >= 0 ? outer(basis) : preferred >= 0 ? outer(preferred) : source.max_content_border_box_units;
+            item.inner_base = std::max<std::int64_t>(0, item.base - edges);
+            item.maximum = outer(maximum);
+            item.minimum = outer(minimum);
+            if (minimum < 0) {
+                FlexAutoMinInput input;
+                input.content_complete = true; input.content_size_units = source.min_content_border_box_units;
+                input.main_decoration_units = edges; input.max_main_units = item.maximum;
+                input.specified_main_units = outer(preferred);
+                const auto kind = flex_auto_min_kind(s, FlexMainAxis::Horizontal);
+                if (kind == FlexAutoMinKind::Unresolved) return false;
+                if (kind == FlexAutoMinKind::Zero) item.minimum = edges;
+                else {
+                    const auto result = flex_auto_minimum(input);
+                    if (result.status != FlexAutoMinStatus::Complete) return false;
+                    item.minimum = result.minimum_border_box_units;
+                }
+            }
+            item.hypothetical = flex_length_clamp(item.base, item);
+            item.margins = (static_cast<std::int64_t>(s.margin.left) + s.margin.right) * 1000;
+            items[item_count++] = item;
+            // Stable insertion keeps ordering scans charged and needs no sort scratch.
+            for (std::size_t index = item_count - 1; index > 0; --index) {
+                if (!ledger.charge(1)) return false;
+                if (items[index - 1].child->style.flex_order <= items[index].child->style.flex_order) break;
+                std::swap(items[index - 1], items[index]);
+            }
+        }
+        std::int64_t used = 0;
+        for (std::size_t index = 0; index < item_count; ++index) {
+            if (!ledger.charge(1)) return false;
+            const auto outer = items[index].hypothetical + items[index].margins;
+            if (lines[line_count - 1].count && used + gap + outer > main_size) {
+                lines[line_count++] = {index, 0, 0}; used = 0;
+            }
+            if (lines[line_count - 1].count) used += gap;
+            used += outer; ++lines[line_count - 1].count;
+        }
+        std::int64_t total_height = 0;
+        const FlexLengthRange<Line> line_range{lines.get(), line_count};
+        for (auto& line : line_range) {
+            FlexLengthRange<FlexLengthPrecisionItem> range{items.get() + line.first, line.count};
+            if (resolve_flex_lengths_precise(range, main_size, gap, [&](std::size_t amount) {
+                return ledger.charge(amount) ? FlexLengthChargeDecision::Continue : FlexLengthChargeDecision::ResourceLimit;
+            }) != FlexLengthPrecisionStatus::Success) return false;
+            for (auto& item : range) {
+                if (!ledger.charge(1)) return false;
+                const auto& s = item.child->style;
+                // Current paragraph publication uses integer inline widths.
+                // Refuse a fractional selected width instead of rounding a wrap boundary.
+                const auto inline_size = std::max<std::int64_t>(0, item.target - decoration(s, true));
+                if (inline_size % 1000 != 0) return false;
+                const auto measured = ledger.query_height(*item.child, *options_.text_system, inline_size);
+                if (measured.status != IntrinsicSourceStatus::Complete) return false;
+                const auto content = computed_content_axis(s, true, -1,
+                    std::max<std::int64_t>(0, measured.border_box_block_size_units - decoration(s, false)), decoration(s, false));
+                if (content < 0) return false;
+                item.probe = content + decoration(s, false);
+                line.height = std::max(line.height, item.probe +
+                    (static_cast<std::int64_t>(s.margin.top) + s.margin.bottom) * 1000);
+            }
+            if (total_height > kDimensionPrecisionMaximum - line.height) return false;
+            total_height += line.height;
+            if (&line != &lines[line_count - 1]) {
+                if (total_height > kDimensionPrecisionMaximum - row_gap) return false;
+                total_height += row_gap;
+            }
+        }
+        // No layout/cache mutation occurs until every query and solver succeeds.
+        LayoutMutationJournal transaction;
+        std::size_t snapshot_count = 1 + item_count;
+        for (std::size_t index = 0; index < item_count; ++index) {
+            if (!ledger.charge(1)) return false;
+            snapshot_count += items[index].child->children.size();
+        }
+        // Capture walks twice, visits each edge twice, records geometry and
+        // swaps caches. Prepay the bounded capture before allocating/mutating.
+        if (!ledger.charge(snapshot_count * 6)) return false;
+        const auto journal_limit = LayoutMutationJournal::capture_scratch_bytes(snapshot_count);
+        IntrinsicSourceQueryScratch journal_scratch(ledger, journal_limit);
+        if (!journal_scratch) return false;
+        if (snapshot_count > options_.max_layout_boxes ||
+            transaction.capture(box, snapshot_count, journal_limit) !=
+            LayoutMutationJournalStatus::Ready) return false;
+        auto line_y = content_y;
+        for (const auto& line : line_range) {
+            auto item_x = content_x;
+            for (std::size_t index = line.first; index < line.first + line.count; ++index) {
+                if (!ledger.charge(1)) return false;
+                auto& item = items[index]; auto& child = *item.child; const auto& s = child.style;
+                const auto alignment = flex_cross_axis_alignment(child, box.style.align_items);
+                const auto free = std::max<std::int64_t>(0, line.height - item.probe -
+                    (static_cast<std::int64_t>(s.margin.top) + s.margin.bottom) * 1000);
+                const auto shift = alignment == AlignItems::Center ? free / 2 : alignment == AlignItems::End ? free : 0;
+                PreciseBoxContext context{main_size, -1,
+                    item_x + static_cast<std::int64_t>(s.margin.left) * 1000,
+                    line_y + static_cast<std::int64_t>(s.margin.top) * 1000 + shift};
+                context.border_origin = true;
+                context.allocated_width = std::max<std::int64_t>(0, item.target - decoration(s, true));
+                if (alignment == AlignItems::Stretch && computed_size_units(s, SizeProperty::Height, -1) < 0) {
+                    const auto content = computed_content_axis(s, true, -1,
+                        std::max<std::int64_t>(0, line.height -
+                            (static_cast<std::int64_t>(s.margin.top) + s.margin.bottom) * 1000 - decoration(s, false)),
+                        decoration(s, false));
+                    if (content < 0) return false;
+                    context.allocated_height = content;
+                }
+                layout_box(child, project_size_edge(context.x), project_size_edge(context.y), project_size_edge(content_width),
+                    containing_height, depth + 1, &context);
+                if (!child.children.empty() && !child.children[0]->text_layout_cache.prepared_text) return false;
+                const auto expected_height = context.allocated_height >= 0 ?
+                    context.allocated_height + decoration(s, false) : item.probe;
+                if (child.rect.width != project_size_extent(context.x, item.target) ||
+                    child.rect.height != project_size_extent(context.y, expected_height)) return false;
+                item_x += item.target + item.margins + gap;
+            }
+            line_y += line.height + row_gap;
+        }
+        if (!ledger.charge(1)) return false;
+        natural_height = total_height;
+        transaction.commit();
+        return true;
+    } catch (const std::bad_alloc&) { return false; }
+      catch (const std::length_error&) { return false; }
+}
+
 bool LayoutEngine::layout_precise_flex(LayoutBox& box, std::int64_t width, std::int64_t fixed_height,
     const PreciseBoxContext& parent, std::int64_t x, std::int64_t y, int legacy_height,
     std::size_t depth, std::int64_t& natural_height) const {
     using namespace detail;
     const bool row = box.style.flex_direction == FlexDirection::Row;
+    if (box.style.flex_wrap && row && fixed_height < 0)
+        return layout_wrapped_row_flex(box, x, y, width, legacy_height, depth, natural_height);
     if (box.style.flex_wrap || (!row && fixed_height < 0)) return false;
     const auto main_size = row ? width : fixed_height;
     const auto decoration = [](const Style& s, bool horizontal) {
@@ -1637,7 +1840,7 @@ int LayoutEngine::layout_box(LayoutBox& box, int x, int y, int width, int height
     if (precision && depth <= std::max<std::size_t>(1,options_.max_layout_depth) &&
         (box.style.display == Display::Block
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
-         || (box.style.display == Display::Flex && !box.style.flex_wrap)
+         || box.style.display == Display::Flex
 #endif
         ) &&
         box.node && box.node->type != NodeType::Text && !is_form_control(*box.node)) {

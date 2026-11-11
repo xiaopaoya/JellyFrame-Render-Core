@@ -183,6 +183,9 @@ private:
                         int min_width,
                         int height) const;
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    bool layout_wrapped_row_flex(LayoutBox&, std::int64_t content_x, std::int64_t content_y,
+                                std::int64_t content_width, int containing_height,
+                                std::size_t depth, std::int64_t& natural_height) const;
     bool layout_precise_flex(LayoutBox&, std::int64_t content_width, std::int64_t fixed_height,
                              const PreciseBoxContext&, std::int64_t content_x, std::int64_t content_y,
                              int legacy_height, std::size_t depth, std::int64_t& natural_height) const;

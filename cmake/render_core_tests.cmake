@@ -206,7 +206,7 @@ if(COMMAND jellyframe_stage_sanitizer_runtime)
 endif()
 
 # Standalone source queries remain tested in every feature profile.
-foreach(query intrinsic_source_query intrinsic_source_query_height)
+foreach(query intrinsic_source_query intrinsic_source_query_height wrapped_row_flex)
     add_executable(jellyframe_${query}_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/${query}_tests.cpp")
     target_link_libraries(jellyframe_${query}_tests PRIVATE jellyframe_render_core)
     if(MSVC)

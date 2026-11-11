@@ -11,13 +11,6 @@
 
 static int allocations_until_failure = -1;
 static std::size_t largest_allocation_bytes = 0;
-#if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL != 0
-// capture's local vector creates checked-iterator metadata in its noexcept
-// constructor before entering the guarded reserve. Inject into storage instead.
-constexpr int capture_metadata_allocations = 1;
-#else
-constexpr int capture_metadata_allocations = 0;
-#endif
 void* operator new(std::size_t bytes) {
     if (allocations_until_failure == 0) throw std::bad_alloc();
     if (allocations_until_failure > 0) --allocations_until_failure;
@@ -29,6 +22,10 @@ void* operator new(std::size_t bytes) {
 }
 void operator delete(void* data) noexcept { std::free(data); }
 void operator delete(void* data, std::size_t) noexcept { std::free(data); }
+// Route array allocations through the same deterministic hook, including ASan.
+void* operator new[](std::size_t bytes) { return ::operator new(bytes); }
+void operator delete[](void* data) noexcept { ::operator delete(data); }
+void operator delete[](void* data, std::size_t) noexcept { ::operator delete(data); }
 
 using namespace jellyframe;
 using namespace jellyframe::detail;
@@ -87,7 +84,7 @@ void allocation_refusal_is_pre_mutation() {
     root.text_layout_cache.source_text = "retained cache";
     for (int successful_allocations : {0, 1}) {
         LayoutMutationJournal journal;
-        allocations_until_failure = successful_allocations + capture_metadata_allocations;
+        allocations_until_failure = successful_allocations;
         const auto status = journal.capture(root, 1);
         allocations_until_failure = -1;
         assert(status == LayoutMutationJournalStatus::ResourceLimit && !journal.active());
@@ -225,6 +222,14 @@ int main() {
     assert(journal.capture(root, 1) == LayoutMutationJournalStatus::Ready);
     const auto allocated_slot_bytes = largest_allocation_bytes;
     assert(allocated_slot_bytes == sizeof(CurrentSlot));
+    const auto exact_scratch = sizeof(CurrentSlot) + sizeof(const LayoutBox*);
+    assert(journal.scratch_peak_bytes() == exact_scratch);
+    journal.rollback();
+    root.text_layout_cache.source_text = "retained";
+    assert(journal.capture(root, 1, exact_scratch - 1) == LayoutMutationJournalStatus::ResourceLimit);
+    assert(!journal.active() && root.text_layout_cache.source_text == "retained");
+    assert(journal.capture(root, 1, exact_scratch) == LayoutMutationJournalStatus::Ready);
+    assert(journal.scratch_peak_bytes() == exact_scratch);
     journal.rollback();
     std::cout << "journal slot old=" << sizeof(OldSlot) << " current=" << sizeof(CurrentSlot)
         << " actual single-slot allocation=" << allocated_slot_bytes
