@@ -14,14 +14,42 @@ constexpr std::size_t kStackListenerSnapshotCapacity = 8;
 
 struct DispatchScope {
     DispatchScope* previous = nullptr;
+    DispatchScope* previous_closing = nullptr;
     const Node* const* path = nullptr;
     std::size_t path_count = 0;
     const Node* target = nullptr;
     Event* event = nullptr;
     bool path_node_destroyed = false;
+    bool closing = false;
+    EventDispatchCompletion* completions = nullptr;
 };
 
+} // namespace
+
+struct EventDispatchCompletionAccess {
+    static EventDispatchEndCallback take_next(DispatchScope& scope, void*& context) noexcept {
+        EventDispatchCompletion* registration = scope.completions;
+        scope.completions = registration->next_;
+        EventDispatchEndCallback callback = registration->callback_;
+        context = registration->context_;
+        registration->owner_ = nullptr;
+        registration->next_ = nullptr;
+        registration->callback_ = nullptr;
+        registration->context_ = nullptr;
+        return callback;
+    }
+};
+
+struct EventDispatchScopeAccess {
+    static void clear_transient_state(Event& event) noexcept {
+        event.clear_current_target();
+    }
+};
+
+namespace {
+
 thread_local DispatchScope* g_dispatch_scope = nullptr;
+thread_local DispatchScope* g_closing_dispatch_scope = nullptr;
 
 class ScopedDispatch {
 public:
@@ -35,7 +63,21 @@ public:
     }
 
     ~ScopedDispatch() {
+        scope_.closing = true;
+        if (scope_.event != nullptr) {
+            EventDispatchScopeAccess::clear_transient_state(*scope_.event);
+        }
+        scope_.previous_closing = g_closing_dispatch_scope;
+        g_closing_dispatch_scope = &scope_;
         g_dispatch_scope = scope_.previous;
+        while (scope_.completions != nullptr) {
+            void* context = nullptr;
+            EventDispatchEndCallback callback = EventDispatchCompletionAccess::take_next(scope_, context);
+            if (callback != nullptr) {
+                callback(*scope_.event, context);
+            }
+        }
+        g_closing_dispatch_scope = scope_.previous_closing;
     }
 
     bool path_node_destroyed() const { return scope_.path_node_destroyed; }
@@ -71,6 +113,10 @@ bool Event::default_prevented() const {
 
 bool Event::target_destroyed() const {
     return target_destroyed_;
+}
+
+bool Event::dispatch_failed() const noexcept {
+    return dispatch_failed_;
 }
 
 bool Event::propagation_stopped() const {
@@ -116,6 +162,7 @@ void Event::reset_for_dispatch(const Node& target) {
     propagation_stopped_ = false;
     immediate_propagation_stopped_ = false;
     target_destroyed_ = false;
+    dispatch_failed_ = false;
 }
 
 void Event::set_current_target(const Node& current_target, EventPhase phase) {
@@ -170,6 +217,7 @@ struct EventTarget::ListenerStore {
 
     std::vector<ListenerGroup> groups;
     ListenerId next_listener_id = 1;
+    bool closing = false;
 
     std::size_t listener_count() const {
         std::size_t count = 0;
@@ -218,14 +266,17 @@ struct EventTarget::ListenerStore {
             return;
         }
         listener.removed = true;
-        if (listener.options.cleanup != nullptr) {
-            listener.options.cleanup(listener.options.cleanup_context);
-            listener.options.cleanup = nullptr;
-            listener.options.cleanup_context = nullptr;
-        }
+        const auto cleanup = listener.options.cleanup;
+        void* const context = listener.options.cleanup_context;
+        listener.options.cleanup = nullptr;
+        listener.options.cleanup_context = nullptr;
+        // The hook may add listeners, reallocating this entry's storage, or
+        // destroy the target. Never access listener after crossing the hook.
+        if (cleanup != nullptr) cleanup(context);
     }
 
     void mark_all_removed() {
+        closing = true;
         for (ListenerGroup& group : groups) {
             for (Listener& listener : group.listeners) {
                 mark_removed(listener);
@@ -257,6 +308,7 @@ EventTarget::ListenerId EventTarget::add_event_listener_bounded(const std::strin
     if (!listeners_) {
         listeners_ = std::make_shared<ListenerStore>();
     }
+    if (listeners_->closing) return 0;
     if (max_listeners > 0 && listeners_->listener_count() >= max_listeners) {
         return 0;
     }
@@ -290,7 +342,7 @@ bool EventTarget::remove_event_listener(ListenerId id) {
 }
 
 void EventTarget::invoke_event_listeners(Event& event, bool capture_phase) const {
-    if (!listeners_) {
+    if (!listeners_ || listeners_->closing) {
         return;
     }
 
@@ -328,12 +380,27 @@ void EventTarget::invoke_event_listeners(Event& event, bool capture_phase) const
         if (once) {
             listener->once_callback_active = true;
         }
-        callback(event);
-        if (once) {
+        const auto finish_once = [&]() {
             if (ListenerStore::Listener* once_listener = listener_store->find_listener(listener_id)) {
                 once_listener->once_callback_active = false;
                 ListenerStore::mark_removed(*once_listener);
             }
+        };
+        // Unwind cleanup preserves the original listener exception, even when
+        // an optional cleanup hook throws. Normal cleanup still propagates.
+        struct OnceUnwindCleanup {
+            const decltype(finish_once)& finish;
+            bool armed;
+            ~OnceUnwindCleanup() noexcept {
+                if (armed) {
+                    try { finish(); } catch (...) {}
+                }
+            }
+        } unwind_cleanup{finish_once, once};
+        callback(event);
+        unwind_cleanup.armed = false;
+        if (once) {
+            finish_once();
         }
         if (event.immediate_propagation_stopped()) {
             return false;
@@ -365,6 +432,17 @@ void EventTarget::invoke_event_listeners(Event& event, bool capture_phase) const
 }
 
 bool dispatch_event(const Node& target, Event& event) {
+    for (DispatchScope* scope = g_dispatch_scope; scope != nullptr; scope = scope->previous) {
+        if (scope->event == &event) {
+            return false;
+        }
+    }
+    for (DispatchScope* scope = g_closing_dispatch_scope;
+         scope != nullptr; scope = scope->previous_closing) {
+        if (scope->event == &event) {
+            return false;
+        }
+    }
     std::vector<const Node*> path;
     for (const Node* node = &target; node != nullptr; node = node->parent) {
         path.push_back(node);
@@ -382,11 +460,11 @@ bool dispatch_event(const Node& target, Event& event) {
         node->invoke_event_listeners(event, true);
         if (dispatch_scope.path_node_destroyed()) {
             event.clear_current_target();
-            return !event.default_prevented();
+            return !event.default_prevented() && !event.dispatch_failed();
         }
         if (event.propagation_stopped()) {
             event.clear_current_target();
-            return !event.default_prevented();
+            return !event.default_prevented() && !event.dispatch_failed();
         }
     }
 
@@ -394,13 +472,13 @@ bool dispatch_event(const Node& target, Event& event) {
     target.invoke_event_listeners(event, true);
     if (dispatch_scope.path_node_destroyed()) {
         event.clear_current_target();
-        return !event.default_prevented();
+        return !event.default_prevented() && !event.dispatch_failed();
     }
     if (!event.immediate_propagation_stopped()) {
         target.invoke_event_listeners(event, false);
         if (dispatch_scope.path_node_destroyed()) {
             event.clear_current_target();
-            return !event.default_prevented();
+            return !event.default_prevented() && !event.dispatch_failed();
         }
     }
 
@@ -411,7 +489,7 @@ bool dispatch_event(const Node& target, Event& event) {
             node->invoke_event_listeners(event, false);
             if (dispatch_scope.path_node_destroyed()) {
                 event.clear_current_target();
-                return !event.default_prevented();
+                return !event.default_prevented() && !event.dispatch_failed();
             }
             if (event.propagation_stopped()) {
                 break;
@@ -420,24 +498,87 @@ bool dispatch_event(const Node& target, Event& event) {
     }
 
     event.clear_current_target();
-    return !event.default_prevented();
+    return !event.default_prevented() && !event.dispatch_failed();
+}
+
+bool fail_event_dispatch(Event& event) noexcept {
+    for (DispatchScope* scope = g_dispatch_scope; scope != nullptr; scope = scope->previous) {
+        if (scope->event == &event && !scope->closing) {
+            event.dispatch_failed_ = true;
+            event.propagation_stopped_ = true;
+            event.immediate_propagation_stopped_ = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+EventDispatchCompletion::~EventDispatchCompletion() {
+    detach_event_dispatch_completion(*this);
+}
+
+bool attach_event_dispatch_completion(Event& event, EventDispatchCompletion& registration,
+                                      EventDispatchEndCallback callback, void* context) noexcept {
+    if (registration.owner_ != nullptr || callback == nullptr) {
+        return false;
+    }
+    for (DispatchScope* scope = g_dispatch_scope; scope != nullptr; scope = scope->previous) {
+        if (scope->event == &event) {
+            if (scope->closing) {
+                return false;
+            }
+            registration.owner_ = scope;
+            registration.callback_ = callback;
+            registration.context_ = context;
+            registration.next_ = scope->completions;
+            scope->completions = &registration;
+            return true;
+        }
+    }
+    return false;
+}
+
+void detach_event_dispatch_completion(EventDispatchCompletion& registration) noexcept {
+    auto* scope = static_cast<DispatchScope*>(registration.owner_);
+    if (scope != nullptr) {
+        EventDispatchCompletion** link = &scope->completions;
+        while (*link != nullptr && *link != &registration) {
+            link = &(*link)->next_;
+        }
+        if (*link == &registration) {
+            *link = registration.next_;
+        }
+    }
+    registration.owner_ = nullptr;
+    registration.next_ = nullptr;
+    registration.callback_ = nullptr;
+    registration.context_ = nullptr;
 }
 
 void event_dispatch_node_destroyed(const Node& node) {
-    for (DispatchScope* scope = g_dispatch_scope; scope != nullptr; scope = scope->previous) {
-        for (std::size_t index = 0; index < scope->path_count; ++index) {
-            if (scope->path[index] == &node) {
-                scope->path_node_destroyed = true;
-                if (scope->event != nullptr && scope->target == &node) {
-                    scope->event->target_destroyed_ = true;
-                    scope->event->target_ = nullptr;
-                    scope->event->current_target_ = nullptr;
-                    scope->event->event_phase_ = EventPhase::None;
+    auto note_destroyed_node = [&node](DispatchScope* scope, DispatchScope* DispatchScope::*previous) {
+        for (; scope != nullptr; scope = scope->*previous) {
+            for (std::size_t index = 0; index < scope->path_count; ++index) {
+                if (scope->path[index] == &node) {
+                    scope->path_node_destroyed = true;
+                    if (scope->event != nullptr && scope->target == &node) {
+                        scope->event->target_destroyed_ = true;
+                        scope->event->target_ = nullptr;
+                        scope->event->current_target_ = nullptr;
+                        scope->event->event_phase_ = EventPhase::None;
+                    }
+                    if (scope->event != nullptr && scope->event->current_target_ == &node) {
+                        scope->event->current_target_ = nullptr;
+                        scope->event->event_phase_ = EventPhase::None;
+                        scope->event->immediate_propagation_stopped_ = false;
+                    }
+                    break;
                 }
-                break;
             }
         }
-    }
+    };
+    note_destroyed_node(g_dispatch_scope, &DispatchScope::previous);
+    note_destroyed_node(g_closing_dispatch_scope, &DispatchScope::previous_closing);
 }
 
 } // namespace jellyframe

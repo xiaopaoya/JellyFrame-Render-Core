@@ -13,6 +13,27 @@ namespace {
 
 const std::string kEmpty;
 
+struct DestructionScope {
+    explicit DestructionScope(Node& node) noexcept : node(&node), previous(current) {
+        current = this;
+    }
+    ~DestructionScope() { current = previous; }
+
+    Node* node;
+    DestructionScope* previous;
+    static thread_local DestructionScope* current;
+};
+
+thread_local DestructionScope* DestructionScope::current = nullptr;
+
+bool is_destroying(const Node& node) noexcept {
+    for (const DestructionScope* scope = DestructionScope::current;
+         scope != nullptr; scope = scope->previous) {
+        if (scope->node == &node) return true;
+    }
+    return false;
+}
+
 // Collect before publishing observer changes. One vector retains every node,
 // using O(n) temporary pointers and O(n) time without recursive stack growth.
 std::vector<Node*> collect_subtree(Node& root) {
@@ -171,15 +192,22 @@ Node::Node(NodeType node_type)
     : type(node_type) {}
 
 Node::~Node() {
+    DestructionScope destruction_scope(*this);
     event_dispatch_node_destroyed(*this);
-    std::vector<DestroyObserverEntry> observers;
-    observers.swap(destroy_observers_);
-    for (const DestroyObserverEntry& entry : observers) {
+    const std::size_t drain_count = destroy_observers_.size();
+    for (std::size_t index = 0; index < drain_count && index < destroy_observers_.size(); ++index) {
+        const DestroyObserverEntry entry = destroy_observers_[index];
+        destroy_observers_[index] = {};
         if (entry.observer != nullptr) {
             entry.observer(*this, entry.context);
         }
     }
+    destroy_observers_.clear();
     destroy_node_list_iterative(children);
+}
+
+NodeLifetimeObserverRegistration::~NodeLifetimeObserverRegistration() {
+    if (owner_ != nullptr) owner_->remove_lifetime_observer(*this);
 }
 
 Node& Node::append_child(std::unique_ptr<Node> child) {
@@ -375,7 +403,18 @@ bool Node::has_class(const std::string& class_name) const {
 }
 
 void Node::set_destroy_observer(DestroyObserver observer, void* context) {
-    destroy_observers_.clear();
+    auto is_ordinary = [](const DestroyObserverEntry& entry) {
+        return entry.observer != &Node::dispatch_lifetime_observer;
+    };
+    if (is_destroying(*this)) {
+        for (DestroyObserverEntry& entry : destroy_observers_) {
+            if (is_ordinary(entry)) entry = {};
+        }
+    } else {
+        destroy_observers_.erase(
+            std::remove_if(destroy_observers_.begin(), destroy_observers_.end(), is_ordinary),
+            destroy_observers_.end());
+    }
     add_destroy_observer(observer, context);
 }
 
@@ -393,12 +432,65 @@ void Node::add_destroy_observer(DestroyObserver observer, void* context) {
 }
 
 void Node::remove_destroy_observer(DestroyObserver observer, void* context) {
-    destroy_observers_.erase(
-        std::remove_if(destroy_observers_.begin(), destroy_observers_.end(),
-                       [observer, context](const DestroyObserverEntry& entry) {
-                           return entry.observer == observer && entry.context == context;
-                       }),
-        destroy_observers_.end());
+    auto matches = [observer, context](const DestroyObserverEntry& entry) {
+        return entry.observer != &Node::dispatch_lifetime_observer &&
+               ((observer == nullptr && context == nullptr) ||
+                (entry.observer == observer && entry.context == context));
+    };
+    if (is_destroying(*this)) {
+        for (DestroyObserverEntry& entry : destroy_observers_) {
+            if (matches(entry)) entry = {};
+        }
+    } else {
+        destroy_observers_.erase(std::remove_if(destroy_observers_.begin(), destroy_observers_.end(), matches),
+                                 destroy_observers_.end());
+    }
+}
+
+bool Node::add_lifetime_observer(NodeLifetimeObserverRegistration& registration,
+                                NodeLifetimeObserverRegistration::Observer observer,
+                                void* context) noexcept {
+    if (is_destroying(*this) || observer == nullptr || registration.owner_ != nullptr ||
+        registration.observer_ != nullptr ||
+        registration.context_ != nullptr) {
+        return false;
+    }
+    try {
+        destroy_observers_.insert(destroy_observers_.begin(),
+                                  {&Node::dispatch_lifetime_observer, &registration});
+    } catch (...) {
+        return false;
+    }
+    registration.owner_ = this;
+    registration.observer_ = observer;
+    registration.context_ = context;
+    return true;
+}
+
+void Node::remove_lifetime_observer(NodeLifetimeObserverRegistration& registration) noexcept {
+    if (registration.owner_ != this) return;
+    auto matches = [&registration](const DestroyObserverEntry& entry) {
+        return entry.observer == &Node::dispatch_lifetime_observer && entry.context == &registration;
+    };
+    const auto found = std::find_if(destroy_observers_.begin(), destroy_observers_.end(), matches);
+    if (found != destroy_observers_.end()) {
+        if (is_destroying(*this)) *found = {};
+        else destroy_observers_.erase(found);
+    }
+    registration.owner_ = nullptr;
+    registration.observer_ = nullptr;
+    registration.context_ = nullptr;
+}
+
+void Node::dispatch_lifetime_observer(Node& node, void* context) noexcept {
+    auto& registration = *static_cast<NodeLifetimeObserverRegistration*>(context);
+    if (registration.owner_ != &node) return;
+    const auto observer = registration.observer_;
+    void* const observer_context = registration.context_;
+    registration.owner_ = nullptr;
+    registration.observer_ = nullptr;
+    registration.context_ = nullptr;
+    if (observer != nullptr) observer(node, observer_context);
 }
 
 void Node::set_mutation_observer(MutationObserver observer, void* context) {

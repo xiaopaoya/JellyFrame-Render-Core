@@ -8,6 +8,10 @@ SubmitEvent::SubmitEvent(const Node* submitter)
     : Event("submit", true, true),
       submitter_(submitter) {}
 
+EventKind SubmitEvent::kind() const {
+    return EventKind::Submit;
+}
+
 const Node* SubmitEvent::submitter() const {
     return submitter_;
 }
