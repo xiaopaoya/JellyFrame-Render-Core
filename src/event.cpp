@@ -217,6 +217,7 @@ struct EventTarget::ListenerStore {
 
     std::vector<ListenerGroup> groups;
     ListenerId next_listener_id = 1;
+    bool closing = false;
 
     std::size_t listener_count() const {
         std::size_t count = 0;
@@ -265,14 +266,17 @@ struct EventTarget::ListenerStore {
             return;
         }
         listener.removed = true;
-        if (listener.options.cleanup != nullptr) {
-            listener.options.cleanup(listener.options.cleanup_context);
-            listener.options.cleanup = nullptr;
-            listener.options.cleanup_context = nullptr;
-        }
+        const auto cleanup = listener.options.cleanup;
+        void* const context = listener.options.cleanup_context;
+        listener.options.cleanup = nullptr;
+        listener.options.cleanup_context = nullptr;
+        // The hook may add listeners, reallocating this entry's storage, or
+        // destroy the target. Never access listener after crossing the hook.
+        if (cleanup != nullptr) cleanup(context);
     }
 
     void mark_all_removed() {
+        closing = true;
         for (ListenerGroup& group : groups) {
             for (Listener& listener : group.listeners) {
                 mark_removed(listener);
@@ -304,6 +308,7 @@ EventTarget::ListenerId EventTarget::add_event_listener_bounded(const std::strin
     if (!listeners_) {
         listeners_ = std::make_shared<ListenerStore>();
     }
+    if (listeners_->closing) return 0;
     if (max_listeners > 0 && listeners_->listener_count() >= max_listeners) {
         return 0;
     }
@@ -337,7 +342,7 @@ bool EventTarget::remove_event_listener(ListenerId id) {
 }
 
 void EventTarget::invoke_event_listeners(Event& event, bool capture_phase) const {
-    if (!listeners_) {
+    if (!listeners_ || listeners_->closing) {
         return;
     }
 

@@ -530,6 +530,63 @@ void throwing_once_cleanup_preserves_listener_failure_and_idle_state() {
     }
 }
 
+struct GrowingCleanupProbe {
+    Node* target = nullptr;
+    int cleanups = 0;
+    int later_callbacks = 0;
+};
+
+void grow_listeners_from_cleanup(void* context) {
+    auto& probe = *static_cast<GrowingCleanupProbe*>(context);
+    ++probe.cleanups;
+    for (int index = 0; index < 32; ++index) {
+        probe.target->add_event_listener("grow-cleanup", [&probe](Event&) { ++probe.later_callbacks; });
+    }
+}
+
+void cleanup_can_reallocate_listener_storage_without_touching_old_entry() {
+    auto target = make_element("button");
+    GrowingCleanupProbe probe{target.get()};
+    target->add_event_listener("grow-cleanup", [](Event&) {},
+        {false, true, grow_listeners_from_cleanup, &probe});
+    Event event("grow-cleanup");
+    check(dispatch_event(*target, event), "cleanup growth dispatch completes");
+    check(probe.cleanups == 1 && probe.later_callbacks == 0 && target->event_listener_count() == 32,
+          "cleanup reallocates listener storage without running new callbacks in current snapshot");
+    check(dispatch_event(*target, event) && probe.later_callbacks == 32 && probe.cleanups == 1,
+          "new callbacks run on following dispatch; once cleanup is not repeated");
+}
+
+struct ClosingCleanupProbe {
+    EventTarget* target = nullptr;
+    EventTarget::ListenerId peer = 0;
+    int cleanup_calls = 0;
+    int admitted = 0;
+};
+
+void cleanup_during_target_teardown(void* context) {
+    auto& probe = *static_cast<ClosingCleanupProbe*>(context);
+    ++probe.cleanup_calls;
+    for (int index = 0; index < 32; ++index) {
+        if (probe.target->add_event_listener(index % 2 ? "existing" : "new", [](Event&) {}) != 0)
+            ++probe.admitted;
+    }
+    probe.target->remove_event_listener(probe.peer);
+}
+
+void teardown_cleanup_refuses_growth_and_tolerates_peer_removal() {
+    ClosingCleanupProbe probe;
+    auto target = std::make_unique<EventTarget>();
+    probe.target = target.get();
+    target->add_event_listener("existing", [](Event&) {},
+        {false, false, cleanup_during_target_teardown, &probe});
+    probe.peer = target->add_event_listener("peer", [](Event&) {},
+        {false, false, cleanup_during_target_teardown, &probe});
+    target.reset();
+    check(probe.cleanup_calls == 2 && probe.admitted == 0,
+          "teardown clears each hook once and refuses reentrant additions before iterator invalidation");
+}
+
 } // namespace
 
 int main() {
@@ -548,6 +605,8 @@ int main() {
         native_failure_stops_every_phase_without_default_prevention();
         nested_failure_and_destroyed_target_keep_independent_outcomes();
         throwing_once_cleanup_preserves_listener_failure_and_idle_state();
+        cleanup_can_reallocate_listener_storage_without_touching_old_entry();
+        teardown_cleanup_refuses_growth_and_tolerates_peer_removal();
     } catch (const std::exception& error) {
         std::cerr << "event test failed: " << error.what() << '\n';
         return 1;
