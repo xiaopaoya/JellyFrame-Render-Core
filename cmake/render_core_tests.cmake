@@ -34,6 +34,19 @@ add_executable(jellyframe_computed_block_layout_tests
     "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/computed_block_layout_tests.cpp")
 target_link_libraries(jellyframe_computed_block_layout_tests PRIVATE jellyframe_render_core)
 add_test(NAME jellyframe_computed_block_layout_tests COMMAND jellyframe_computed_block_layout_tests)
+add_executable(jellyframe_mixed_dimension_consumer_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/mixed_dimension_consumer_tests.cpp")
+target_link_libraries(jellyframe_mixed_dimension_consumer_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_mixed_dimension_consumer_tests COMMAND jellyframe_mixed_dimension_consumer_tests)
+add_executable(jellyframe_c5_mixed_rollback_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/c5_mixed_rollback_tests.cpp")
+target_link_libraries(jellyframe_c5_mixed_rollback_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_c5_mixed_rollback_tests COMMAND jellyframe_c5_mixed_rollback_tests)
+add_executable(jellyframe_c5_mixed_dimension_storage_oracle_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/c5_mixed_dimension_storage_oracle_tests.cpp")
+target_link_libraries(jellyframe_c5_mixed_dimension_storage_oracle_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_c5_mixed_dimension_storage_oracle_tests
+    COMMAND jellyframe_c5_mixed_dimension_storage_oracle_tests)
 add_executable(jellyframe_computed_size_storage_tests
     "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/computed_size_storage_tests.cpp")
 target_link_libraries(jellyframe_computed_size_storage_tests PRIVATE jellyframe_render_core)

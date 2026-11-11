@@ -8,8 +8,9 @@ FlexAutoMinKind flex_auto_min_kind(const Style& s,FlexMainAxis axis) {
     const int scalar=vertical?s.min_height:s.min_width;
     const int percent=vertical?s.min_height_percent:s.min_width_percent;
     if(scalar < -1 || percent < -1)return FlexAutoMinKind::Unresolved;
-    SizeKind kind;std::int64_t units=0;
-    if(scalar!=-1 || percent!=-1 || s.computed_sizes.get(vertical?SizeProperty::MinHeight:SizeProperty::MinWidth,kind,units))
+    SizeKind kind;std::int64_t units=0, percentage=0;
+    if(scalar!=-1 || percent!=-1 || s.computed_sizes.read_typed(
+        vertical?SizeProperty::MinHeight:SizeProperty::MinWidth,kind,units,percentage))
         return FlexAutoMinKind::NotAuto;
     if(s.overflow=="hidden" || s.overflow=="auto" || s.overflow=="scroll")return FlexAutoMinKind::Zero;
     if(s.overflow.empty() || s.overflow=="visible" || s.overflow=="clip")return FlexAutoMinKind::Content;

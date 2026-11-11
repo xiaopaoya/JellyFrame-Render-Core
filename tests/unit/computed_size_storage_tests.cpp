@@ -3,6 +3,7 @@
 #include "render_core/render_tree.h"
 #include "render_core/style_repaint.h"
 #include "../../src/computed_size_values.h"
+#include "../../src/computed_size_geometry.h"
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -63,10 +64,16 @@ void signed_inset_storage_contract() {
         "legacy getter refuses mixed percentage without changing outputs");
     const auto refused_allocations=allocations;
     for (unsigned index=0;index<7;++index) {
-        check(!storage.set_length_percentage(static_cast<SizeProperty>(index),1.25,25) && storage.equals(saved),
-            "original dimension slots refuse unsupported mixed units without changing state");
+        ComputedSizeStorage dimension;
+        check(dimension.set_length_percentage(static_cast<SizeProperty>(index),1.25,25),
+            "dimension slots accept bounded mixed units");
+        SizeKind typed_kind; std::int64_t length=0, percent=0;
+        check(dimension.read_typed(static_cast<SizeProperty>(index),typed_kind,length,percent) &&
+            typed_kind == SizeKind::LengthPercentage && length == 1250 && percent == 25000,
+            "typed mixed presence survives for dimensions");
+        check(!dimension.get(static_cast<SizeProperty>(index),typed_kind,length) && length == 1250,
+            "legacy getter continues to hide mixed dimensions");
     }
-    check(allocations==refused_allocations,"unsupported mixed dimension writes allocate nothing");
     check(!storage.set_length_percentage(SizeProperty::InsetTop,2147483648.0,0) && storage.equals(saved),"mixed length overflow refuses atomically");
     const auto copies=allocations;
     auto copy=storage;
@@ -124,6 +131,55 @@ int main() {
         check(!copy.computed_sizes.set(SizeProperty::FlexBasis,SizeKind::Percent,1.5),"unsupported flex percent slot refuses");
         check(apply_computed_size(style,SizeProperty::Width,SizeKind::Pixels,12),"integral override clears residue");
         check(style.computed_sizes.empty(),"last slot clear releases owner");
+
+        Style mixed;
+        mixed.width = 17;
+        mixed.width_percent = 23;
+        check(apply_computed_length_percentage(mixed,SizeProperty::Width,20,-50),
+              "signed mixed width publishes");
+        SizeKind mixed_kind;
+        std::int64_t mixed_length = 0, mixed_percent = 0;
+        check(mixed.computed_sizes.read_typed(SizeProperty::Width,mixed_kind,mixed_length,mixed_percent) &&
+              mixed_kind == SizeKind::LengthPercentage && mixed_length == 20000 && mixed_percent == -50000,
+              "signed mixed components publish together");
+        check(mixed.width == -1 && mixed.width_percent == -1 &&
+              (mixed.table_properties & table_sizing_provenance_bit(SizeProperty::Width)) != 0,
+              "mixed publisher clears scalar proxies and marks source provenance");
+        check(apply_computed_length_percentage(mixed,SizeProperty::Width,20,0) &&
+              mixed.computed_sizes.read_typed(SizeProperty::Width,mixed_kind,mixed_length,mixed_percent) &&
+              mixed_kind == SizeKind::LengthPercentage && mixed_length == 20000 && mixed_percent == 0,
+              "zero percentage remains a typed mixed value");
+        const auto mixed_before_invalid = mixed;
+        for (double invalid : {std::numeric_limits<double>::quiet_NaN(),
+                               std::numeric_limits<double>::infinity(), 2147483648.0}) {
+            check(!apply_computed_length_percentage(mixed,SizeProperty::Width,invalid,0) &&
+                  mixed.computed_sizes.equals(mixed_before_invalid.computed_sizes) &&
+                  mixed.width == mixed_before_invalid.width && mixed.width_percent == mixed_before_invalid.width_percent &&
+                  mixed.table_properties == mixed_before_invalid.table_properties,
+                  "invalid mixed publication leaves state unchanged");
+        }
+        check(apply_computed_length_percentage(mixed,SizeProperty::FlexBasis,10,25) &&
+              mixed.flex_basis == -1 && mixed.flex_basis_kind == FlexBasisKind::Length &&
+              mixed.computed_sizes.read_typed(SizeProperty::FlexBasis,mixed_kind,mixed_length,mixed_percent) &&
+              mixed_kind == SizeKind::LengthPercentage && mixed_length == 10000 && mixed_percent == 25000,
+              "mixed FlexBasis publishes typed components and disables its scalar proxy");
+        check(computed_size_units(mixed,SizeProperty::FlexBasis,100250) == 35063,
+              "mixed FlexBasis resolves against its definite main-axis basis");
+        check(!apply_computed_length_percentage(mixed,SizeProperty::InsetTop,10,20),
+              "mixed publisher refuses non-dimension properties");
+        auto mixed_copy = mixed;
+        fail_allocation = true;
+        failed = false;
+        try { apply_computed_length_percentage(mixed_copy,SizeProperty::Height,10,0); }
+        catch (const std::bad_alloc&) { failed = true; }
+        fail_allocation = false;
+        check(failed && mixed_copy.computed_sizes.equals(mixed.computed_sizes) &&
+              mixed_copy.height == mixed.height && mixed_copy.height_percent == mixed.height_percent &&
+              mixed_copy.table_properties == mixed.table_properties,
+              "mixed allocation failure leaves style and provenance unchanged");
+        check(apply_computed_size(mixed,SizeProperty::Width,SizeKind::Pixels,12) &&
+              (mixed.table_properties & table_sizing_provenance_bit(SizeProperty::Width)) != 0,
+              "existing scalar publisher behavior remains unchanged");
         auto moved = std::move(copy.computed_sizes);
         check(copy.computed_sizes.empty() && units(moved,SizeProperty::Height,SizeKind::Percent)==37500,"move transfers owner");
         ComputedSizeStorage independent;

@@ -7,6 +7,7 @@
 #include "render_core/render_tree.h"
 #include "render_core/style.h"
 #include "render_core/text_backend.h"
+#include "../../src/css_length_percentage.h"
 
 #include <array>
 #include <iostream>
@@ -21,6 +22,21 @@ namespace {
 void check(bool condition, const char* message) {
     if (!condition) {
         throw std::runtime_error(message);
+    }
+}
+
+void bounded_length_percentage_calc_parser() {
+    detail::ParsedLengthPercentage parsed{91, 92};
+    check(detail::parse_length_percentage_calc("calc(10px - 50%)", parsed) && parsed.length_pixels == 10 && parsed.percentage == -50,
+          "bounded mixed calc retains signed independent components");
+    check(detail::parse_length_percentage_calc("calc(20px + 0%)", parsed) && parsed.length_pixels == 20 && parsed.percentage == 0,
+          "bounded mixed calc preserves explicit zero percent");
+    check(detail::parse_length_percentage_calc("calc(1in + 2%)", parsed) && parsed.length_pixels == 96 && parsed.percentage == 2,
+          "bounded mixed calc converts supported absolute units");
+    for (const auto value : {"calc(10px)", "calc(1px + 2px + 3%)", "calc(1px + min(2px, 3%))", "calc(1px+2%)", "calc(1px * 2%)", "calc(1px + 2%)junk"}) {
+        parsed = {91, 92};
+        if (detail::parse_length_percentage_calc(value, parsed) || parsed.length_pixels != 91 || parsed.percentage != 92)
+            throw std::runtime_error(std::string("invalid mixed calc accepted or mutated: ") + value);
     }
 }
 
@@ -1958,6 +1974,7 @@ void text_overflow_is_specified_but_not_inherited_by_nested_elements() {
 
 int main() {
     try {
+        bounded_length_percentage_calc_parser();
         parses_comments_strings_and_functions();
         splits_selector_lists();
         expands_single_level_explicit_css_nesting();

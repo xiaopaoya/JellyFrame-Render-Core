@@ -1,4 +1,6 @@
 #include <render_core/css_parser.h>
+#include <render_core/computed_size_storage.h>
+#include <render_core/diagnostics.h>
 #include <render_core/feature_config.h>
 #include <render_core/font_resource.h>
 #include <render_core/html_parser.h>
@@ -80,6 +82,13 @@ const LayoutBox* find_box(const LayoutBox& root, const char* id) {
     if (root.node && root.node->attribute("id") == std::string(id)) return &root;
     for (const auto& child : root.children)
         if (const auto* found = find_box(*child, id)) return found;
+    return nullptr;
+}
+
+RenderObject* find_object(RenderObject& root, const char* id) {
+    if (root.node && root.node->attribute("id") == std::string(id)) return &root;
+    for (const auto& child : root.children)
+        if (auto* found = find_object(*child, id)) return found;
     return nullptr;
 }
 
@@ -216,6 +225,118 @@ void check_cropped_pass_budget(TextSystem& text_system) {
             bounded_item->rect.height == normal_item->rect.height && bounded_item->rect.height > 0,
             "Installed cropped zero-query allowance must preserve ordinary Block text layout");
 }
+
+void check_installed_block_mixed_dimensions() {
+    const std::string html = "<div id='parent'><div id='mixed'></div></div>";
+    const std::string base_css = "*{margin:0;padding:0;border:0}"
+        "#parent{width:200px;height:100px}";
+
+    StyleResolver calc_resolver(CssParser{}.parse(base_css +
+        "#mixed{width:calc(20px + 50%)}"));
+    auto calc_dom = HtmlParser{}.parse(html);
+    auto calc_tree = RenderTreeBuilder(calc_resolver).build(*calc_dom);
+    const auto* calc_item = find_object(*calc_tree, "mixed");
+    detail::SizeKind calc_kind = detail::SizeKind::Pixels;
+    std::int64_t calc_length = 0;
+    std::int64_t calc_percentage = 0;
+    require(calc_item && !calc_item->style.computed_sizes.read_typed(
+                detail::SizeProperty::Width, calc_kind, calc_length, calc_percentage) &&
+            calc_kind != detail::SizeKind::LengthPercentage,
+            "Installed CSS calc declaration must not publish typed mixed-dimension storage");
+
+    StyleResolver mixed_resolver(CssParser{}.parse(base_css));
+    auto mixed_dom = HtmlParser{}.parse(html);
+    auto mixed_tree = RenderTreeBuilder(mixed_resolver).build(*mixed_dom);
+    auto* mixed_item = find_object(*mixed_tree, "mixed");
+    require(mixed_item != nullptr, "Installed mixed Block fixture item exists");
+    auto publish = [&](detail::SizeProperty property, double length, double percentage,
+                       int& scalar, int& percentage_proxy) {
+        if (!mixed_item->style.computed_sizes.set_length_percentage(property, length, percentage))
+            return false;
+        scalar = -1;
+        percentage_proxy = -1;
+        return true;
+    };
+    require(publish(detail::SizeProperty::Width, 50, 50,
+                    mixed_item->style.width, mixed_item->style.width_percent) &&
+            publish(detail::SizeProperty::MinWidth, 80, -50,
+                    mixed_item->style.min_width, mixed_item->style.min_width_percent) &&
+            publish(detail::SizeProperty::MaxWidth, 30, 50,
+                    mixed_item->style.max_width, mixed_item->style.max_width_percent) &&
+            publish(detail::SizeProperty::Height, 20, 50,
+                    mixed_item->style.height, mixed_item->style.height_percent) &&
+            publish(detail::SizeProperty::MinHeight, 80, -50,
+                    mixed_item->style.min_height, mixed_item->style.min_height_percent) &&
+            publish(detail::SizeProperty::MaxHeight, 50, 50,
+                    mixed_item->style.max_height, mixed_item->style.max_height_percent),
+            "Installed package publishes all six mixed Block dimensions through typed storage");
+    const auto mixed_layout = LayoutEngine(mixed_resolver).layout(*mixed_tree, 320, 240);
+    const auto* mixed_box = find_box(*mixed_layout, "mixed");
+    require(mixed_box && mixed_box->rect.width == 130 && mixed_box->rect.height == 70,
+            "Installed Block consumer resolves signed mixed ranges in the cropped-capable profile");
+}
+
+void check_installed_grid_vertical_refusal() {
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    const std::string html =
+        "<main id='grid'><div id='mixed'></div><div id='other'></div></main>";
+    const std::string css = "*{margin:0;padding:0;border:0}"
+        "#grid{display:grid;width:200px;grid-template-columns:100px 100px}"
+        "#mixed,#other{height:0px}";
+    const auto layout_fixture = [&](bool inject_mixed, VectorDiagnosticSink* diagnostics) {
+        auto dom = HtmlParser{}.parse(html);
+        StyleResolver resolver(CssParser{}.parse(css));
+        auto tree = RenderTreeBuilder(resolver).build(*dom);
+        auto* mixed = find_object(*tree, "mixed");
+        require(mixed != nullptr, "Installed Grid refusal fixture item exists");
+        if (inject_mixed) {
+            require(mixed->style.computed_sizes.set_length_percentage(
+                        detail::SizeProperty::Height, 20, 50),
+                    "Installed Grid mixed height publishes through typed storage");
+            mixed->style.height = -1;
+            mixed->style.height_percent = -1;
+        }
+        LayoutEngineOptions options;
+        options.diagnostics = diagnostics;
+        auto boxes = LayoutEngine(resolver, {}, options).layout(*tree, 320, 240);
+        return std::make_pair(std::move(dom), std::move(boxes));
+    };
+
+    auto reference = layout_fixture(false, nullptr);
+    VectorDiagnosticSink diagnostics;
+    auto refused = layout_fixture(true, &diagnostics);
+    const auto* reference_mixed = find_box(*reference.second, "mixed");
+    const auto* refused_mixed = find_box(*refused.second, "mixed");
+    const auto same_vertical_geometry = [](const Rect& left, const Rect& right) {
+        return left.y == right.y && left.height == right.height;
+    };
+    require(reference_mixed && refused_mixed &&
+            same_vertical_geometry(reference_mixed->rect, refused_mixed->rect),
+            "Installed Grid vertical refusal preserves the item's equivalent pixel geometry");
+    const auto* refused_grid = find_box(*refused.second, "grid");
+    const auto* refused_other = find_box(*refused.second, "other");
+    require(refused_grid && refused_other &&
+            refused_grid->rect.x == 0 && refused_grid->rect.y == 0 &&
+            refused_grid->rect.width == 0 && refused_grid->rect.height == 0 &&
+            refused_mixed->rect.x == 0 && refused_mixed->rect.y == 0 &&
+            refused_mixed->rect.width == 0 && refused_mixed->rect.height == 0 &&
+            refused_other->rect.x == 0 && refused_other->rect.y == 0 &&
+            refused_other->rect.width == 0 && refused_other->rect.height == 0,
+            "Installed Grid refusal leaves the container, item and sibling at the documented zero-geometry boundary");
+    detail::SizeKind kind = detail::SizeKind::Pixels;
+    std::int64_t length = 0;
+    std::int64_t percentage = 0;
+    require(refused_mixed->style.computed_sizes.read_typed(
+                detail::SizeProperty::Height, kind, length, percentage) &&
+            kind == detail::SizeKind::LengthPercentage &&
+            refused_mixed->style.height == -1 && refused_mixed->style.height_percent == -1,
+            "Installed Grid refusal keeps the authored typed height and scalar proxies intact");
+    require(diagnostics.size() == 1 &&
+            diagnostics.diagnostics().front().stage == DiagnosticStage::Layout &&
+            diagnostics.diagnostics().front().code == "unsupported-mixed-dimension-layout",
+            "Installed Grid refusal exposes the exact public layout diagnostic");
+#endif
+}
 } // namespace
 
 int main() {
@@ -228,17 +349,19 @@ int main() {
         TextSystem text_system;
         require(text_system.bind(faces, std::size(faces)) == TextSystemStatus::Ok,
                 "Installed consumer TextSystem bind failed");
+        check_installed_block_mixed_dimensions();
 
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+        check_installed_grid_vertical_refusal();
         check_auto_min(text_system);
         check_percentage_minimum(text_system);
         check_grid_max_content(text_system);
         check_calc_refusal(text_system);
         check_pass_budget(text_system);
-        std::cout << "Installed ABI4 Flex auto-min, percentage min, Grid max-content and calc refusal passed\n";
+        std::cout << "Installed ABI4 mixed Block, Flex auto-min, percentage min, Grid max-content and calc refusal passed\n";
 #else
         check_cropped_pass_budget(text_system);
-        std::cout << "Installed ABI4 cropped profile: package identity, Block text layout and fresh query statistics passed\n";
+        std::cout << "Installed ABI4 cropped profile: mixed Block, package identity, Block text layout and fresh query statistics passed\n";
 #endif
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

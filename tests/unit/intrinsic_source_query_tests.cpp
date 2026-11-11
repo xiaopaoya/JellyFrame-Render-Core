@@ -1,5 +1,6 @@
 #include "../../src/intrinsic_source_query.h"
 #include "../../src/intrinsic_source_query_height.h"
+#include "../../src/computed_size_values.h"
 #include "render_core/css_parser.h"
 #include "render_core/html_parser.h"
 
@@ -161,6 +162,37 @@ IntrinsicSourceWidthResult query(const Fixture& fixture, const TextSystem& text_
                                  IntrinsicSourceQueryLimits limits = {}) {
     return query_intrinsic_source_width(fixture.root_box, text_system,
         IntrinsicPercentageBasis{IntrinsicPercentageBasisKind::CyclicSameAxis, -1}, limits);
+}
+
+void cyclic_mixed_preferred_width_is_wholly_auto(const TextSystem& system) {
+    Fixture reference_fixture;
+    reference_fixture.append_text(reference_fixture.root_box, reference_fixture.root_node, "AB CD");
+    const auto reference = query(reference_fixture, system);
+    check(reference.status == IntrinsicSourceStatus::Complete,
+          "cyclic mixed-width comparison has a complete auto reference");
+
+    for (double percentage : {50.0, 0.0}) {
+        Fixture mixed_fixture;
+        mixed_fixture.append_text(mixed_fixture.root_box, mixed_fixture.root_node, "AB CD");
+        check(apply_computed_length_percentage(mixed_fixture.root_box.style,
+                  SizeProperty::Width, 900, percentage),
+              "cyclic mixed preferred width retains percentage-bearing provenance");
+        const auto mixed = query(mixed_fixture, system);
+        check(mixed.status == IntrinsicSourceStatus::Complete &&
+              mixed.min_content_border_box_units == reference.min_content_border_box_units &&
+              mixed.max_content_border_box_units == reference.max_content_border_box_units,
+              "cyclic mixed preferred width, including zero coefficient, is wholly auto");
+    }
+
+    Fixture mixed_minimum;
+    auto mixed_minimum_pair = mixed_minimum.append_element(
+        mixed_minimum.root_box, mixed_minimum.root_node, "div", Display::Block);
+    auto& mixed_minimum_child = mixed_minimum_pair.first;
+    mixed_minimum.append_text(mixed_minimum_child, mixed_minimum_pair.second, "AB CD");
+    check(apply_computed_length_percentage(mixed_minimum_child.style,
+              SizeProperty::MinWidth, 900, 50) &&
+          query(mixed_minimum, system).status == IntrinsicSourceStatus::Unsupported,
+          "cyclic mixed min-width remains explicitly unsupported");
 }
 
 void percentage_basis_contract(const TextSystem& text_system) {
@@ -1276,6 +1308,7 @@ int main() {
         exact_limits_and_cancellation(text_system);
         shared_query_usage_saturates_atomically();
         pass_ledger_query_and_scratch_limits(text_system);
+        cyclic_mixed_preferred_width_is_wholly_auto(text_system);
         layout_pass_intrinsic_budget(text_system);
         flex_auto_min_consumer(text_system);
         percentage_basis_contract(text_system);

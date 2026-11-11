@@ -68,7 +68,7 @@ bool ComputedSizeStorage::set(SizeProperty property, SizeKind kind, double value
 bool ComputedSizeStorage::set_length_percentage(
     SizeProperty property, double length_pixels, double percentage) {
     const auto index = static_cast<unsigned>(property);
-    if (index < 7 || index >= 11 || !std::isfinite(length_pixels) || !std::isfinite(percentage) ||
+    if (index >= 11 || !std::isfinite(length_pixels) || !std::isfinite(percentage) ||
         std::abs(length_pixels) > std::numeric_limits<int>::max() ||
         std::abs(percentage) > 1000.0) return false;
     std::int64_t length_units = 0;
@@ -124,6 +124,11 @@ bool ComputedSizeStorage::get(SizeProperty property, SizeKind& kind, std::int64_
     units = data_->slots[index].units;
     percentage_units = data_->slots[index].percentage_units;
     return true;
+}
+bool ComputedSizeStorage::read_typed(SizeProperty property, SizeKind& kind,
+                                     std::int64_t& units,
+                                     std::int64_t& percentage_units) const noexcept {
+    return get(property, kind, units, percentage_units);
 }
 bool ComputedSizeStorage::equals(const ComputedSizeStorage& other) const noexcept {
     if (data_ == other.data_) return true;
