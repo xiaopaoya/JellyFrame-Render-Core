@@ -416,6 +416,120 @@ void closing_completion_rejects_same_event_and_allows_distinct_event() {
           "distinct Event dispatch from completion succeeds");
 }
 
+struct FailureCompletionProbe {
+    int calls = 0;
+    bool saw_failure = false;
+    bool saw_final_state = false;
+    bool closing_failure_result = true;
+};
+
+void observe_dispatch_failure(Event& event, void* context) noexcept {
+    auto& probe = *static_cast<FailureCompletionProbe*>(context);
+    ++probe.calls;
+    probe.saw_failure = event.dispatch_failed();
+    probe.saw_final_state = event.current_target() == nullptr &&
+        event.event_phase() == EventPhase::None && !event.default_prevented();
+    probe.closing_failure_result = fail_event_dispatch(event);
+}
+
+void native_failure_stops_every_phase_without_default_prevention() {
+    for (bool cancelable : {false, true}) {
+        for (int failing_phase = 0; failing_phase != 4; ++failing_phase) {
+            auto root = make_element("root");
+            Node& target = append_element(*root, "button");
+            Event event("native-failure", true, cancelable);
+            check(!fail_event_dispatch(event) && !event.dispatch_failed(),
+                  "inactive failure request leaves Event unchanged");
+            EventDispatchCompletion completion;
+            FailureCompletionProbe probe;
+            std::vector<int> observed;
+            bool inject_failure = true;
+            auto invoke = [&](int phase, Event& current) {
+                observed.push_back(phase);
+                if (phase == 0) {
+                    check(attach_event_dispatch_completion(current, completion,
+                          observe_dispatch_failure, &probe), "failure completion enrolled");
+                }
+                if (inject_failure && phase == failing_phase) {
+                    check(fail_event_dispatch(current), "native failure admitted during active phase");
+                    check(fail_event_dispatch(current), "repeated failure is idempotent");
+                }
+            };
+            root->add_event_listener(event.type(), [&](Event& current) { invoke(0, current); }, {true, false});
+            target.add_event_listener(event.type(), [&](Event& current) { invoke(1, current); }, {true, false});
+            target.add_event_listener(event.type(), [&](Event& current) { invoke(2, current); });
+            root->add_event_listener(event.type(), [&](Event& current) { invoke(3, current); });
+            root->add_event_listener(event.type(), [&](Event&) { observed.push_back(4); });
+            check(!dispatch_event(target, event), "native failure returns false even for noncancelable Event");
+            check(observed.size() == static_cast<std::size_t>(failing_phase + 1),
+                  "native failure stops target, bubble and later same-node callbacks");
+            check(event.dispatch_failed() && !event.default_prevented(),
+                  "native failure has distinct snapshot from default prevention");
+            check(probe.calls == 1 && probe.saw_failure && probe.saw_final_state &&
+                  !probe.closing_failure_result, "completion observes finalized immutable failure");
+            check(!fail_event_dispatch(event), "completed Event failure request is refused");
+            inject_failure = false;
+            observed.clear();
+            check(dispatch_event(target, event) && !event.dispatch_failed(),
+                  "normal redispatch resets prior native failure");
+            check(observed.size() == 5 && probe.calls == 2 && !probe.saw_failure &&
+                  !probe.closing_failure_result, "normal completion cannot turn success into failure");
+        }
+    }
+}
+
+void nested_failure_and_destroyed_target_keep_independent_outcomes() {
+    auto target = make_element("target");
+    target->add_event_listener("inner", [](Event& event) {
+        check(fail_event_dispatch(event), "nested failure admitted");
+    });
+    target->add_event_listener("outer", [&](Event& event) {
+        Event inner("inner", true, false);
+        check(!dispatch_event(*target, inner) && inner.dispatch_failed(), "nested noncancelable failure returned");
+        check(!event.dispatch_failed(), "inner failure does not poison outer Event");
+    });
+    Event outer("outer");
+    check(dispatch_event(*target, outer), "outer dispatch succeeds after inner failure");
+
+    target->add_event_listener("destroy", [&](Event& event) {
+        check(fail_event_dispatch(event), "failure recorded before target destruction");
+        target.reset();
+    });
+    Event destroyed("destroy", true, false);
+    check(!dispatch_event(*target, destroyed) && destroyed.dispatch_failed() &&
+          destroyed.target_destroyed(), "destroyed-path early return preserves native failure");
+}
+
+void throwing_once_cleanup_preserves_listener_failure_and_idle_state() {
+    for (bool listener_throws : {false, true}) {
+        auto target = make_element("button");
+        int cleanup_calls = 0;
+        EventListenerOptions options;
+        options.once = true;
+        options.cleanup_context = &cleanup_calls;
+        options.cleanup = [](void* context) {
+            ++*static_cast<int*>(context);
+            throw std::runtime_error("cleanup failure");
+        };
+        target->add_event_listener("cleanup-throws", [&](Event&) {
+            if (listener_throws) throw std::runtime_error("listener failure");
+        }, options);
+        Event event("cleanup-throws");
+        bool propagated_expected = false;
+        try { dispatch_event(*target, event); }
+        catch (const std::runtime_error& error) {
+            propagated_expected = std::string(error.what()) ==
+                (listener_throws ? "listener failure" : "cleanup failure");
+        }
+        check(propagated_expected && cleanup_calls == 1,
+              "unwind preserves original listener exception; normal cleanup propagates its own");
+        check(event.current_target() == nullptr && event.event_phase() == EventPhase::None,
+              "throwing once cleanup leaves finalized transient state");
+        check(target->event_listener_count() == 0 && dispatch_event(*target, event) && cleanup_calls == 1,
+              "throwing cleanup removes once listener exactly once and permits redispatch");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -431,6 +545,9 @@ int main() {
         completion_detach_and_destroyed_current_target_are_safe();
         completion_callback_can_release_its_own_registration();
         closing_completion_rejects_same_event_and_allows_distinct_event();
+        native_failure_stops_every_phase_without_default_prevention();
+        nested_failure_and_destroyed_target_keep_independent_outcomes();
+        throwing_once_cleanup_preserves_listener_failure_and_idle_state();
     } catch (const std::exception& error) {
         std::cerr << "event test failed: " << error.what() << '\n';
         return 1;

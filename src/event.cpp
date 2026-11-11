@@ -115,6 +115,10 @@ bool Event::target_destroyed() const {
     return target_destroyed_;
 }
 
+bool Event::dispatch_failed() const noexcept {
+    return dispatch_failed_;
+}
+
 bool Event::propagation_stopped() const {
     return propagation_stopped_;
 }
@@ -158,6 +162,7 @@ void Event::reset_for_dispatch(const Node& target) {
     propagation_stopped_ = false;
     immediate_propagation_stopped_ = false;
     target_destroyed_ = false;
+    dispatch_failed_ = false;
 }
 
 void Event::set_current_target(const Node& current_target, EventPhase phase) {
@@ -376,17 +381,19 @@ void EventTarget::invoke_event_listeners(Event& event, bool capture_phase) const
                 ListenerStore::mark_removed(*once_listener);
             }
         };
-        try {
-            callback(event);
-        } catch (...) {
-            if (once) {
-                try {
-                    finish_once();
-                } catch (...) {
+        // Unwind cleanup preserves the original listener exception, even when
+        // an optional cleanup hook throws. Normal cleanup still propagates.
+        struct OnceUnwindCleanup {
+            const decltype(finish_once)& finish;
+            bool armed;
+            ~OnceUnwindCleanup() noexcept {
+                if (armed) {
+                    try { finish(); } catch (...) {}
                 }
             }
-            throw;
-        }
+        } unwind_cleanup{finish_once, once};
+        callback(event);
+        unwind_cleanup.armed = false;
         if (once) {
             finish_once();
         }
@@ -448,11 +455,11 @@ bool dispatch_event(const Node& target, Event& event) {
         node->invoke_event_listeners(event, true);
         if (dispatch_scope.path_node_destroyed()) {
             event.clear_current_target();
-            return !event.default_prevented();
+            return !event.default_prevented() && !event.dispatch_failed();
         }
         if (event.propagation_stopped()) {
             event.clear_current_target();
-            return !event.default_prevented();
+            return !event.default_prevented() && !event.dispatch_failed();
         }
     }
 
@@ -460,13 +467,13 @@ bool dispatch_event(const Node& target, Event& event) {
     target.invoke_event_listeners(event, true);
     if (dispatch_scope.path_node_destroyed()) {
         event.clear_current_target();
-        return !event.default_prevented();
+        return !event.default_prevented() && !event.dispatch_failed();
     }
     if (!event.immediate_propagation_stopped()) {
         target.invoke_event_listeners(event, false);
         if (dispatch_scope.path_node_destroyed()) {
             event.clear_current_target();
-            return !event.default_prevented();
+            return !event.default_prevented() && !event.dispatch_failed();
         }
     }
 
@@ -477,7 +484,7 @@ bool dispatch_event(const Node& target, Event& event) {
             node->invoke_event_listeners(event, false);
             if (dispatch_scope.path_node_destroyed()) {
                 event.clear_current_target();
-                return !event.default_prevented();
+                return !event.default_prevented() && !event.dispatch_failed();
             }
             if (event.propagation_stopped()) {
                 break;
@@ -486,7 +493,19 @@ bool dispatch_event(const Node& target, Event& event) {
     }
 
     event.clear_current_target();
-    return !event.default_prevented();
+    return !event.default_prevented() && !event.dispatch_failed();
+}
+
+bool fail_event_dispatch(Event& event) noexcept {
+    for (DispatchScope* scope = g_dispatch_scope; scope != nullptr; scope = scope->previous) {
+        if (scope->event == &event && !scope->closing) {
+            event.dispatch_failed_ = true;
+            event.propagation_stopped_ = true;
+            event.immediate_propagation_stopped_ = true;
+            return true;
+        }
+    }
+    return false;
 }
 
 EventDispatchCompletion::~EventDispatchCompletion() {

@@ -8,6 +8,7 @@
 namespace jellyframe {
 
 #define JELLYFRAME_EVENT_DISPATCH_COMPLETION_API 1
+#define JELLYFRAME_EVENT_DISPATCH_FAILURE_API 1
 
 struct Node;
 class Event;
@@ -65,6 +66,7 @@ public:
     bool cancelable() const;
     bool default_prevented() const;
     bool target_destroyed() const;
+    bool dispatch_failed() const noexcept;
     bool propagation_stopped() const;
     bool immediate_propagation_stopped() const;
 
@@ -80,6 +82,7 @@ private:
     friend class EventTarget;
     friend struct EventDispatchScopeAccess;
     friend bool dispatch_event(const Node& target, Event& event);
+    friend bool fail_event_dispatch(Event& event) noexcept;
     friend void event_dispatch_node_destroyed(const Node& node);
 
     std::string type_;
@@ -89,6 +92,7 @@ private:
     bool propagation_stopped_ = false;
     bool immediate_propagation_stopped_ = false;
     bool target_destroyed_ = false;
+    bool dispatch_failed_ = false;
     const Node* target_ = nullptr;
     const Node* current_target_ = nullptr;
     EventPhase event_phase_ = EventPhase::None;
@@ -153,8 +157,13 @@ private:
 };
 
 bool dispatch_event(const Node& target, Event& event);
-// dispatch_event returns false both for preventDefault() and for same-Event
-// recursive dispatch refusal. Enrollment returns false when no matching
+// Native infrastructure failure terminates the remaining dispatch, independently
+// of cancelable/defaultPrevented. Only an active, non-closing dispatch can fail.
+// Earlier callbacks and their side effects are not rolled back. The failure
+// snapshot remains until the next dispatch; dispatch_event returns false.
+bool fail_event_dispatch(Event& event) noexcept;
+// dispatch_event returns false for preventDefault(), native dispatch failure,
+// and same-Event recursive dispatch refusal. Enrollment returns false when no matching
 // dispatch is active or the registration is already armed. Completion callbacks
 // run LIFO after Event transient state is finalized and the scope is unlinked.
 // Same-thread use is required.
