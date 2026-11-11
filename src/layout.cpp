@@ -1231,7 +1231,7 @@ bool LayoutEngine::layout_precise_flex(LayoutBox& box, std::int64_t width, std::
         items.push_back(item);cross.push_back(0);
     }
     const auto gap=static_cast<std::int64_t>(std::max(0,row?box.style.column_gap:box.style.row_gap))*1000;
-    if (resolve_flex_lengths_precise(items,main_size,gap,[](std::size_t){}) != FlexLengthPrecisionStatus::Success) return false;
+    if (resolve_flex_lengths_precise(items,main_size,gap,[](std::size_t){return FlexLengthChargeDecision::Continue;}) != FlexLengthPrecisionStatus::Success) return false;
     const auto make_context = [&](const FlexLengthPrecisionItem& item, std::int64_t cx, std::int64_t cy) {
         PreciseBoxContext context{width,fixed_height,cx,cy};
         context.border_origin=true;

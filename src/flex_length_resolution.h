@@ -11,6 +11,8 @@
 
 namespace jellyframe::detail {
 
+enum class FlexLengthChargeDecision { Continue, ResourceLimit };
+
 // All state belongs to one layout pass. Sizes are border-box sizes; shrink
 // weights use the separately recorded nonnegative inner flex base size.
 inline std::int64_t flex_length_coordinate_maximum(const FlexLengthPrecisionItem&) {
@@ -87,31 +89,36 @@ template<class Item> struct FlexLengthRange {
 
 // Intrinsic planning uses bounded subranges and charges every solver scan.
 // Ordinary layout instantiates the same algorithm with a no-op work callback.
+// A refused charge stops before its scan, but earlier scans may have changed
+// scratch items. Callers must discard a refused plan before publishing geometry.
+// The charge callback owns the ledger and must reject before exceeding its cap.
 template<class Range, class Coordinate, class Charge>
-inline void resolve_flex_lengths(Range& items, Coordinate main_size, Coordinate gap, const Charge& charge) {
-    if (items.empty()) return;
+inline bool resolve_flex_lengths(Range& items, Coordinate main_size, Coordinate gap, const Charge& charge) {
+    if (items.empty()) return true;
     std::int64_t hypothetical_sum = 0;
     std::int64_t available = main_size - static_cast<std::int64_t>(std::max<Coordinate>(0, gap)) * static_cast<std::int64_t>(items.size() - 1);
-    charge(items.size());
+    if (charge(items.size())!=FlexLengthChargeDecision::Continue) return false;
     for (auto& item : items) {
         available -= item.margins;
         hypothetical_sum += item.hypothetical;
     }
     const bool grow = hypothetical_sum < available;
-    charge(items.size());
+    if (charge(items.size())!=FlexLengthChargeDecision::Continue) return false;
     for (auto& item : items) {
         item.target = item.base;
         const int factor = grow ? item.child->style.flex_grow : item.child->style.flex_shrink;
         item.frozen = factor <= 0 || (grow ? item.base > item.hypothetical : item.base < item.hypothetical);
         if (item.frozen) item.target = item.hypothetical;
     }
-    const auto free_space = [&]() {
+    const auto free_space = [&](std::int64_t& result) {
         std::int64_t remaining = available;
-        charge(items.size());
+        if (charge(items.size())!=FlexLengthChargeDecision::Continue) return false;
         for (const auto& item : items) remaining -= item.frozen ? item.target : item.base;
-        return remaining;
+        result = remaining;
+        return true;
     };
-    const std::int64_t initial_free = free_space();
+    std::int64_t initial_free = 0;
+    if (!free_space(initial_free)) return false;
     // At least one item is frozen on each nonterminal iteration.
     for (std::size_t iteration = 0; iteration <= items.size(); ++iteration) {
         std::uint64_t factor_sum = 0, weight_sum = 0, weight_high = 0;
@@ -119,7 +126,7 @@ inline void resolve_flex_lengths(Range& items, Coordinate main_size, Coordinate 
         // widened integers or floating subtraction of almost equal weights.
         // A size_t-count of INT_MAX-squared weights fits within these limbs.
         std::size_t unfrozen = 0, weighted_items = 0;
-        charge(items.size());
+        if (charge(items.size())!=FlexLengthChargeDecision::Continue) return false;
         for (const auto& item : items) if (!item.frozen) {
             ++unfrozen;
             factor_sum += static_cast<std::uint64_t>(std::max(0,
@@ -131,8 +138,9 @@ inline void resolve_flex_lengths(Range& items, Coordinate main_size, Coordinate 
             weight_high += weight.high;
             if (weight_sum < previous_sum) ++weight_high;
         }
-        if (unfrozen == 0) return;
-        std::int64_t remaining = free_space();
+        if (unfrozen == 0) return true;
+        std::int64_t remaining = 0;
+        if (!free_space(remaining)) return false;
         if (factor_sum < 1000) {
             const std::uint64_t magnitude = static_cast<std::uint64_t>(initial_free < 0 ? -initial_free : initial_free);
             const auto partial = static_cast<std::int64_t>(flex_mul_div(magnitude, factor_sum, 1000));
@@ -142,7 +150,7 @@ inline void resolve_flex_lengths(Range& items, Coordinate main_size, Coordinate 
         std::uint64_t remaining_weight = weight_sum;
         std::uint64_t remaining_weight_high = weight_high;
         std::int64_t total_violation = 0;
-        charge(items.size());
+        if (charge(items.size())!=FlexLengthChargeDecision::Continue) return false;
         for (auto& item : items) if (!item.frozen) {
             const auto weight = flex_length_weight_parts(item, grow);
             std::uint64_t share = 0;
@@ -166,18 +174,19 @@ inline void resolve_flex_lengths(Range& items, Coordinate main_size, Coordinate 
             item.violation = violation > 0 ? 1 : violation < 0 ? -1 : 0;
             total_violation += violation;
         }
-        charge(items.size());
+        if (charge(items.size())!=FlexLengthChargeDecision::Continue) return false;
         for (auto& item : items) if (!item.frozen && (total_violation == 0 ||
             (total_violation > 0 ? item.violation > 0 : item.violation < 0))) item.frozen = true;
     }
+    return true;
 }
 
 // One fixed callback type shares the checked solver across caller lambdas.
 // Records retain direct array access; no per-item type erasure is needed.
 struct FlexLengthPrecisionCharge {
     const void* context = nullptr;
-    void (*charge)(const void*,std::size_t) = nullptr;
-    void operator()(std::size_t count) const { charge(context,count); }
+    FlexLengthChargeDecision (*charge)(const void*,std::size_t) = nullptr;
+    FlexLengthChargeDecision operator()(std::size_t count) const { return charge(context,count); }
 };
 template<class Item>
 FlexLengthPrecisionStatus resolve_flex_lengths_precise_typed(FlexLengthRange<Item> items,
@@ -187,7 +196,7 @@ FlexLengthPrecisionStatus resolve_flex_lengths_precise_typed(FlexLengthRange<Ite
     if(main_size>limit || gap>limit || items.size()>
         static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()/(4*limit)))
         return FlexLengthPrecisionStatus::CoordinateOverflow;
-    charge(items.size());
+    if (charge(items.size())!=FlexLengthChargeDecision::Continue) return FlexLengthPrecisionStatus::ResourceLimit;
     for(const auto& item:items) {
         if(!item.child || item.base<0 || item.inner_base<0 || item.hypothetical<0 ||
             item.minimum<0 || item.maximum<-1) return FlexLengthPrecisionStatus::InvalidInput;
@@ -195,8 +204,8 @@ FlexLengthPrecisionStatus resolve_flex_lengths_precise_typed(FlexLengthRange<Ite
             item.minimum>limit || item.maximum>limit || item.margins<-limit || item.margins>limit)
             return FlexLengthPrecisionStatus::CoordinateOverflow;
     }
-    resolve_flex_lengths(items,main_size,gap,charge);
-    return FlexLengthPrecisionStatus::Success;
+    return resolve_flex_lengths(items,main_size,gap,charge) ?
+        FlexLengthPrecisionStatus::Success : FlexLengthPrecisionStatus::ResourceLimit;
 }
 extern template FlexLengthPrecisionStatus resolve_flex_lengths_precise_typed(
     FlexLengthRange<FlexLengthPrecisionItem>,std::int64_t,std::int64_t,FlexLengthPrecisionCharge);
@@ -206,8 +215,8 @@ inline FlexLengthPrecisionStatus resolve_flex_lengths_precise(Range& items,
     std::int64_t main_size,std::int64_t gap,const Charge& charge) {
     using Item=typename std::remove_reference<decltype(*items.begin())>::type;
     FlexLengthRange<Item> range{items.empty()?nullptr:&*items.begin(),items.size()};
-    FlexLengthPrecisionCharge callback{&charge,[](const void* context,std::size_t count) {
-        (*static_cast<const Charge*>(context))(count);
+    FlexLengthPrecisionCharge callback{&charge,[](const void* context,std::size_t count) -> FlexLengthChargeDecision {
+        return (*static_cast<const Charge*>(context))(count);
     }};
     return resolve_flex_lengths_precise_typed(range,main_size,gap,callback);
 }
