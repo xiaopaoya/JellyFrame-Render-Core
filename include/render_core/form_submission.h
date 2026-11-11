@@ -50,6 +50,7 @@ class SubmitEvent final : public Event {
 public:
     explicit SubmitEvent(const Node* submitter = nullptr);
 
+    EventKind kind() const override;
     const Node* submitter() const;
 
 private:

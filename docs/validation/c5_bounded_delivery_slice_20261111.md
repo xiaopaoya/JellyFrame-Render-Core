@@ -1,9 +1,10 @@
 # C5 bounded nowrap Flex/Grid delivery slice
 
-This independent slice starts at Core master
+This independent slice initially starts at Core master
 `b951751a23901e6e89560c5954b6b143be48db8c`. The four selected commits apply
 without conflict and without additional source dependencies. The branch remains
-on that base and is not rebased onto the separate R3 delivery.
+on that base for the initial checks below. The final delivery integrates the
+subsequently merged R3 master; see the final qualification section below.
 
 | Original commit | Replayed commit | Change |
 | --- | --- | --- |
@@ -92,4 +93,26 @@ The two replayed historical checkpoint documents retain their original hashes,
 branch context and observations. Their prior sanitizer/resource results are not
 new evidence for this identity. No fresh sanitizer, Win32, MCU timing/stack/heap,
 device execution, Runtime adoption or remote CI result is claimed. This local
-slice has not been pushed and no PR was created. No shared board was changed.
+slice had not been pushed at that checkpoint. No shared board was changed by
+the extraction agent.
+
+## Final qualification after R3 mainline integration
+
+The delivery branch merges Core master `6af1bb59` (PR24). The sole merge conflict
+was adjacent CI step insertion; both R3 and bounded-layout installed gates are
+retained. Production implementation changes merge without edits. Relative to
+this new master the PR still contains only bounded nowrap Flex/Grid queries,
+the shared pass ledger, their tests and documentation.
+
+Final source identity is
+`6ba204f6bed2984b27ed6299277dd9bd2ab7a2a56b0dccd5131beea8b54a3c0c` / 145.
+New Clang Release full and cropped builds pass 24/24 and 23/23. Four public
+installed consumers (bounded layout, event completion, event failure and Submit
+kind) each pass in both profiles, eight checks total, with `-fno-rtti`. The
+installed manifests and exported profile identities are checked independently
+for every consumer. Package remains 0.9.0-dev / ABI4.
+
+Final builds use `E:/Builds/core-c5-r3-delivery-*`; reproducible profile runner,
+logs and manifests are under `E:/Experiments/core-c5-r3-delivery-20261111`.
+The earlier per-slice identities remain historical evidence only. No fresh
+sanitizer or device result is claimed for this joined source.

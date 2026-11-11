@@ -29,6 +29,18 @@ Node* find_by_id(Node& node, const std::string& id) {
     return nullptr;
 }
 
+void submit_kind_distinguishes_generic_submit_event() {
+    static_assert(static_cast<int>(EventKind::Generic) == 0);
+    static_assert(static_cast<int>(EventKind::Mouse) == 1);
+    static_assert(static_cast<int>(EventKind::Wheel) == 2);
+    SubmitEvent submit;
+    Event generic("submit");
+    const Event& submitted = submit;
+    check(submitted.kind() == EventKind::Submit, "SubmitEvent exposes kind through Event reference");
+    check(generic.kind() == EventKind::Generic, "generic submit event keeps Generic kind");
+    check(submitted.type() == generic.type(), "event type alone does not identify SubmitEvent");
+}
+
 #if JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED
 void validation_and_form_data_follow_control_state() {
     HtmlParser parser;
@@ -100,8 +112,9 @@ void request_submit_is_cancellable_and_exposes_submitter() {
     int submits = 0;
     form->add_event_listener("submit", [&](Event& event) {
         ++submits;
-        const auto* submit = dynamic_cast<const SubmitEvent*>(&event);
-        check(submit != nullptr && submit->submitter() == send, "submit event preserves submitter");
+        check(event.kind() == EventKind::Submit, "form submission dispatches SubmitEvent kind");
+        const auto& submit = static_cast<const SubmitEvent&>(event);
+        check(submit.submitter() == send, "submit event preserves submitter");
         event.prevent_default();
     });
 
@@ -212,6 +225,7 @@ void advanced_form_apis_are_safe_no_ops_when_disabled() {
 
 int main() {
     try {
+        submit_kind_distinguishes_generic_submit_event();
 #if JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED
         validation_and_form_data_follow_control_state();
         request_submit_is_cancellable_and_exposes_submitter();

@@ -2,6 +2,7 @@
 #include "render_core/html_parser.h"
 
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 
 using namespace jellyframe;
@@ -23,6 +24,64 @@ void observe_destroyed_node_parent(Node& node, void* context) {
     auto& observation = *static_cast<DestroyObservation*>(context);
     observation.called = true;
     observation.parent = node.parent;
+}
+
+struct LifetimeObservation {
+    int calls = 0;
+    bool inactive_during_callback = false;
+    bool late_registration_rejected = false;
+    NodeLifetimeObserverRegistration* late_registration = nullptr;
+};
+
+void observe_node_lifetime(Node&, void* context) noexcept {
+    auto& observation = *static_cast<LifetimeObservation*>(context);
+    ++observation.calls;
+}
+
+void observe_and_probe_destroying_node(Node& node, void* context) noexcept {
+    auto& observation = *static_cast<LifetimeObservation*>(context);
+    ++observation.calls;
+    observation.inactive_during_callback =
+        observation.late_registration != nullptr && !observation.late_registration->active();
+    observation.late_registration_rejected = node.add_lifetime_observer(
+        *observation.late_registration, observe_node_lifetime, &observation);
+}
+
+struct PendingRemovalObservation {
+    LifetimeObservation* lifetime = nullptr;
+    std::unique_ptr<NodeLifetimeObserverRegistration>* pending = nullptr;
+};
+
+struct DestroyMutationObservation {
+    int active_calls = 0;
+    int pending_calls = 0;
+    int appended_calls = 0;
+};
+
+void remove_pending_lifetime_registration(Node&, void* context) noexcept {
+    auto& observation = *static_cast<PendingRemovalObservation*>(context);
+    ++observation.lifetime->calls;
+    observation.pending->reset();
+}
+
+void release_current_lifetime_registration(Node&, void* context) noexcept {
+    auto* registration = static_cast<std::unique_ptr<NodeLifetimeObserverRegistration>*>(context);
+    registration->reset();
+}
+
+void count_pending_destroy_observer(Node&, void* context) {
+    ++static_cast<DestroyMutationObservation*>(context)->pending_calls;
+}
+
+void count_appended_destroy_observer(Node&, void* context) {
+    ++static_cast<DestroyMutationObservation*>(context)->appended_calls;
+}
+
+void mutate_destroy_observers(Node& node, void* context) {
+    auto& observation = *static_cast<DestroyMutationObservation*>(context);
+    ++observation.active_calls;
+    node.remove_destroy_observer(count_pending_destroy_observer, &observation);
+    node.add_destroy_observer(count_appended_destroy_observer, &observation);
 }
 
 Node* find_first_by_tag(Node& node, const std::string& tag_name) {
@@ -154,6 +213,86 @@ void text_content_replacement_detaches_nodes_before_destroy_observers() {
     check(body.text_content() == "replacement", "replacement text remains attached");
 }
 
+void protected_lifetime_observers_survive_regular_replacement_and_removal() {
+    auto node = make_element("div");
+    NodeLifetimeObserverRegistration registration;
+    LifetimeObservation observation;
+    DestroyObservation ordinary_observation;
+    check(node->add_lifetime_observer(registration, observe_node_lifetime, &observation),
+          "protected lifetime observer registers with bounded observer storage");
+
+    node->set_destroy_observer(observe_destroyed_node_parent, &ordinary_observation);
+    node->remove_destroy_observer(observe_node_lifetime, &observation);
+    check(registration.active(), "ordinary observer APIs cannot detach protected registration");
+
+    node.reset();
+    check(observation.calls == 1, "protected observer runs once before Node storage is released");
+    check(!registration.active(), "registration is detached before its callback");
+}
+
+void lifetime_registration_detaches_before_node_and_during_callback() {
+    LifetimeObservation observation;
+    auto node = make_element("div");
+    {
+        NodeLifetimeObserverRegistration registration;
+        check(node->add_lifetime_observer(registration, observe_node_lifetime, &observation),
+              "temporary lifetime registration succeeds");
+    }
+    node.reset();
+    check(observation.calls == 0, "destroying registration removes its notification");
+
+    observation = {};
+    auto second_node = make_element("div");
+    auto pending = std::make_unique<NodeLifetimeObserverRegistration>();
+    NodeLifetimeObserverRegistration current;
+    PendingRemovalObservation pending_observation{&observation, &pending};
+    check(second_node->add_lifetime_observer(*pending, observe_node_lifetime, &observation),
+          "pending lifetime registration succeeds");
+    check(second_node->add_lifetime_observer(current, remove_pending_lifetime_registration,
+                                             &pending_observation),
+          "active lifetime registration succeeds");
+    second_node.reset();
+    check(observation.calls == 1, "one callback may remove a pending registration safely");
+    check(pending == nullptr, "pending registration owner can release its record in callback");
+}
+
+void lifetime_callbacks_cannot_rearm_a_destroying_node() {
+    auto node = make_element("div");
+    NodeLifetimeObserverRegistration registration;
+    NodeLifetimeObserverRegistration late_registration;
+    LifetimeObservation observation;
+    observation.late_registration = &late_registration;
+    check(node->add_lifetime_observer(registration, observe_and_probe_destroying_node, &observation),
+          "lifetime callback registration succeeds");
+    node.reset();
+    check(observation.calls == 1, "lifetime callback runs once");
+    check(observation.inactive_during_callback, "current registration is detached before callback");
+    check(!observation.late_registration_rejected,
+          "destroying Node refuses new protected lifetime registrations");
+    check(!late_registration.active(), "failed rearm leaves registration detached");
+}
+
+void lifetime_callback_can_release_its_own_registration() {
+    auto node = make_element("div");
+    auto registration = std::make_unique<NodeLifetimeObserverRegistration>();
+    check(node->add_lifetime_observer(*registration, release_current_lifetime_registration,
+                                     &registration),
+          "self-release lifetime registration succeeds");
+    node.reset();
+    check(registration == nullptr, "lifetime callback releases its own detached registration");
+}
+
+void destruction_drain_handles_observer_mutation_in_place() {
+    auto node = make_element("div");
+    DestroyMutationObservation observation;
+    node->add_destroy_observer(mutate_destroy_observers, &observation);
+    node->add_destroy_observer(count_pending_destroy_observer, &observation);
+    node.reset();
+    check(observation.active_calls == 1, "active destroy observer runs once");
+    check(observation.pending_calls == 0, "active observer can remove a pending observer in place");
+    check(observation.appended_calls == 0, "observer appended during drain waits for no later destruction pass");
+}
+
 void deep_subtree_replacement_and_teardown_are_iterative() {
     auto document = make_element("document");
     Node* current = document.get();
@@ -227,6 +366,11 @@ int main() {
         attributes_and_text_mark_specific_dirty_bits();
         unchanged_text_content_stays_clean();
         text_content_replacement_detaches_nodes_before_destroy_observers();
+        protected_lifetime_observers_survive_regular_replacement_and_removal();
+        lifetime_registration_detaches_before_node_and_during_callback();
+        lifetime_callbacks_cannot_rearm_a_destroying_node();
+        lifetime_callback_can_release_its_own_registration();
+        destruction_drain_handles_observer_mutation_in_place();
         deep_subtree_replacement_and_teardown_are_iterative();
         deep_text_content_is_iterative_and_ordered();
         deep_dirty_flags_clear_iteratively();
