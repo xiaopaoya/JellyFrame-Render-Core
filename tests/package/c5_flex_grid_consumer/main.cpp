@@ -195,6 +195,27 @@ void check_pass_budget(TextSystem& text_system) {
             statistics.work <= limits.max_work && statistics.resource_refusals == 0,
             "Installed next public pass must replace statistics and restore intrinsic allocation");
 }
+
+void check_cropped_pass_budget(TextSystem& text_system) {
+    const std::string html = "<body><div id='item'>AB CD</div></body>";
+    const std::string css = "#item{display:block;width:40px;font-family:'Core Test';font-size:16px}";
+    LayoutIntrinsicQueryStatistics statistics;
+    statistics.work = 123;
+    statistics.queries = 456;
+    LayoutIntrinsicQueryLimits limits;
+    limits.max_work = 0;
+    auto bounded = layout(html, css, &text_system, true, limits, &statistics);
+    require(statistics.work == 0 && statistics.queries == 0 && statistics.resource_refusals == 0,
+            "Installed cropped public layout must replace stale query statistics");
+    const auto normal = layout(html, css, &text_system);
+    const auto* bounded_item = find_box(*bounded.boxes, "item");
+    const auto* normal_item = find_box(*normal.boxes, "item");
+    require(bounded_item && normal_item && bounded_item->rect.x == normal_item->rect.x &&
+            bounded_item->rect.y == normal_item->rect.y &&
+            bounded_item->rect.width == normal_item->rect.width &&
+            bounded_item->rect.height == normal_item->rect.height && bounded_item->rect.height > 0,
+            "Installed cropped zero-query allowance must preserve ordinary Block text layout");
+}
 } // namespace
 
 int main() {
@@ -216,7 +237,8 @@ int main() {
         check_pass_budget(text_system);
         std::cout << "Installed ABI4 Flex auto-min, percentage min, Grid max-content and calc refusal passed\n";
 #else
-        std::cout << "Installed ABI4 cropped profile has Flex/Grid disabled; package and font binding passed\n";
+        check_cropped_pass_budget(text_system);
+        std::cout << "Installed ABI4 cropped profile: package identity, Block text layout and fresh query statistics passed\n";
 #endif
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
