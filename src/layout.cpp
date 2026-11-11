@@ -1220,7 +1220,18 @@ void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box,
             }
         }
 #endif
-        bool qualified_grid = render_object.style.display == Display::Grid &&
+        bool fixed_grid_tracks = render_object.style.grid_template_column_count > 0 &&
+            render_object.style.grid_template_column_count <=
+                static_cast<int>(render_object.style.grid_template_column_widths.size());
+        if (fixed_grid_tracks) {
+            for (int column = 0; column < render_object.style.grid_template_column_count; ++column) {
+                if (render_object.style.grid_template_column_widths[static_cast<std::size_t>(column)] <= 0) {
+                    fixed_grid_tracks = false;
+                    break;
+                }
+            }
+        }
+        bool qualified_grid = render_object.style.display == Display::Grid && fixed_grid_tracks &&
             render_object.style.position_type == PositionType::Static && render_object.style.width >= 0 &&
             render_object.node && render_object.node->type == NodeType::Element &&
             !is_form_control(*render_object.node) && !render_object.children.empty();
@@ -1228,7 +1239,7 @@ void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box,
         for (const auto& child : render_object.children) {
             if (!child || !child->node || child->node->type != NodeType::Element ||
                 child->style.display != Display::Block || child->style.position_type != PositionType::Static ||
-                is_form_control(*child->node) || !child->children.empty()) {
+                is_form_control(*child->node) || !child->children.empty() || child->style.grid_column_span != 1) {
                 qualified_grid = false;
                 break;
             }

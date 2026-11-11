@@ -21,12 +21,16 @@ precise plan declines that indefinite column slice, ordinary Flex runs with
 temporarily materialized typed values under complete Style snapshots, while
 the mutation journal protects geometry and prepared-text caches.
 
-Grid admits direct static empty Block items under a static definite-width Grid
-container. The ordinary assigned-track path resolves mixed width/min-width/
+Grid admits direct static empty Block items with `column-span: 1` only under a
+static definite-width Grid that declares one or more positive fixed-width
+column tracks. The ordinary assigned-track path resolves mixed width/min-width/
 max-width against each item's track width and preserves the authored result at
-the final rectangle boundary. Its RAII override restores typed storage, all
-dimension scalar and percent proxies, FlexBasis kind, table provenance and
-box-sizing.
+the final rectangle boundary. Implicit tracks, auto/min-content/max-content
+tracks, flexible tracks, minmax tracks and spanning mixed items are rejected
+during preflight before geometry is assigned; their intrinsic contributions are
+not included in the current track finalizer. Its RAII override restores typed
+storage, all dimension scalar and percent proxies, FlexBasis kind, table
+provenance and box-sizing.
 
 Remaining refusals have concrete callers:
 
@@ -57,8 +61,10 @@ select whole-expression content behavior, then restores the authored kind from
 its Style snapshot. No installed public header or API changed.
 
 Focused consumer tests compare mixed results with equivalent pixel fixtures
-for Block, nowrap Flex, wrapped-row Flex and Grid. They also check authored
-typed storage restoration after Grid overrides and ordinary Flex replay.
+for Block, nowrap Flex, wrapped-row Flex and fixed-track Grid. Grid tests also
+assert preflight refusal for implicit/auto/flexible tracks and spanning items,
+and check authored typed storage restoration after Grid overrides and ordinary
+Flex replay.
 Parser admission stays closed until unsupported-context probes, fixed-table
 refusal coverage, full parity over all qualified edge cases and cropped-profile
 package validation pass together.

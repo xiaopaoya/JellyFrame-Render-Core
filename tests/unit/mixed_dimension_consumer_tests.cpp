@@ -391,9 +391,9 @@ void qualified_flex_success_preserves_authored_state() {
 
 void qualified_grid_item_resolves_mixed_width_constraints() {
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
-    auto dom = HtmlParser{}.parse("<div id='grid'><div id='mixed'></div></div>");
+    auto dom = HtmlParser{}.parse("<div id='grid'><div id='mixed'></div><div id='other'></div></div>");
     const char* css = "*{margin:0;padding:0;border:0}"
-        "#grid{display:grid;width:100px;grid-template-columns:100px}#mixed{height:10px}";
+        "#grid{display:grid;width:200px;grid-template-columns:100px 100px}#mixed{height:10px}";
     StyleResolver resolver(CssParser{}.parse(css));
     auto tree = RenderTreeBuilder(resolver).build(*dom);
     auto* mixed = find(*tree, "mixed");
@@ -411,9 +411,9 @@ void qualified_grid_item_resolves_mixed_width_constraints() {
           item->style.min_width == -1 && item->style.max_width == -1,
           "Grid restores the full temporary mixed Style");
 
-    auto pixel_dom = HtmlParser{}.parse("<div id='grid'><div id='mixed'></div></div>");
+    auto pixel_dom = HtmlParser{}.parse("<div id='grid'><div id='mixed'></div><div id='other'></div></div>");
     const char* pixel_css = "*{margin:0;padding:0;border:0}"
-        "#grid{display:grid;width:100px;grid-template-columns:100px}"
+        "#grid{display:grid;width:200px;grid-template-columns:100px 100px}"
         "#mixed{width:100px;min-width:30px;max-width:80px;height:10px}";
     StyleResolver pixel_resolver(CssParser{}.parse(pixel_css));
     auto pixel_tree = RenderTreeBuilder(pixel_resolver).build(*pixel_dom);
@@ -435,6 +435,45 @@ void qualified_grid_item_resolves_mixed_width_constraints() {
     check(find(*vertical_layout, "mixed")->rect.width == 0 &&
           !vertical_diagnostics.diagnostics().empty(),
           "Grid refuses mixed height with an indefinite row basis before mutation");
+#endif
+}
+
+void mixed_grid_refuses_unresolved_tracks_and_spans_before_geometry() {
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    const auto verify_refused = [](const char* css, const char* label) {
+        auto dom = HtmlParser{}.parse(
+            "<div id='grid'><div id='mixed'></div><div id='other'></div></div>");
+        StyleResolver resolver(CssParser{}.parse(css));
+        auto tree = RenderTreeBuilder(resolver).build(*dom);
+        auto* mixed = find(*tree, "mixed");
+        check(mixed && apply_computed_length_percentage(
+            mixed->style, SizeProperty::Width, 40, 50),
+            "Grid refusal fixture publishes typed mixed width");
+        VectorDiagnosticSink diagnostics;
+        LayoutEngineOptions options;
+        options.diagnostics = &diagnostics;
+        auto layout = LayoutEngine(resolver, {}, options).layout(*tree, 320, 240);
+        const auto* grid = find(*layout, "grid");
+        const auto* item = find(*layout, "mixed");
+        check(grid && item && grid->rect.width == 0 && item->rect.width == 0 && item->rect.height == 0,
+              label);
+        check(!diagnostics.diagnostics().empty() &&
+              diagnostics.diagnostics().back().code == "unsupported-mixed-dimension-layout",
+              "unsupported mixed Grid is diagnosed during preflight");
+    };
+
+    verify_refused("*{margin:0;padding:0;border:0}"
+                   "#grid{display:grid;width:100px;grid-template-columns:repeat(2,auto)}",
+                   "auto-track Grid refuses before any geometry is assigned");
+    verify_refused("*{margin:0;padding:0;border:0}#grid{display:grid;width:100px}",
+                   "implicit auto-track Grid refuses before any geometry is assigned");
+    verify_refused("*{margin:0;padding:0;border:0}"
+                   "#grid{display:grid;width:100px;grid-template-columns:1fr 1fr}",
+                   "flexible-track Grid refuses before any geometry is assigned");
+    verify_refused("*{margin:0;padding:0;border:0}"
+                   "#grid{display:grid;width:100px;grid-template-columns:50px 50px}"
+                   "#mixed{grid-column:span 2}",
+                   "spanning mixed Grid item refuses before any geometry is assigned");
 #endif
 }
 
@@ -479,6 +518,7 @@ int main() {
         qualified_wrapped_row_flex_resolves_mixed_basis();
         qualified_flex_success_preserves_authored_state();
         qualified_grid_item_resolves_mixed_width_constraints();
+        mixed_grid_refuses_unresolved_tracks_and_spans_before_geometry();
         temporary_override_restores_typed_storage_and_provenance();
         flex_auto_min_treats_mixed_minimum_as_authored();
     } catch (const std::exception& error) {
