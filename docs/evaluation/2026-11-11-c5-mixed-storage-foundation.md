@@ -28,3 +28,25 @@ Validation: `jellyframe_computed_size_storage_tests` passes in the fresh
 `E:\\Builds\\c5-mixed-storage` build; it covers all seven dimension slots,
 legacy getter hiding, signed bounds, snapshot isolation, and allocation-failure
 atomicity.
+
+## Atomic Style publication follow-up
+
+Core commit `4fbbe070` adds the internal
+`apply_computed_length_percentage` publisher. It validates the six width,
+height, min/max dimension slots, mutates a COW `Style` candidate, retains the
+typed signed Q1000 pair (including a zero-percent coefficient), sets legacy
+scalar and percent proxies to `-1`, and publishes only after all operations
+succeed. Failure leaves the original Style unchanged. Table sizing
+qualification provenance is marked with the authored dimension in the same
+publication.
+
+Tests cover positive/negative components, zero-percent preservation, invalid
+and unsupported slots, and injected allocation failure. The exact candidate
+passes a fresh Release build and all 25 Core CTest entries in
+`E:\\Builds\\c5-mixed-storage-r3`.
+
+This still does not admit mixed CSS syntax. Consumers have distributed
+presence/safety checks in layout, intrinsic width/height queries and Flex
+auto-min sizing; temporary table and fallback snapshots require review. Keep
+parser admission closed until those consumers, precise/ordinary parity and
+intrinsic/table refusal semantics are integrated as a coordinated package.
