@@ -2,6 +2,7 @@
 
 #include "render_core/form_control.h"
 #include "computed_size_geometry.h"
+#include "grid_track_provenance.h"
 #include "intrinsic_source_query.h"
 #include "intrinsic_source_query_height.h"
 #include "layout_mutation_journal.h"
@@ -1220,7 +1221,9 @@ void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box,
             }
         }
 #endif
-        bool fixed_grid_tracks = render_object.style.grid_template_column_count > 0 &&
+        bool fixed_grid_tracks = render_object.style.grid_min_track_width !=
+                detail::kFlexibleMinmaxTrackProvenance &&
+            render_object.style.grid_template_column_count > 0 &&
             render_object.style.grid_template_column_count <=
                 static_cast<int>(render_object.style.grid_template_column_widths.size());
         if (fixed_grid_tracks) {

@@ -8,6 +8,7 @@
 #include "background_resource_transaction.h"
 #include "css_flex_values.h"
 #include "computed_size_values.h"
+#include "grid_track_provenance.h"
 
 #include <algorithm>
 #include <array>
@@ -1280,8 +1281,10 @@ bool parse_transition_longhand(const std::string& property, const std::string& r
 bool parse_simple_grid_template_columns(const std::string& raw_value,
                                         std::array<int, 4>& widths,
                                         int& count,
+                                        bool& has_flexible_minmax_track,
                                         int em_base,
                                         const LengthResolutionContext& context = {}) {
+    has_flexible_minmax_track = false;
     const std::string value = lowercase(trim(raw_value));
     if (value.rfind("repeat(", 0) == 0 && value.back() == ')') {
         const std::size_t comma = value.find(',');
@@ -1313,6 +1316,7 @@ bool parse_simple_grid_template_columns(const std::string& raw_value,
                 (!max_track.empty() && max_track.back() == 'r' && max_track.size() >= 2 &&
                  max_track[max_track.size() - 2] == 'f')) {
                 stored_width = min_width > 0 ? std::max(1, min_width) : 0;
+                has_flexible_minmax_track = max_track != "auto";
             } else {
                 return false;
             }
@@ -4264,10 +4268,14 @@ bool apply_declaration(Style& style,
     } else if (property == "grid-template-columns") {
         std::array<int, 4> widths{{0, 0, 0, 0}};
         int count = 0;
-        if (parse_simple_grid_template_columns(value, widths, count, style.font_size, context)) {
+        bool has_flexible_minmax_track = false;
+        if (parse_simple_grid_template_columns(
+                value, widths, count, has_flexible_minmax_track, style.font_size, context)) {
             style.grid_template_column_widths = widths;
             style.grid_template_column_count = count;
-            style.grid_min_track_width = -1;
+            style.grid_min_track_width = has_flexible_minmax_track
+                ? detail::kFlexibleMinmaxTrackProvenance
+                : -1;
             return true;
         }
         int min_track = 0;

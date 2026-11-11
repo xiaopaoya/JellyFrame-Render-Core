@@ -8,8 +8,10 @@
 #include "../../src/flex_auto_min.h"
 #include "../../src/intrinsic_source_query.h"
 #include "../../src/intrinsic_source_query_height.h"
+#include "../../src/grid_track_provenance.h"
 
 #include <iostream>
+#include <array>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -471,9 +473,40 @@ void mixed_grid_refuses_unresolved_tracks_and_spans_before_geometry() {
                    "#grid{display:grid;width:100px;grid-template-columns:1fr 1fr}",
                    "flexible-track Grid refuses before any geometry is assigned");
     verify_refused("*{margin:0;padding:0;border:0}"
+                   "#grid{display:grid;width:100px;grid-template-columns:repeat(2,minmax(50px,1fr))}",
+                   "flexible minmax Grid refuses before any geometry is assigned");
+    verify_refused("*{margin:0;padding:0;border:0}"
                    "#grid{display:grid;width:100px;grid-template-columns:50px 50px}"
                    "#mixed{grid-column:span 2}",
                    "spanning mixed Grid item refuses before any geometry is assigned");
+#endif
+}
+
+void flexible_minmax_keeps_ordinary_grid_geometry() {
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    const auto layout_grid = [](const char* columns) {
+        auto dom = HtmlParser{}.parse(
+            "<div id='grid'><div id='first'></div><div id='second'></div></div>");
+        const std::string css = std::string("*{margin:0;padding:0;border:0}") +
+            "#grid{display:grid;width:120px;grid-template-columns:" + columns + "}";
+        StyleResolver resolver(CssParser{}.parse(css));
+        auto tree = RenderTreeBuilder(resolver).build(*dom);
+        const auto layout = LayoutEngine(resolver).layout(*tree, 320, 240);
+        const auto* grid = find(*layout, "grid");
+        const auto* first = find(*layout, "first");
+        const auto* second = find(*layout, "second");
+        check(grid && first && second, "explicit Grid fixture boxes exist");
+        return std::array<int, 12>{
+            grid->rect.x, grid->rect.y, grid->rect.width, grid->rect.height,
+            first->rect.x, first->rect.y, first->rect.width, first->rect.height,
+            second->rect.x, second->rect.y, second->rect.width, second->rect.height,
+        };
+    };
+
+    const auto minmax_layout = layout_grid("repeat(2,minmax(50px,1fr))");
+    const auto fixed_layout = layout_grid("50px 50px");
+    check(minmax_layout == fixed_layout,
+          "ordinary flexible minmax Grid preserves its existing minimum-width geometry");
 #endif
 }
 
@@ -519,6 +552,7 @@ int main() {
         qualified_flex_success_preserves_authored_state();
         qualified_grid_item_resolves_mixed_width_constraints();
         mixed_grid_refuses_unresolved_tracks_and_spans_before_geometry();
+        flexible_minmax_keeps_ordinary_grid_geometry();
         temporary_override_restores_typed_storage_and_provenance();
         flex_auto_min_treats_mixed_minimum_as_authored();
     } catch (const std::exception& error) {
