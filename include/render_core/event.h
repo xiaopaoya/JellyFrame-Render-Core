@@ -9,6 +9,7 @@ namespace jellyframe {
 
 #define JELLYFRAME_EVENT_DISPATCH_COMPLETION_API 1
 #define JELLYFRAME_EVENT_DISPATCH_FAILURE_API 1
+#define JELLYFRAME_EVENT_SUBMIT_KIND_API 1
 
 struct Node;
 class Event;
@@ -46,6 +47,7 @@ enum class EventKind {
     Generic,
     Mouse,
     Wheel,
+    Submit,
 };
 
 struct EventListenerOptions {
