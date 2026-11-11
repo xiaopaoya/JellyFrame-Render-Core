@@ -91,6 +91,43 @@ jobs:
           cmake --build build/positioned-consumer-${{ matrix.profile }} --parallel
           ctest --test-dir build/positioned-consumer-${{ matrix.profile }} --output-on-failure
 
+      - name: Configure R3 completion installed consumer
+        run: >-
+          cmake -S tests/package/event_dispatch_completion_consumer
+          -B build/r3-completion-${{ matrix.profile }} -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="$PWD/build/install-${{ matrix.profile }}"
+          -DEXPECTED_CORE_SOURCE_HASH="$EXPECTED_CORE_SOURCE_HASH"
+          -DEXPECTED_PROFILE_ID="$EXPECTED_CORE_PROFILE_ID"
+          -DCMAKE_CXX_FLAGS=-fno-rtti
+
+      - name: Configure R3 failure installed consumer
+        run: >-
+          cmake -S tests/package/event_dispatch_failure_consumer
+          -B build/r3-failure-${{ matrix.profile }} -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="$PWD/build/install-${{ matrix.profile }}"
+          -DEXPECTED_SOURCE_HASH="$EXPECTED_CORE_SOURCE_HASH"
+          -DEXPECTED_PROFILE_ID="$EXPECTED_CORE_PROFILE_ID"
+          -DCMAKE_CXX_FLAGS=-fno-rtti
+
+      - name: Configure R3 Submit kind installed consumer
+        run: >-
+          cmake -S tests/package/submit_event_kind_consumer
+          -B build/r3-submit-${{ matrix.profile }} -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="$PWD/build/install-${{ matrix.profile }}"
+          -DEXPECTED_SOURCE_HASH="$EXPECTED_CORE_SOURCE_HASH"
+          -DEXPECTED_PROFILE_ID="$EXPECTED_CORE_PROFILE_ID"
+          -DCMAKE_CXX_FLAGS=-fno-rtti
+
+      - name: Build and test R3 installed consumers without RTTI
+        run: |
+          for consumer in completion failure submit; do
+            cmake --build "build/r3-$consumer-${{ matrix.profile }}" --parallel
+            ctest --test-dir "build/r3-$consumer-${{ matrix.profile }}" --output-on-failure
+          done
+
   standalone:
     name: Standalone Build And Archive
     runs-on: ubuntu-latest
