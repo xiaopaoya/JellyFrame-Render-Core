@@ -97,19 +97,68 @@ int main(){
             for(unsigned i=0;i<2;++i){items[i].child=i?&b:&a;items[i].base=100000;items[i].inner_base=100000;
                 items[i].hypothetical=100000;items[i].target=123;}
             items[0].base=-1;
-            check(detail::resolve_flex_lengths_precise(items,100000,0,[](std::size_t){})==detail::FlexLengthPrecisionStatus::InvalidInput &&
+            check(detail::resolve_flex_lengths_precise(items,100000,0,[](std::size_t){return detail::FlexLengthChargeDecision::Continue;})==detail::FlexLengthPrecisionStatus::InvalidInput &&
                   items[0].target==123,"solver refuses invalid inputs before changing targets");
             detail::FlexLengthRange<detail::FlexLengthPrecisionItem> oversized{nullptr,std::numeric_limits<std::size_t>::max()};
-            const detail::FlexLengthPrecisionCharge charge{nullptr,[](const void*,std::size_t){}};
+            const detail::FlexLengthPrecisionCharge charge{nullptr,[](const void*,std::size_t){return detail::FlexLengthChargeDecision::Continue;}};
             check(detail::resolve_flex_lengths_precise_typed(oversized,100000,0,charge)==
                   detail::FlexLengthPrecisionStatus::CoordinateOverflow,"oversized solver ranges refuse before visiting records");
             items[0].base=100000;
             a.style.flex_shrink=b.style.flex_shrink=std::numeric_limits<int>::max();
             items[0].base=items[0].inner_base=items[0].hypothetical=detail::kDimensionPrecisionMaximum;
             items[1].base=items[1].inner_base=items[1].hypothetical=detail::kDimensionPrecisionMaximum;
-            check(detail::resolve_flex_lengths_precise(items,detail::kDimensionPrecisionMaximum,0,[](std::size_t){})==
+            check(detail::resolve_flex_lengths_precise(items,detail::kDimensionPrecisionMaximum,0,[](std::size_t){return detail::FlexLengthChargeDecision::Continue;})==
                   detail::FlexLengthPrecisionStatus::Success && items[0].target+items[1].target==detail::kDimensionPrecisionMaximum,
                   "two-limb shrink weights stay exact beyond 64-bit products");
+        }
+        {
+            using Item=detail::FlexLengthPrecisionItem;
+            LayoutBox children[2];
+            std::vector<Item> items(2);
+            for(std::size_t i=0;i<items.size();++i){
+                children[i].style.flex_grow=children[i].style.flex_shrink=1000;
+                items[i].child=&children[i];items[i].base=items[i].inner_base=items[i].hypothetical=30000;
+                items[i].minimum=0;items[i].maximum=-1;items[i].target=90000+i;
+            }
+            std::size_t exact_work=0;
+            check(detail::resolve_flex_lengths_precise(items,41560,0,[&](std::size_t amount){exact_work+=amount;return detail::FlexLengthChargeDecision::Continue;})==
+                detail::FlexLengthPrecisionStatus::Success,"unlimited checked solver caller remains compatible");
+            const auto exact_result=items;
+            for(std::size_t cancelled_at=0;cancelled_at<exact_work/items.size();++cancelled_at){
+                items=exact_result;
+                std::size_t charged=0,charge_calls=0;
+                std::vector<Item> at_refusal;
+                const auto status=detail::resolve_flex_lengths_precise(items,41560,0,[&](std::size_t amount){
+                    ++charge_calls;
+                    if(charge_calls==cancelled_at+1){at_refusal=items;return detail::FlexLengthChargeDecision::ResourceLimit;}
+                    charged+=amount;return detail::FlexLengthChargeDecision::Continue;
+                });
+                check(status==detail::FlexLengthPrecisionStatus::ResourceLimit && charge_calls==cancelled_at+1 &&
+                    items.size()==at_refusal.size() && charged<=exact_work,
+                    "cancellation is returned at each solver scan boundary");
+                for(std::size_t i=0;i<items.size();++i)
+                    check(items[i].target==at_refusal[i].target && items[i].frozen==at_refusal[i].frozen &&
+                        items[i].violation==at_refusal[i].violation,"solver performs no mutation after a refused charge");
+            }
+            items=exact_result;
+            std::size_t exact_charged=0;
+            check(detail::resolve_flex_lengths_precise(items,41560,0,[&](std::size_t amount){
+                if(amount>exact_work-exact_charged)return detail::FlexLengthChargeDecision::ResourceLimit;
+                exact_charged+=amount;return detail::FlexLengthChargeDecision::Continue;
+            })==detail::FlexLengthPrecisionStatus::Success && exact_charged==exact_work,
+                "exact work cap preserves deterministic solver completion");
+            for(std::size_t i=0;i<items.size();++i)
+                check(items[i].target==exact_result[i].target && items[i].frozen==exact_result[i].frozen &&
+                    items[i].violation==exact_result[i].violation,"exact-cap output matches unlimited solver output");
+            items=exact_result;
+            std::size_t over_charged=0;
+            check(detail::resolve_flex_lengths_precise(items,41560,0,[&](std::size_t amount){
+                if(amount>exact_work-1-over_charged)return detail::FlexLengthChargeDecision::ResourceLimit;
+                over_charged+=amount;return detail::FlexLengthChargeDecision::Continue;
+            })==detail::FlexLengthPrecisionStatus::ResourceLimit && over_charged<=exact_work-1,
+                "one-unit-short work cap refuses before exceeding its budget");
+            check(exact_result[0].target==exact_result[1].target,
+                "unlimited solve retains deterministic exact-fit results");
         }
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
     std::cout<<"closed-form Flex geometry and basis tests passed; solver item bytes="<<sizeof(detail::FlexLengthPrecisionItem)<<"\n";

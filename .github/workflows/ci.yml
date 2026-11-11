@@ -91,6 +91,20 @@ jobs:
           cmake --build build/positioned-consumer-${{ matrix.profile }} --parallel
           ctest --test-dir build/positioned-consumer-${{ matrix.profile }} --output-on-failure
 
+      - name: Configure bounded Flex Grid installed consumer
+        run: >-
+          cmake -S tests/package/c5_flex_grid_consumer
+          -B build/c5-bounded-consumer-${{ matrix.profile }} -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="$PWD/build/install-${{ matrix.profile }}"
+          -DEXPECTED_SOURCE_HASH="$EXPECTED_CORE_SOURCE_HASH"
+          -DEXPECTED_PROFILE="$EXPECTED_CORE_PROFILE_ID"
+
+      - name: Build and test bounded Flex Grid installed consumer
+        run: |
+          cmake --build build/c5-bounded-consumer-${{ matrix.profile }} --parallel
+          ctest --test-dir build/c5-bounded-consumer-${{ matrix.profile }} --output-on-failure
+
       - name: Configure R3 completion installed consumer
         run: >-
           cmake -S tests/package/event_dispatch_completion_consumer

@@ -14,5 +14,5 @@ struct FlexLengthPrecisionItem {
     std::int8_t violation = 0;
     bool frozen = false;
 };
-enum class FlexLengthPrecisionStatus { Success, InvalidInput, CoordinateOverflow };
+enum class FlexLengthPrecisionStatus { Success, InvalidInput, CoordinateOverflow, ResourceLimit };
 } // namespace jellyframe::detail

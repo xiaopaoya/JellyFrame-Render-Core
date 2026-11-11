@@ -207,7 +207,7 @@ public:
                 return result(IntrinsicSourceStatus::ResourceLimit);
             return {IntrinsicSourceStatus::Complete,
                     min_content + decoration, max_content + decoration,
-                    boxes_, source_bytes_, measurements_, work_};
+                    boxes_, source_bytes_, measurements_, work_, peak_scratch_};
         } catch (const std::bad_alloc&) {
             return result(IntrinsicSourceStatus::ResourceLimit);
         }
@@ -226,7 +226,7 @@ private:
     };
 
     IntrinsicSourceWidthResult result(IntrinsicSourceStatus status) const {
-        return {status, -1, -1, boxes_, source_bytes_, measurements_, work_};
+        return {status, -1, -1, boxes_, source_bytes_, measurements_, work_, peak_scratch_};
     }
 
     bool admit_context(const Node& node) {
@@ -284,6 +284,7 @@ private:
                 return false;
             }
             if (!consume_work(stream_size_)) return false;
+            peak_scratch_ = std::max(peak_scratch_, stream_capacity_ + capacity);
             std::unique_ptr<char[]> next(new char[capacity]);
             if (stream_size_ != 0) std::memcpy(next.get(), stream_.get(), stream_size_);
             stream_ = std::move(next);
@@ -588,6 +589,7 @@ private:
     std::unique_ptr<char[]> stream_;
     std::size_t stream_size_ = 0;
     std::size_t stream_capacity_ = 0;
+    std::size_t peak_scratch_ = 0;
     std::size_t boxes_ = 0;
     std::size_t source_bytes_ = 0;
     std::size_t measurements_ = 0;
@@ -611,6 +613,17 @@ IntrinsicSourceWidthResult query_intrinsic_source_width(
     IntrinsicSourceQueryLimits limits) noexcept {
     SourceWidthQuery query(box, text_system, percentage_basis, limits);
     return query.run();
+}
+
+IntrinsicSourceWidthResult IntrinsicSourceQueryLedger::query_width(
+    const LayoutBox& box, const TextSystem& text_system, IntrinsicPercentageBasis basis) noexcept {
+    const auto remaining = remaining_limits();
+    IntrinsicSourceWidthResult result;
+    if (cancelled()) result.status = IntrinsicSourceStatus::Cancelled;
+    else if (!can_query(remaining)) result.status = IntrinsicSourceStatus::ResourceLimit;
+    else result = query_intrinsic_source_width(box, text_system, basis, remaining);
+    if (!consume(result)) return {IntrinsicSourceStatus::ResourceLimit};
+    return result;
 }
 
 } // namespace jellyframe::detail

@@ -2,6 +2,7 @@
 
 #include "render_core/form_control.h"
 #include "computed_size_geometry.h"
+#include "intrinsic_source_query.h"
 #include "layout_mutation_journal.h"
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
 #include "flex_length_resolution.h"
@@ -265,8 +266,11 @@ ResolvedInset resolve_inset(const Style& style, detail::SizeProperty property,
 struct FlexLayoutItem {
     LayoutBox* child = nullptr;
     int base_width = 0;
+    int minimum_width = 0;
+    int intrinsic_minimum_width = 0;
     int target_width = 0;
     bool force_width = false;
+    bool shrink_frozen = false;
     int probe_width = 0;
     bool probe_forced_width = false;
 };
@@ -304,22 +308,55 @@ void distribute_flex_row_widths(std::vector<FlexLayoutItem>& items,
             item.force_width = true;
         }
     } else if (free_space < 0 && total_shrink_weight > 0) {
-        const int deficit = bounded_subtract(0, free_space);
-        int remaining_deficit = deficit;
+        int remaining_deficit = bounded_subtract(0, free_space);
         std::int64_t remaining_weight = total_shrink_weight;
-        for (FlexLayoutItem& item : items) {
-            const std::int64_t weight = flex_shrink_weight(item);
-            if (weight <= 0) {
-                continue;
+        while (remaining_deficit > 0 && remaining_weight > 0) {
+            int proposed_deficit = remaining_deficit;
+            std::int64_t proposed_weight = remaining_weight;
+            bool froze_item = false;
+
+            for (FlexLayoutItem& item : items) {
+                if (item.shrink_frozen) continue;
+                const std::int64_t weight = flex_shrink_weight(item);
+                if (weight <= 0) continue;
+
+                const int share = proposed_weight == weight
+                    ? proposed_deficit
+                    : static_cast<int>((static_cast<std::int64_t>(proposed_deficit) * weight) /
+                        proposed_weight);
+                proposed_deficit -= share;
+                proposed_weight -= weight;
+
+                const int shrink_capacity = std::max(0, bounded_subtract(item.base_width,
+                    item.minimum_width));
+                if (share > shrink_capacity) {
+                    item.target_width = item.minimum_width;
+                    item.force_width = true;
+                    item.shrink_frozen = true;
+                    remaining_deficit -= shrink_capacity;
+                    remaining_weight -= weight;
+                    froze_item = true;
+                }
             }
-            const int share = remaining_weight == weight
-                ? remaining_deficit
-                : static_cast<int>((static_cast<std::int64_t>(remaining_deficit) * weight) / remaining_weight);
-            remaining_deficit -= share;
-            remaining_weight -= weight;
-            const int min_width = item.child == nullptr ? 0 : std::max(0, item.child->style.min_width);
-            item.target_width = std::max(min_width, bounded_subtract(item.base_width, share));
-            item.force_width = true;
+
+            if (froze_item) continue;
+
+            int final_deficit = remaining_deficit;
+            std::int64_t final_weight = remaining_weight;
+            for (FlexLayoutItem& item : items) {
+                if (item.shrink_frozen) continue;
+                const std::int64_t weight = flex_shrink_weight(item);
+                if (weight <= 0) continue;
+                const int share = final_weight == weight
+                    ? final_deficit
+                    : static_cast<int>((static_cast<std::int64_t>(final_deficit) * weight) /
+                        final_weight);
+                final_deficit -= share;
+                final_weight -= weight;
+                item.target_width = bounded_subtract(item.base_width, share);
+                item.force_width = true;
+            }
+            break;
         }
     }
 }
@@ -680,18 +717,63 @@ int grid_intrinsic_outer_width(const LayoutBox& box, const TextMeasureProvider& 
             horizontal_edges(box.style.border_width)));
 }
 
+bool grid_source_query_has_unconstrained_root(const LayoutBox& box) {
+    using detail::SizeKind;
+    using detail::SizeProperty;
+    if (box.style.display != Display::Block || box.style.width >= 0 || box.style.width_percent >= 0 ||
+        box.style.min_width >= 0 || box.style.min_width_percent >= 0 ||
+        box.style.max_width >= 0 || box.style.max_width_percent >= 0) return false;
+    for (SizeProperty property : {SizeProperty::Width, SizeProperty::MinWidth, SizeProperty::MaxWidth}) {
+        SizeKind kind = SizeKind::Pixels;
+        std::int64_t value = 0;
+        if (box.style.computed_sizes.get(property, kind, value)) return false;
+    }
+    return true;
+}
+
 void finalize_grid_columns(GridColumns& columns,
                            const std::vector<GridPlacement>& placements,
                            const TextMeasureProvider& text_measure,
                            const TextSystem* text_system,
-                           int content_width) {
-    for (const GridPlacement& placement : placements) {
+                            int content_width,
+                            detail::IntrinsicSourceQueryLedger& intrinsic_queries) {
+    const auto scratch_bytes = placements.size() <= std::numeric_limits<std::size_t>::max() / sizeof(int)
+        ? placements.size() * sizeof(int) : std::numeric_limits<std::size_t>::max();
+    detail::IntrinsicSourceQueryScratch source_scratch(intrinsic_queries, text_system ? scratch_bytes : 0);
+    std::unique_ptr<int[]> source_widths;
+    bool source_queries_complete = text_system != nullptr && static_cast<bool>(source_scratch);
+    if (source_queries_complete) {
+        try { source_widths.reset(new int[placements.size()]); }
+        catch (const std::bad_alloc&) { source_queries_complete = false; }
+    }
+    for (std::size_t index = 0; index < placements.size(); ++index) {
+        const GridPlacement& placement = placements[index];
         if (placement.fallback_block || placement.column_span != 1 ||
             placement.column < 0 || placement.column >= columns.count ||
             !columns.auto_sized[static_cast<std::size_t>(placement.column)]) {
             continue;
         }
-        const int intrinsic_width = grid_intrinsic_outer_width(*placement.child, text_measure, text_system);
+        if (!source_queries_complete || !grid_source_query_has_unconstrained_root(*placement.child)) {
+            source_queries_complete = false;
+            continue;
+        }
+        const auto source = intrinsic_queries.query_width(*placement.child, *text_system,
+            {detail::IntrinsicPercentageBasisKind::CyclicSameAxis, -1});
+        if (source.status != detail::IntrinsicSourceStatus::Complete) {
+            source_queries_complete = false;
+            break;
+        }
+        source_widths[index] = clamp_layout_value((source.max_content_border_box_units + 999) / 1000);
+    }
+
+    for (std::size_t index = 0; index < placements.size(); ++index) {
+        const GridPlacement& placement = placements[index];
+        if (placement.fallback_block || placement.column_span != 1 ||
+            placement.column < 0 || placement.column >= columns.count ||
+            !columns.auto_sized[static_cast<std::size_t>(placement.column)]) continue;
+        const int intrinsic_width = source_queries_complete && source_widths[index] >= 0
+            ? source_widths[index]
+            : grid_intrinsic_outer_width(*placement.child, text_measure, text_system);
         columns.widths[static_cast<std::size_t>(placement.column)] = std::max(
             columns.widths[static_cast<std::size_t>(placement.column)], intrinsic_width);
     }
@@ -992,6 +1074,12 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
                                             int viewport_width,
                                             int viewport_height,
                                             MonotonicArena* arena) const {
+    detail::IntrinsicSourceQueryLedger intrinsic_queries(options_.intrinsic_query_limits);
+    // The caller's engine remains immutable and reusable. Only this synchronous
+    // worker borrows the stack ledger, so nested layout/probes share one budget
+    // while independent or reentrant public calls start independent ledgers.
+    LayoutEngine pass_engine(*this);
+    pass_engine.intrinsic_queries_ = &intrinsic_queries;
     auto root_box = make_layout_box(arena);
     root_box->node = render_tree.node;
     root_box->style = render_tree.style;
@@ -1000,9 +1088,11 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
     build_layout_tree(render_tree, *root_box, arena);
     const PreciseBoxContext precision{static_cast<std::int64_t>(std::max(0,viewport_width))*1000,
         static_cast<std::int64_t>(std::max(0,viewport_height))*1000,0,0};
-    layout_box(*root_box, 0, 0, viewport_width, viewport_height, 1, &precision);
+    pass_engine.layout_box(*root_box, 0, 0, viewport_width, viewport_height, 1, &precision);
     const LayoutContentGeometry viewport{0, 0, precision.width, precision.height, true};
-    layout_positioned_children(*root_box, PositionedContext{viewport, viewport}, 1);
+    pass_engine.layout_positioned_children(*root_box, PositionedContext{viewport, viewport}, 1);
+    if (options_.intrinsic_query_statistics)
+        *options_.intrinsic_query_statistics = intrinsic_queries.snapshot();
     return root_box;
 }
 
@@ -1147,7 +1237,7 @@ bool LayoutEngine::layout_precise_flex(LayoutBox& box, std::int64_t width, std::
         items.push_back(item);cross.push_back(0);
     }
     const auto gap=static_cast<std::int64_t>(std::max(0,row?box.style.column_gap:box.style.row_gap))*1000;
-    if (resolve_flex_lengths_precise(items,main_size,gap,[](std::size_t){}) != FlexLengthPrecisionStatus::Success) return false;
+    if (resolve_flex_lengths_precise(items,main_size,gap,[](std::size_t){return FlexLengthChargeDecision::Continue;}) != FlexLengthPrecisionStatus::Success) return false;
     const auto make_context = [&](const FlexLengthPrecisionItem& item, std::int64_t cx, std::int64_t cy) {
         PreciseBoxContext context{width,fixed_height,cx,cy};
         context.border_origin=true;
@@ -2412,6 +2502,7 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
     int max_child_height = 0;
     int total_grow = 0;
     std::int64_t total_shrink_weight = 0;
+    bool intrinsic_queries_complete = true;
 
     for_each_in_flow_child([&](LayoutBox& child) {
         const int basis=resolved_flex_basis_pixels(child.style,content_width);
@@ -2430,6 +2521,79 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
         item.child = &child;
         item.base_width = base_width;
         item.target_width = base_width;
+        const auto declared_minimum = detail::computed_size_units(child.style,
+            detail::SizeProperty::MinWidth, static_cast<std::int64_t>(content_width) * 1000);
+        detail::SizeKind minimum_kind = detail::SizeKind::Pixels;
+        std::int64_t minimum_value = 0;
+        const bool retained_minimum = child.style.computed_sizes.get(
+            detail::SizeProperty::MinWidth, minimum_kind, minimum_value);
+        const bool unsupported_minimum = declared_minimum < -1 ||
+            (retained_minimum && minimum_kind == detail::SizeKind::LengthPercentage);
+        const auto has_mixed_constraint = [&](detail::SizeProperty property) {
+            detail::SizeKind kind = detail::SizeKind::Pixels;
+            std::int64_t value = 0;
+            return child.style.computed_sizes.get(property, kind, value) &&
+                kind == detail::SizeKind::LengthPercentage;
+        };
+        const bool unsupported_intrinsic_constraints = unsupported_minimum ||
+            has_mixed_constraint(detail::SizeProperty::Width) ||
+            has_mixed_constraint(detail::SizeProperty::MaxWidth) ||
+            has_mixed_constraint(detail::SizeProperty::Height) ||
+            has_mixed_constraint(detail::SizeProperty::MinHeight) ||
+            has_mixed_constraint(detail::SizeProperty::MaxHeight);
+        const std::int64_t main_edges = (static_cast<std::int64_t>(child.style.padding.left) +
+            child.style.padding.right + child.style.border_width.left +
+            child.style.border_width.right) * 1000;
+        const auto to_border_box = [&](std::int64_t value) {
+            if (value < 0) return value;
+            return child.style.box_sizing_border_box ? std::max(main_edges, value) : value + main_edges;
+        };
+        item.minimum_width = !unsupported_minimum && declared_minimum >= 0
+            ? static_cast<int>(std::clamp<std::int64_t>((to_border_box(declared_minimum) + 999) / 1000, 0,
+                std::numeric_limits<int>::max()))
+            : std::max(0, child.style.min_width);
+        const auto auto_min_kind = detail::flex_auto_min_kind(child.style,
+            detail::FlexMainAxis::Horizontal);
+        if (intrinsic_queries_complete && !unsupported_intrinsic_constraints && declared_minimum < 0 &&
+            options_.text_system != nullptr &&
+            auto_min_kind == detail::FlexAutoMinKind::Content && !has_aspect_ratio(child.style)) {
+            const auto measured = intrinsic_queries_->query_width(child, *options_.text_system,
+                {detail::IntrinsicPercentageBasisKind::CyclicSameAxis, -1});
+            if (measured.status != detail::IntrinsicSourceStatus::Complete) {
+                intrinsic_queries_complete = false;
+            } else {
+            if (measured.status == detail::IntrinsicSourceStatus::Complete) {
+                const auto preferred = detail::computed_size_units(child.style,
+                    detail::SizeProperty::Width, static_cast<std::int64_t>(content_width) * 1000);
+                const auto maximum = detail::computed_size_units(child.style,
+                    detail::SizeProperty::MaxWidth, static_cast<std::int64_t>(content_width) * 1000);
+                const auto min_height = detail::computed_size_units(child.style,
+                    detail::SizeProperty::MinHeight, -1);
+                const auto max_height = detail::computed_size_units(child.style,
+                    detail::SizeProperty::MaxHeight, -1);
+                const auto preferred_height = detail::computed_size_units(child.style,
+                    detail::SizeProperty::Height, -1);
+                if (preferred >= -1 && maximum >= -1 && min_height >= -1 &&
+                    max_height >= -1 && preferred_height >= -1) {
+                    detail::FlexAutoMinInput input;
+                    input.content_size_units = measured.min_content_border_box_units;
+                    input.content_complete = true;
+                    input.specified_main_units = to_border_box(preferred);
+                    input.max_main_units = to_border_box(maximum);
+                    input.main_decoration_units = main_edges;
+                    input.preferred_cross_units = preferred_height;
+                    input.min_cross_units = min_height;
+                    input.max_cross_units = max_height;
+                    const auto automatic = detail::flex_auto_minimum(input);
+                    if (automatic.status == detail::FlexAutoMinStatus::Complete) {
+                        item.intrinsic_minimum_width = static_cast<int>(
+                            std::clamp<std::int64_t>((automatic.minimum_border_box_units + 999) / 1000,
+                                0, std::numeric_limits<int>::max()));
+                    }
+                }
+            }
+            }
+        }
         item.force_width = force_width;
         item.probe_width = probe_width;
         item.probe_forced_width = force_width;
@@ -2442,6 +2606,21 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
         total_grow = bounded_add(total_grow, flex_grow_factor(item));
         total_shrink_weight += flex_shrink_weight(item);
     });
+
+    for (auto& item : items) {
+        if (intrinsic_queries_complete)
+            item.minimum_width = std::max(item.minimum_width, item.intrinsic_minimum_width);
+        item.base_width = std::max(item.base_width, item.minimum_width);
+        item.target_width = item.base_width;
+    }
+    total_base_width = 0;
+    total_grow = 0;
+    total_shrink_weight = 0;
+    for (const auto& item : items) {
+        total_base_width = bounded_add(total_base_width, item.base_width);
+        total_grow = bounded_add(total_grow, flex_grow_factor(item));
+        total_shrink_weight += flex_shrink_weight(item);
+    }
 
     const int total_gap_width = bounded_non_negative_multiply(
         box.style.column_gap, std::max(0, in_flow_count - 1));
@@ -2588,7 +2767,8 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
         placements.push_back(placement);
     }
 
-    finalize_grid_columns(columns, placements, text_measure_, options_.text_system, content_width);
+    finalize_grid_columns(columns, placements, text_measure_, options_.text_system, content_width,
+        *intrinsic_queries_);
 
     for (const GridPlacement& placement : placements) {
         LayoutBox& child = *placement.child;
