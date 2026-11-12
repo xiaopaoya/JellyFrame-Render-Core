@@ -5,8 +5,8 @@ Text StyleResolver overloads return default Text style before context preparatio
 custom-property ancestor walking and rule/cascade processing. RenderTree retains
 inherited style and explicit override ownership. Elements retain existing paths.
 Test-only instrumentation follows existing private JELLYFRAME_RENDER_CORE_TEST_HOOKS
-configuration; an actual candidate-rule lookup counter supplements skipped-work
-counters. Both direct Text overloads make zero lookup attempts; both Element
+configuration; thread-local counters record fast-path calls and actual candidate-rule
+lookup attempts without cross-thread writes. Both direct Text overloads make zero lookup attempts; both Element
 control overloads exercise lookups. Inheritance/custom-property isolation and
 explicit override regression cases pass.
 
@@ -27,3 +27,6 @@ candidate 179.166 ms; mean paired reduction 0.662%, SD 2.737 points, interval
 [-0.619%,1.944%], consistent with no change. This synthetic desktop fixture
 establishes current benefit under text-rich selector/inheritance work, not a
 whole-application or MCU latency guarantee. No hardware/board writes, push or PR.
+
+Final counter cleanup removes inferred skipped-work totals. Incremental full and
+cropped Release core suites pass again; tests-OFF timing binaries are unaffected.
