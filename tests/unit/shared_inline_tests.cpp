@@ -271,6 +271,14 @@ void scrolling_topology_and_packet_refusal() {
     const auto marker=painted.front();
     bool complete=false;
     int failed=0;
+#if defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL != 0
+    // MSVC debug string constructors may allocate iterator proxies inside a
+    // noexcept constructor. Injecting global OOM there terminates in the STL,
+    // before the emitter can catch anything. Release and sanitizer builds run
+    // the complete failure sweep; keep normal emission checked here as well.
+    complete=detail::emit_shared_inline(host,painted);
+    check(complete && painted.size()>1,"debug ordinary shared paint succeeds");
+#else
     for(int allocation=0;allocation<200;++allocation) {
         allocations_until_failure=allocation;
         const bool accepted=detail::emit_shared_inline(host,painted);
@@ -280,6 +288,7 @@ void scrolling_topology_and_packet_refusal() {
         check(painted.size()==1 && painted.front().type()==marker.type(),"paint allocation refusal keeps complete old display prefix");
     }
     check(complete && failed>2,"paint transactional packet sweep reaches success");
+#endif
     auto low=f.layers;low.max_display_commands=1;
     check(glyphs(*LayerTreeBuilder(low).build(*layout)).empty(),"command budget refuses complete shared paragraph atomically");
     // Replace a same-tag/same-count child and free the old Node. Whole membership

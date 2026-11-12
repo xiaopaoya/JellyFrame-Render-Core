@@ -1,5 +1,5 @@
 # Only executables registered by this module receive the test CRT bootstrap.
-if(MSVC)
+if(WIN32)
     get_property(_jellyframe_targets_before_tests DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 endif()
 add_executable(jellyframe_shared_inline_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shared_inline_tests.cpp")
@@ -254,7 +254,7 @@ endforeach()
 
 # Keep failed CTest processes noninteractive on MSVC, with diagnostics on stderr.
 # This source belongs to test executables only, never the product library.
-if(MSVC)
+if(WIN32)
     get_property(_jellyframe_targets_after_tests DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
     foreach(_jellyframe_test_target IN LISTS _jellyframe_targets_after_tests)
         if(_jellyframe_test_target IN_LIST _jellyframe_targets_before_tests)
