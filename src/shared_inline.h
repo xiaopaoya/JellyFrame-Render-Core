@@ -1,6 +1,8 @@
 #pragma once
 #include "core_text_paragraph.h"
 namespace jellyframe::detail {
+
+struct NaturalImageSizingFrame;
 struct SharedInlineProof {
     SharedInlineProof() : source(0, '\0'), tag(0, '\0') {}
     const LayoutBox* box = nullptr;
@@ -21,6 +23,8 @@ struct SharedInlineProof {
     bool nowrap = false;
     bool anywhere = false;
     bool atomic_image = false;
+    bool natural_image_sized = false;
+    ImageIntrinsicSize image_intrinsic{};
     std::string image_source;
     std::int64_t image_width_units = 0;
     int image_height = 0;
@@ -69,7 +73,8 @@ using SharedInlineImageEmitter = bool (*)(const LayoutBox&, DisplayList&, void* 
 // All allocation, admission, measurement and geometry happen before publication.
 // A failed attempt leaves every participating box and cache untouched.
 bool layout_shared_inline(LayoutBox&, int x, int y, int width,
-    const LayoutEngineOptions&, int& height, std::int64_t precise_width_units = -1) noexcept;
+    const LayoutEngineOptions&, int& height, std::int64_t precise_width_units = -1,
+    NaturalImageSizingFrame* natural_images = nullptr) noexcept;
 void retire_shared_inline(LayoutBox&) noexcept;
 bool shared_inline_current(const SharedInlineBinding&, const TextSystem*) noexcept;
 bool shared_inline_contains(const LayoutBox&, int x, int y) noexcept;

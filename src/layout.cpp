@@ -2628,7 +2628,8 @@ int LayoutEngine::layout_inline_children(LayoutBox& box,
                                          std::size_t depth, std::int64_t precise_width_units) const {
     int shared_height = 0;
     if (!has_temporary_size_override(box.style) && !has_temporary_style_replay(box.style) &&
-        detail::layout_shared_inline(box, content_x, content_y, content_width, options_, shared_height, precise_width_units))
+        detail::layout_shared_inline(box, content_x, content_y, content_width, options_, shared_height,
+            precise_width_units, natural_images_))
         return shared_height;
     detail::retire_shared_inline(box);
     int cursor_x = bounded_add(content_x, std::max(0, std::min(box.style.text_indent, content_width)));

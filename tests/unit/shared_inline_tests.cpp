@@ -111,6 +111,16 @@ struct InlineImageState {
     bool fail_emission = false;
     bool resolved = true;
 };
+struct NaturalInlineImageState {
+    std::size_t calls = 0;
+    ImageIntrinsicSize result{ImageIntrinsicSizeState::Known, 15, 10};
+};
+ImageIntrinsicSize natural_inline_size(const Node& node, void* context) {
+    auto& state = *static_cast<NaturalInlineImageState*>(context);
+    ++state.calls;
+    if (node.tag_name != "img" || node.attribute("src") != "tile") return {};
+    return state.result;
+}
 bool resolve_inline_image(const Node& node, ImageResolveKind kind, std::uint16_t,
     ResolvedImageResource& result, void* context) {
     auto& state = *static_cast<InlineImageState*>(context);
@@ -377,6 +387,44 @@ void definite_inline_image_percent_width() {
     int height = 0;
     check(!detail::layout_shared_inline(host, 0, 0, 40, f.options, height, precise_max),
         "out-of-range percentage basis refuses before multiplication can overflow");
+}
+void natural_inline_image_metadata_path() {
+    const auto run = [](const char* image_style, ImageIntrinsicSize intrinsic, bool expect_shared,
+        std::int64_t expected_width, int expected_height) {
+        Fixture f;
+        NaturalInlineImageState state;
+        state.result = intrinsic;
+        f.options.natural_image_sizing.provider = {natural_inline_size, &state};
+        NaturalImageSizingStatistics stats;
+        f.options.natural_image_sizing.statistics = &stats;
+        StyleResolver styles(CssParser{}.parse(std::string(
+            "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
+            "span{display:inline}img{display:inline;") + image_style + "}"));
+        auto dom = HtmlParser{}.parse("<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
+        auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+        const auto& host = find(*layout, "p");
+        const auto& image = find(*layout, "i");
+        check(static_cast<bool>(host.text_layout_cache.shared_inline) == expect_shared,
+            "natural inline image admission follows bounded sizing result");
+        check(state.calls == 1 && stats.queries == 1,
+            "natural inline metadata is queried once through the layout operation memo");
+        if (expect_shared) {
+            check(image.content_geometry.width == expected_width && image.rect.height == expected_height &&
+                image.content_geometry.height() == static_cast<std::int64_t>(expected_height) * 1000,
+                "natural inline image publishes Q1000 width and integral pixel height");
+        }
+        auto layers = LayerTreeBuilder(f.layers).build(*layout);
+        const auto painted = glyphs(*layers);
+        check(painted.size() == 2 && std::get<0>(painted[0]) == 'A' && std::get<0>(painted[1]) == 'B',
+            "natural image admission or refusal preserves surrounding source text");
+    };
+    run("", {ImageIntrinsicSizeState::Known, 15, 10}, true, 15000, 10);
+    run("width:30px", {ImageIntrinsicSizeState::Known, 15, 10}, true, 30000, 20);
+    run("height:12px", {ImageIntrinsicSizeState::Known, 15, 10}, true, 18000, 12);
+    run("min-width:18px", {ImageIntrinsicSizeState::Known, 15, 10}, true, 18000, 12);
+    run("max-width:9px", {ImageIntrinsicSizeState::Known, 15, 10}, true, 9000, 6);
+    run("width:20px", {ImageIntrinsicSizeState::Known, 15, 10}, false, 0, 0);
+    run("", {ImageIntrinsicSizeState::Unknown, 0, 0}, false, 0, 0);
 }
 void partition_and_live_proof() {
     Fixture fixture;
@@ -719,6 +767,7 @@ int main() {
         definite_inline_image_atomic_path();
         definite_inline_image_refusal_and_style_proof();
         definite_inline_image_percent_width();
+        natural_inline_image_metadata_path();
         partition_and_live_proof();
         refusal_and_rollback();
         mutation_damage_and_tiling();

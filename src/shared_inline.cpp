@@ -1,5 +1,6 @@
 #include "render_core/text_normalization.h"
 #include "computed_size_geometry.h"
+#include "natural_image_sizing.h"
 #include "shared_inline.h"
 #include <algorithm>
 #include <limits>
@@ -38,16 +39,15 @@ bool neutral(const Style& s, bool host, bool allow_image_dimensions = false) {
         !empty_edges(s.margin) || !empty_edges(s.padding) || !empty_edges(s.border_width) ||
         (!allow_image_dimensions && (s.width != -1 || s.height != -1 || s.width_percent != -1 || s.height_percent != -1)) ||
         (allow_image_dimensions && s.height_percent != -1) ||
-        s.min_width != -1 || s.max_width != -1 || s.min_height != -1 || s.max_height != -1 ||
-        s.min_width_percent != -1 || s.max_width_percent != -1 ||
-        s.min_height_percent != -1 || s.max_height_percent != -1 ||
+        (!allow_image_dimensions && (s.min_width != -1 || s.max_width != -1 ||
+            s.min_height != -1 || s.max_height != -1 || s.min_width_percent != -1 ||
+            s.max_width_percent != -1 || s.min_height_percent != -1 || s.max_height_percent != -1)) ||
         s.border_radius != 0 || s.border_radius_percent != -1 || s.border_radius_axes_specified ||
         !s.z_index_auto || s.aspect_ratio_width != 0 || s.aspect_ratio_height != 0 ||
         s.list_style_type != ListStyleType::None) return false;
     if (!allow_image_dimensions && !s.computed_sizes.empty()) return false;
     if (allow_image_dimensions) {
-        constexpr SizeProperty unsupported[] = {SizeProperty::MinWidth, SizeProperty::MinHeight,
-            SizeProperty::MaxWidth, SizeProperty::MaxHeight, SizeProperty::FlexBasis,
+        constexpr SizeProperty unsupported[] = {SizeProperty::FlexBasis,
             SizeProperty::InsetTop, SizeProperty::InsetRight, SizeProperty::InsetBottom, SizeProperty::InsetLeft};
         for (const auto property : unsupported) {
             SizeKind kind = SizeKind::Pixels;
@@ -58,6 +58,19 @@ bool neutral(const Style& s, bool host, bool allow_image_dimensions = false) {
     for (const auto& background : s.background_layers)
         if (background.kind != BackgroundLayerKind::None) return false;
     return true;
+}
+bool has_image_constraints(const Style& style) {
+    if (style.min_width != -1 || style.max_width != -1 || style.min_height != -1 ||
+        style.max_height != -1 || style.min_width_percent != -1 || style.max_width_percent != -1 ||
+        style.min_height_percent != -1 || style.max_height_percent != -1) return true;
+    constexpr SizeProperty properties[] = {SizeProperty::MinWidth, SizeProperty::MaxWidth,
+        SizeProperty::MinHeight, SizeProperty::MaxHeight};
+    for (const auto property : properties) {
+        SizeKind kind = SizeKind::Pixels;
+        std::int64_t value = 0, percentage = 0;
+        if (style.computed_sizes.read_typed(property, kind, value, percentage)) return true;
+    }
+    return false;
 }
 bool image_dimensions(const Style& style, std::int64_t containing_width,
     std::int64_t& width_units, int& height) {
@@ -94,15 +107,38 @@ bool image_dimensions(const Style& style, std::int64_t containing_width,
     height = static_cast<int>(value / 1000);
     return true;
 }
-bool eligible_inline_image(const Node& node, const Style& style, std::int64_t containing_width,
-    std::int64_t& width_units, int& height) {
+bool inline_image_style_eligible(const Node& node, const Style& style) {
     if (node.type != NodeType::Element || node.tag_name != "img" || !node.children.empty() ||
         node.attribute("src").empty() || node.attributes.find("srcset") != node.attributes.end() ||
         node.attributes.find("sizes") != node.attributes.end() ||
         style.object_fit != ObjectFit::Fill || style.object_position.x_percent != 50 ||
         style.object_position.y_percent != 50 || style.image_rendering != ImageRendering::Auto ||
         !neutral(style, false, true)) return false;
-    return image_dimensions(style, containing_width, width_units, height);
+    return true;
+}
+bool eligible_inline_image(const Node& node, const Style& style, std::int64_t containing_width,
+    std::int64_t& width_units, int& height, NaturalImageSizingFrame* natural_images,
+    ImageIntrinsicSize* retained_intrinsic = nullptr) {
+    if (!inline_image_style_eligible(node, style)) return false;
+    const bool constrained = has_image_constraints(style);
+    if (!constrained && image_dimensions(style, containing_width, width_units, height)) return true;
+    if (!natural_images || !natural_images->options.provider.intrinsic_size || style.height_percent >= 0)
+        return false;
+    const auto authored_width = computed_size_units(style, SizeProperty::Width, containing_width);
+    const auto authored_height = computed_size_units(style, SizeProperty::Height, -1);
+    const auto min_height = computed_size_units(style, SizeProperty::MinHeight, -1);
+    const auto max_height = computed_size_units(style, SizeProperty::MaxHeight, -1);
+    if (authored_width < -1 || authored_height < -1 ||
+        min_height < -1 || max_height < -1 || (authored_width >= 0 && authored_height >= 0)) return false;
+    const auto metadata = natural_images->metadata(node);
+    const auto natural = natural_image_content_size(style, metadata, containing_width, -1, 0, 0);
+    if (!natural.valid || natural.width < 0 || natural.height < 0 || natural.height % 1000 != 0 ||
+        natural.width > kDimensionPrecisionMaximum || natural.height / 1000 > std::numeric_limits<int>::max())
+        return false;
+    width_units = natural.width;
+    height = static_cast<int>(natural.height / 1000);
+    if (retained_intrinsic) *retained_intrinsic = metadata;
+    return true;
 }
 std::array<int, 32> host_geometry(const Style& s) {
     return {{s.width, s.height, s.min_width, s.max_width, s.min_height, s.max_height,
@@ -186,6 +222,7 @@ struct Collector {
     std::vector<CoreTextParagraphSpan> spans;
     std::size_t bytes = 0;
     ContextBudget& budget;
+    NaturalImageSizingFrame* natural_images = nullptr;
     std::int64_t containing_width_units = 0;
     std::vector<CoreTextAtomicGeometry> atomic_geometry;
     bool collect(LayoutBox& box, std::size_t parent, std::size_t depth, std::size_t dom_index = 0, std::size_t render_index = 0) {
@@ -196,8 +233,10 @@ struct Collector {
         const bool image = depth && box.node->tag_name == "img";
         std::int64_t image_width_units = 0;
         int image_height = 0;
+        ImageIntrinsicSize image_intrinsic{};
         if (image ? !eligible_inline_image(*box.node, box.style, containing_width_units,
-                image_width_units, image_height) : !neutral(box.style, depth == 0)) return false;
+                image_width_units, image_height, natural_images, &image_intrinsic) :
+                !neutral(box.style, depth == 0)) return false;
         if (depth && !text && !marker && !image && box.node->tag_name != "span") return false;
         if (box.node->text.size() > max_source-bytes) return false;
         bytes += box.node->text.size();
@@ -223,6 +262,8 @@ struct Collector {
             image_proof.image_source = box.node->attribute("src");
             image_proof.image_width_units = image_width_units;
             image_proof.image_height = image_height;
+            image_proof.natural_image_sized = image_intrinsic.state == ImageIntrinsicSizeState::Known;
+            image_proof.image_intrinsic = image_intrinsic;
         }
         if (text || marker) {
             if (!box.children.empty()) return false;
@@ -328,7 +369,8 @@ void append_fragment(SharedInlineMember& member, Rect fragment) {
 }
 
 bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
-    const LayoutEngineOptions& options, int& height, std::int64_t precise_width_units) noexcept {
+    const LayoutEngineOptions& options, int& height, std::int64_t precise_width_units,
+    NaturalImageSizingFrame* natural_images) noexcept {
     if (!host.node || !options.text_system || !options.text_system->ready() || host.children.empty() ||
         !neutral(host.style, true)) return false;
     SharedInlineLayoutStatistics local_statistics;
@@ -362,7 +404,7 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         snapshot->omitted.reserve(member_count);
         snapshot->owners.reserve(owner_count);
         Collector collector{*snapshot, std::vector<CoreTextParagraphSpan>(0), 0, budget,
-            paragraph_options.width_units, std::vector<CoreTextAtomicGeometry>(0)};
+            natural_images, paragraph_options.width_units, std::vector<CoreTextAtomicGeometry>(0)};
         collector.spans.reserve(owner_count);
         collector.atomic_geometry.reserve(owner_count);
         budget.capacity((snapshot->members.capacity()-member_count)*sizeof(SharedInlineMember)+
@@ -546,9 +588,17 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
         if (!p.node) return false;
         std::int64_t image_width = 0;
         int image_height = 0;
+        const bool image_dimensions_current = p.natural_image_sized
+            ? [&] {
+                const auto natural = natural_image_content_size(box.style, p.image_intrinsic,
+                    snapshot.width_units, -1, 0, 0);
+                return natural.valid && natural.width == p.image_width_units &&
+                    natural.height == static_cast<std::int64_t>(p.image_height) * 1000;
+            }()
+            : image_dimensions(box.style, snapshot.width_units, image_width, image_height) &&
+                image_width == p.image_width_units && image_height == p.image_height;
         const bool style_current = p.atomic_image
-            ? eligible_inline_image(*p.node, box.style, snapshot.width_units, image_width, image_height) &&
-                image_width == p.image_width_units && image_height == p.image_height &&
+            ? inline_image_style_eligible(*p.node, box.style) && image_dimensions_current &&
                 p.node->attribute("src") == p.image_source
             : neutral(box.style, i == 0);
         if (box.node != p.node || !p.node || p.node->parent != p.parent ||
