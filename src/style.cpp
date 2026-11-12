@@ -1,4 +1,5 @@
 ﻿#include "render_core/style.h"
+#include "scalar_cascade_cache.h"
 
 #include "render_core/form_control.h"
 #if defined(JELLYFRAME_RENDER_CORE_TEST_HOOKS)
@@ -5640,11 +5641,14 @@ StyleResolver::StyleResolver(Stylesheet stylesheet, StyleResolverOptions options
     }
 }
 
+StyleResolver::~StyleResolver() = default;
+
 StyleResolver::StyleResolver(const StyleResolver& other)
     : StyleResolver(other.stylesheet_, other.options_) {}
 
 StyleResolver& StyleResolver::operator=(const StyleResolver& other) {
     if (this != &other) {
+        scalar_cache_.reset();
         stylesheet_ = other.stylesheet_;
         options_ = other.options_;
         rebuild_derived_state();
@@ -5657,21 +5661,28 @@ StyleResolver::StyleResolver(StyleResolver&& other) noexcept
       options_(std::move(other.options_)),
       statistics_(other.statistics_),
       interaction_state_generation_(other.interaction_state_generation_) {
+    other.stylesheet_ = Stylesheet{};
+    other.clear_derived_state();
     rebuild_derived_state();
 }
 
 StyleResolver& StyleResolver::operator=(StyleResolver&& other) noexcept {
     if (this != &other) {
+        scalar_cache_.reset();
+        other.scalar_cache_.reset();
         stylesheet_ = std::move(other.stylesheet_);
         options_ = std::move(other.options_);
         statistics_ = other.statistics_;
-        interaction_state_generation_ = other.interaction_state_generation_;
+        other.stylesheet_ = Stylesheet{};
+        other.clear_derived_state();
         rebuild_derived_state();
     }
     return *this;
 }
 
-void StyleResolver::rebuild_derived_state() {
+void StyleResolver::clear_derived_state() noexcept {
+    ++interaction_state_generation_;
+    scalar_cache_.reset();
     id_rules_.clear();
     class_rules_.clear();
     tag_rules_.clear();
@@ -5681,6 +5692,10 @@ void StyleResolver::rebuild_derived_state() {
     background_image_resources_.clear();
     interaction_hints_ = {};
     has_custom_property_declarations_ = false;
+}
+
+void StyleResolver::rebuild_derived_state() {
+    clear_derived_state();
     build_rule_index();
     for (const CssRule& rule : stylesheet_) {
         for (const CssDeclaration& declaration : rule.declarations) {
@@ -6095,6 +6110,76 @@ Style StyleResolver::resolve_with_custom_properties(const Node& node,
                                                     const CustomPropertyMap& custom_properties,
                                                     const std::vector<const CssRule*>* matched_rules,
                                                     const LengthResolutionContext& length_context) const {
+    if (!options_.max_scalar_cache_entries || options_.max_scalar_cache_bytes < sizeof(detail::ScalarCascadeCache) ||
+        options_.diagnostics || node.type != NodeType::Element) {
+        ++statistics_.scalar_cache_bypasses;
+        return resolve_uncached(node, custom_properties, matched_rules, length_context);
+    }
+    detail::ScalarCascadeKey key;
+    std::vector<const CssRule*> local_matches;
+    const std::vector<const CssRule*>* complete_matches = matched_rules;
+    try {
+        const auto& candidates = candidate_rules_for(node);
+        if (candidates.size() > 64) {
+            key.valid = false;
+        }
+        if (key.valid && !complete_matches) {
+            const auto match_context = selector_match_context_from_options(options_);
+            for (const CssRule* rule : candidates) {
+                if (matches_rule(node, *rule, match_context)) local_matches.push_back(rule);
+            }
+            complete_matches = &local_matches;
+        }
+        if (!key.valid) complete_matches = matched_rules;
+        if (key.valid) {
+            key.inputs(node, is_document_root_element(node), length_context, custom_properties);
+            key.number(complete_matches->size());
+            for (const auto* rule : *complete_matches) {
+                key.number(static_cast<std::size_t>(rule - &*stylesheet_.begin()));
+            }
+        }
+        if (key.valid && scalar_cache_) {
+            if (const Style* cached = scalar_cache_->find(key.bytes)) {
+                Style result = *cached;
+                ++statistics_.scalar_cache_hits;
+                return result;
+            }
+        }
+    } catch (const std::bad_alloc&) {
+        ++statistics_.scalar_cache_bypasses;
+        return resolve_uncached(node, custom_properties, matched_rules, length_context);
+    } catch (const std::length_error&) {
+        ++statistics_.scalar_cache_bypasses;
+        return resolve_uncached(node, custom_properties, matched_rules, length_context);
+    }
+    if (!key.valid) {
+        ++statistics_.scalar_cache_bypasses;
+        return resolve_uncached(node, custom_properties, complete_matches, length_context);
+    }
+    ++statistics_.scalar_cache_misses;
+    Style result = resolve_uncached(node, custom_properties, complete_matches, length_context);
+    if (!detail::ScalarCascadeCache::scalar(result)) {
+        ++statistics_.scalar_cache_bypasses;
+        return result;
+    }
+    try {
+        if (!scalar_cache_) scalar_cache_ = std::make_unique<detail::ScalarCascadeCache>();
+        if (!scalar_cache_->insert(std::move(key.bytes), result,
+                                   options_.max_scalar_cache_entries, options_.max_scalar_cache_bytes)) {
+            ++statistics_.scalar_cache_bypasses;
+        }
+    } catch (const std::bad_alloc&) {
+        ++statistics_.scalar_cache_bypasses;
+    } catch (const std::length_error&) {
+        ++statistics_.scalar_cache_bypasses;
+    }
+    return result;
+}
+
+Style StyleResolver::resolve_uncached(const Node& node,
+                                                    const CustomPropertyMap& custom_properties,
+                                                    const std::vector<const CssRule*>* matched_rules,
+                                                    const LengthResolutionContext& length_context) const {
     Style style = default_style_for(node);
     if (node.type == NodeType::Element) {
         struct HtmlDimension {
@@ -6272,6 +6357,8 @@ std::size_t StyleResolver::background_image_resource_count() const {
 
 StyleResolverStatistics StyleResolver::statistics() const {
     StyleResolverStatistics snapshot = statistics_;
+    snapshot.scalar_cache_entries = scalar_cache_ ? scalar_cache_->entries : 0;
+    snapshot.scalar_cache_payload_bytes = scalar_cache_ ? scalar_cache_->payload_bytes : 0;
     snapshot.candidate_cache_entries = candidate_cache_.size();
     return snapshot;
 }
