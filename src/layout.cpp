@@ -1,4 +1,5 @@
 #include "render_core/layout.h"
+#include "shared_inline.h"
 
 #include "render_core/form_control.h"
 #include "computed_size_geometry.h"
@@ -41,7 +42,11 @@ int q1000_ceil_pixels(std::int32_t value) {
     return value <= 0 ? 0 : clamp_layout_value((static_cast<std::int64_t>(value) + 999) / 1000);
 }
 
+struct SizeOverrideRestore;
+thread_local const SizeOverrideRestore* active_size_override = nullptr;
+
 struct SizeOverrideRestore {
+    const SizeOverrideRestore* previous = active_size_override;
     Style& target;
     detail::ComputedSizeStorage sizes;
     bool saved_sizes = false;
@@ -62,8 +67,10 @@ struct SizeOverrideRestore {
         if (saved_sizes) sizes = style.computed_sizes;
         (void)first;
         (void)second;
+        active_size_override = this;
     }
     ~SizeOverrideRestore() noexcept {
+        active_size_override = previous;
         target.width = scalars[0];
         target.height = scalars[1];
         target.min_width = scalars[2];
@@ -84,14 +91,45 @@ struct SizeOverrideRestore {
     }
 };
 
+// Only a changed sizing scope is excluded. Unmodified probes and nested
+// paragraphs with their own stable style remain eligible for shared layout.
+bool has_temporary_size_override(const Style& style) noexcept {
+    for (auto* scope = active_size_override; scope; scope = scope->previous) {
+        if (&scope->target != &style) continue;
+        if (style.width != scope->scalars[0] || style.height != scope->scalars[1] ||
+            style.min_width != scope->scalars[2] || style.min_height != scope->scalars[3] ||
+            style.max_width != scope->scalars[4] || style.max_height != scope->scalars[5] ||
+            style.flex_basis != scope->scalars[6] ||
+            style.width_percent != scope->percentages[0] || style.height_percent != scope->percentages[1] ||
+            style.min_width_percent != scope->percentages[2] || style.min_height_percent != scope->percentages[3] ||
+            style.max_width_percent != scope->percentages[4] || style.max_height_percent != scope->percentages[5] ||
+            style.box_sizing_border_box != scope->box_sizing_border_box ||
+            !style.computed_sizes.equals(scope->sizes)) return true;
+    }
+    return false;
+}
+
+struct StyleReplayRestore;
+thread_local const StyleReplayRestore* active_style_replay = nullptr;
+
 struct StyleReplayRestore {
+    const StyleReplayRestore* previous = active_style_replay;
+    StyleReplayRestore() noexcept { active_style_replay = this; }
     std::vector<std::pair<Style*, Style>> snapshots;
     ~StyleReplayRestore() noexcept {
+        active_style_replay = previous;
         for (auto it = snapshots.rbegin(); it != snapshots.rend(); ++it)
             *it->first = std::move(it->second);
     }
     void capture(Style& style) { snapshots.emplace_back(&style, style); }
 };
+
+bool has_temporary_style_replay(const Style& style) noexcept {
+    for (auto* replay = active_style_replay; replay; replay = replay->previous)
+        for (const auto& saved : replay->snapshots)
+            if (saved.first == &style) return true;
+    return false;
+}
 
 TextSystemStatus measure_core_text(const TextSystem& text_system, std::string_view text,
                                    const Style& style, TextRunMetrics& metrics) {
@@ -1131,6 +1169,12 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
                                             int viewport_width,
                                             int viewport_height,
                                             MonotonicArena* arena) const {
+    SharedInlineLayoutStatistics shared_statistics;
+    struct SharedStatisticsOutput {
+        SharedInlineLayoutStatistics* output;
+        SharedInlineLayoutStatistics& value;
+        ~SharedStatisticsOutput() { if (output) *output = value; }
+    } shared_output{options_.shared_inline.statistics, shared_statistics};
     detail::IntrinsicSourceQueryLedger intrinsic_queries(options_.intrinsic_query_limits);
     detail::NaturalImageSizingFrame natural_images(options_.natural_image_sizing);
     // The caller's engine remains immutable and reusable. Only this synchronous
@@ -1139,6 +1183,7 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
     LayoutEngine pass_engine(*this);
     pass_engine.intrinsic_queries_ = &intrinsic_queries;
     pass_engine.natural_images_ = &natural_images;
+    pass_engine.options_.shared_inline.statistics = &shared_statistics;
     auto root_box = make_layout_box(arena);
     root_box->node = render_tree.node;
     root_box->style = render_tree.style;
@@ -1858,7 +1903,7 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
 #endif
     if (has_only_inline_children(box)) {
         children_units = static_cast<std::int64_t>(layout_inline_children(box,project_size_edge(content_x_units),
-            project_size_edge(content_y_units),content_width,depth))*1000;
+            project_size_edge(content_y_units),content_width,depth,content_width_units))*1000;
     } else {
         auto cursor_units = content_y_units;
         for (auto& child : box.children) {
@@ -2580,7 +2625,12 @@ int LayoutEngine::layout_inline_children(LayoutBox& box,
                                          int content_x,
                                          int content_y,
                                          int content_width,
-                                         std::size_t depth) const {
+                                         std::size_t depth, std::int64_t precise_width_units) const {
+    int shared_height = 0;
+    if (!has_temporary_size_override(box.style) && !has_temporary_style_replay(box.style) &&
+        detail::layout_shared_inline(box, content_x, content_y, content_width, options_, shared_height, precise_width_units))
+        return shared_height;
+    detail::retire_shared_inline(box);
     int cursor_x = bounded_add(content_x, std::max(0, std::min(box.style.text_indent, content_width)));
     int line_y = content_y;
     int line_height = 0;

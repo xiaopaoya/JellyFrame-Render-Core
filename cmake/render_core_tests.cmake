@@ -1,6 +1,18 @@
 # Only executables registered by this module receive the test CRT bootstrap.
-if(MSVC)
+if(WIN32)
     get_property(_jellyframe_targets_before_tests DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+endif()
+add_executable(jellyframe_shared_inline_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shared_inline_tests.cpp")
+target_link_libraries(jellyframe_shared_inline_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_shared_inline_tests COMMAND jellyframe_shared_inline_tests)
+add_executable(jellyframe_shared_inline_planner_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shared_inline_planner_tests.cpp")
+target_link_libraries(jellyframe_shared_inline_planner_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_shared_inline_planner_tests COMMAND jellyframe_shared_inline_planner_tests)
+if(COMMAND jellyframe_stage_sanitizer_runtime)
+    jellyframe_stage_sanitizer_runtime(jellyframe_shared_inline_planner_tests)
+endif()
+if(COMMAND jellyframe_stage_sanitizer_runtime)
+    jellyframe_stage_sanitizer_runtime(jellyframe_shared_inline_tests)
 endif()
 add_executable(jellyframe_scalar_cascade_cache_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/scalar_cascade_cache_tests.cpp")
 target_link_libraries(jellyframe_scalar_cascade_cache_tests PRIVATE jellyframe_render_core)
@@ -242,7 +254,7 @@ endforeach()
 
 # Keep failed CTest processes noninteractive on MSVC, with diagnostics on stderr.
 # This source belongs to test executables only, never the product library.
-if(MSVC)
+if(WIN32)
     get_property(_jellyframe_targets_after_tests DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
     foreach(_jellyframe_test_target IN LISTS _jellyframe_targets_after_tests)
         if(_jellyframe_test_target IN_LIST _jellyframe_targets_before_tests)

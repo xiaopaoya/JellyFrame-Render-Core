@@ -152,3 +152,10 @@ version and engine ABI according to their own compatibility policy.
 
 The JellyFrame Runtime repository owns App packages, JerryScript integration,
 desktop tooling and device-layer documentation.
+
+The ABI4 shared-inline candidate adds a sparse 16-byte layout-cache binding and
+pass-local shared paragraph options/statistics. JFTP capability version 2 adds a
+signed initial Q1000 glyph X while retaining v1 decoding and fixed packet sizes.
+See [shared inline paragraphs](docs/reference/render_core/shared_inline_paragraphs.md)
+for admission, cumulative budgets, ownership, consumer rebuild requirements and
+remaining accepted migration stages.

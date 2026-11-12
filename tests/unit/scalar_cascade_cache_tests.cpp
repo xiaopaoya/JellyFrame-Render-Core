@@ -583,7 +583,11 @@ void fractional_size_admission() {
         node->set_attribute("style", declaration);
         StyleResolver unsupported(CssParser{}.parse(""), enabled());
         compare(unsupported, plain, *node);
-        if (unsupported.statistics().scalar_cache_entries != 0)
+        // Cropped builds discard unsupported Flex declarations during parsing;
+        // there is then no retained flex-basis owner to disqualify the cache.
+        const bool ignored_flex = !JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED &&
+            std::string_view(declaration)=="flex-basis:2.5px";
+        if (unsupported.statistics().scalar_cache_entries != (ignored_flex ? 1u : 0u))
             throw std::runtime_error(declaration);
     }
 }

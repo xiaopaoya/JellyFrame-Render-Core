@@ -50,6 +50,10 @@ set(JELLYFRAME_RENDER_CORE_CORE_PAINT_SOURCES
     src/frame_update.cpp
     src/hit_test.cpp
     src/layer_tree.cpp
+    src/core_text_paragraph.cpp
+    src/layout_text_service.cpp
+    src/inline_fragment_lines.cpp
+    src/shared_inline.cpp
     src/layout.cpp
     src/pipeline_statistics.cpp
     src/render_tree.cpp

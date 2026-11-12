@@ -252,6 +252,13 @@ bool style_dirty_can_reuse_layout(const Node& document,
         !dirty_flags_are_style_text_layout_only(document.dirty_flags)) {
         return false;
     }
+    std::vector<const LayoutBox*> pending{&current_layout};
+    while (!pending.empty()) {
+        const auto* box = pending.back();
+        pending.pop_back();
+        if (box->text_layout_cache.shared_inline) return false;
+        for (const auto& child : box->children) pending.push_back(child.get());
+    }
     return render_tree_shape_and_layout_fields_match(previous_render_tree, next_render_tree) &&
         dirty_text_nodes_have_stable_layout(document, current_layout, text_measure, false);
 }

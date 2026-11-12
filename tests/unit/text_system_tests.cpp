@@ -244,7 +244,7 @@ void prepared_packet_paint() {
     };
     TextPaintLimits limits;limits.max_pixels=1;reject_without_write(limits);
     limits={};limits.max_work=1;reject_without_write(limits);
-    auto malformed=packet;malformed[4]=2;PreparedTextView preserved=view;
+    auto malformed=packet;malformed[4]=3;PreparedTextView preserved=view;
     assert(!decode_prepared_text(malformed,preserved) && preserved.size()==view.size());
     assert(system.paint(preserved,unchanged,{0,0,32,20},7000,12000,ink)==TextSystemStatus::Ok);
 
@@ -271,6 +271,71 @@ void prepared_packet_paint() {
     }
 }
 const LayoutBox* find_text_box(const LayoutBox& box);
+void offset_prepared_packets() {
+    auto a=asset();TextFontFace face{1,0,a.font};TextSystem system;
+    assert(system.bind(&face,1)==S::Ok);
+    std::array<PreparedTextGlyph,2> glyphs;TextRunMetrics metrics;
+    assert(system.prepare("BA",{},glyphs.data(),glyphs.size(),metrics)==S::Ok);
+    std::string packet;
+    auto shifted=glyphs;
+    for(auto& glyph:shifted) glyph.x+=1500;
+    assert(encode_prepared_text(shifted.data(),shifted.size(),16000,2,packet,1500));
+    assert(packet[4]==2);
+    PreparedTextView offset;
+    assert(decode_prepared_text(packet,offset));
+    FrameBuffer actual(40,30,{255,255,255,255}),expected=actual;
+    assert(system.paint(offset,actual,{0,0,40,30},7000,12000,{0,0,0,255})==S::Ok);
+    assert(encode_prepared_text(glyphs.data(),glyphs.size(),16000,2,packet));
+    PreparedTextView zero;
+    assert(packet[4]==1 && decode_prepared_text(packet,zero));
+    assert(system.paint(zero,expected,{0,0,40,30},8500,12000,{0,0,0,255})==S::Ok);
+    for(std::size_t i=0;i<actual.pixels.size();++i) assert(actual.pixels[i].r==expected.pixels[i].r);
+    auto malformed=packet;malformed[24]=1;
+    assert(!decode_prepared_text(malformed,zero));
+    TextLayoutCache cache;
+    TextLayoutCache copied=cache;
+    assert(!copied.shared_inline);
+}
+void installed_shared_paragraph_path() {
+    auto font=asset(); TextFontFace face{1,0,font.font}; TextSystem system;
+    assert(system.bind(&face,1)==S::Ok);
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}div{width:25px;font-size:16px;line-height:20px;text-align:center}"));
+    auto plain=HtmlParser{}.parse("<div><span>AB AB AB</span></div>");
+    auto split=HtmlParser{}.parse("<div><span>A<span>B A</span>B </span><span>AB</span></div>");
+    LayoutEngineOptions options; options.text_system=&system;
+    auto a=LayoutEngine(styles,{},options).layout(*plain,80,80);
+    auto b=LayoutEngine(styles,{},options).layout(*split,80,80);
+    TextLayoutCache copied;
+    bool has_binding=false;
+    const auto bindings=[&](const auto& self,const LayoutBox& box)->void {
+        if(box.text_layout_cache.shared_inline) {copied=box.text_layout_cache;has_binding=true;}
+        for(const auto& child:box.children) self(self,*child);
+    };
+    bindings(bindings,*b);
+    assert(has_binding && copied.shared_inline);
+    LayerTreeBuilderOptions layers; layers.text_system=&system;
+    auto la=LayerTreeBuilder(layers).build(*a), lb=LayerTreeBuilder(layers).build(*b);
+    bool has_v2=false;
+    const auto packets=[&](const auto& self,const LayerNode& layer)->void {
+        for(const auto& command:layer.display_list)
+            if(command.type()==DisplayCommandType::PreparedText && command.text.size()>4 && command.text[4]==2)
+                has_v2=true;
+        for(const auto& child:layer.children) self(self,*child);
+    };
+    packets(packets,*lb); assert(has_v2);
+    SoftwareCompositor::Options paint; paint.text_system=&system;
+    SoftwareCompositor compositor({},paint);
+    const auto expected=compositor.render(*la,80,80,{255,255,255,255});
+    const auto actual=compositor.render(*lb,80,80,{255,255,255,255});
+    assert(expected.pixels.size()==actual.pixels.size());
+    for(std::size_t i=0;i<actual.pixels.size();++i) {
+        const auto x=expected.pixels[i],y=actual.pixels[i];
+        assert(x.r==y.r && x.g==y.g && x.b==y.b && x.a==y.a);
+    }
+    b.reset(); split.reset();
+    assert(copied.shared_inline); // Destruction needs only the installed incomplete type.
+}
 void html_layout_to_core_paint() {
     auto a=asset();
     const auto family_hash=normalized_font_family_hash("Core Test");
@@ -513,6 +578,6 @@ int main(int argc,char** argv) {
 #endif
     if (argc>1) return inspect(argc,argv);
     weights();strikes_and_families();fallback_and_geometry();refusals_and_budgets();
-    prepared_packet_paint();html_layout_to_core_paint();aligned_prepared_text_stays_inside_its_layout_box();core_layout_refusals_do_not_fall_back_to_host_text();
+    prepared_packet_paint();offset_prepared_packets();installed_shared_paragraph_path();html_layout_to_core_paint();aligned_prepared_text_stays_inside_its_layout_box();core_layout_refusals_do_not_fall_back_to_host_text();
     std::cout<<"text system selection/geometry/transaction/budget tests passed\n";
 }

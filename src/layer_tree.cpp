@@ -1,4 +1,5 @@
-﻿#include "render_core/layer_tree.h"
+﻿#include "shared_inline.h"
+#include "render_core/layer_tree.h"
 
 #include "render_core/animation_timeline.h"
 #include "render_core/form_control.h"
@@ -1586,6 +1587,15 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
                    resolved_border_radius(box), resolved_border_radius_y(box));
     }
 
+    if (box.text_layout_cache.shared_inline) {
+        const auto& binding = *box.text_layout_cache.shared_inline;
+        const auto used = display_list.size()-box_command_begin;
+        const auto available = remaining_commands-std::min(used, remaining_commands);
+        if (binding.member == 0 && binding.snapshot->paragraph.fragments.size() <= available &&
+            detail::shared_inline_current(binding, options.text_system))
+            detail::emit_shared_inline(box, display_list);
+        return;
+    }
     if (box.node != nullptr && box.node->type == NodeType::Text) {
         const TextLayoutCache* cached_layout = valid_text_layout_cache(box, options);
         const std::string text = cached_layout != nullptr
