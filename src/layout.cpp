@@ -6,6 +6,7 @@
 #include "intrinsic_source_query.h"
 #include "intrinsic_source_query_height.h"
 #include "layout_mutation_journal.h"
+#include "natural_image_sizing.h"
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
 #include "flex_length_resolution.h"
 #include "flex_auto_min.h"
@@ -1131,18 +1132,20 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
                                             int viewport_height,
                                             MonotonicArena* arena) const {
     detail::IntrinsicSourceQueryLedger intrinsic_queries(options_.intrinsic_query_limits);
+    detail::NaturalImageSizingFrame natural_images(options_.natural_image_sizing);
     // The caller's engine remains immutable and reusable. Only this synchronous
     // worker borrows the stack ledger, so nested layout/probes share one budget
     // while independent or reentrant public calls start independent ledgers.
     LayoutEngine pass_engine(*this);
     pass_engine.intrinsic_queries_ = &intrinsic_queries;
+    pass_engine.natural_images_ = &natural_images;
     auto root_box = make_layout_box(arena);
     root_box->node = render_tree.node;
     root_box->style = render_tree.style;
     root_box->viewport_width = viewport_width;
     root_box->viewport_height = viewport_height;
     bool unsupported_mixed_dimension = false;
-    build_layout_tree(render_tree, *root_box, arena, unsupported_mixed_dimension);
+    pass_engine.build_layout_tree(render_tree, *root_box, arena, unsupported_mixed_dimension);
     if (unsupported_mixed_dimension) {
         report_diagnostic(options_.diagnostics, DiagnosticStage::Layout,
             DiagnosticSeverity::Warning, "unsupported-mixed-dimension-layout",
@@ -1184,6 +1187,15 @@ void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box,
         const bool block_path = current.parent_block_path && render_object.style.display == Display::Block &&
             render_object.style.position_type == PositionType::Static && render_object.node &&
             render_object.node->type != NodeType::Text && !is_form_control(*render_object.node);
+        if (block_path && current.depth <= std::max<std::size_t>(1, options_.max_layout_depth) &&
+            natural_images_ && options_.natural_image_sizing.provider.intrinsic_size &&
+            render_object.node->tag_name == "img" && !render_object.node->attribute("src").empty() &&
+            (!render_object.node->parent || render_object.node->parent->tag_name != "picture") &&
+            render_object.children.empty() &&
+            (detail::computed_size_units(render_object.style, detail::SizeProperty::Width, -1) == -1 ||
+             detail::computed_size_units(render_object.style, detail::SizeProperty::Height, -1) == -1)) {
+            natural_images_->metadata(*render_object.node);
+        }
         bool qualified_flex = false;
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
         const auto& flex_style = render_object.style;
@@ -1711,10 +1723,19 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
     const auto right_margin = style.margin_right_auto ? 0 : static_cast<std::int64_t>(style.margin.right)*1000;
     const auto fallback_width = std::clamp<std::int64_t>(context.width-left_margin-right_margin-horizontal_decoration,
         0,kDimensionPrecisionMaximum);
-    const auto content_width_units = context.allocated_width >= 0 ? context.allocated_width :
+    auto content_width_units = context.allocated_width >= 0 ? context.allocated_width :
         computed_content_axis(style,false,context.width,fallback_width,horizontal_decoration);
-    const auto fixed_height_units = context.allocated_height >= 0 ? context.allocated_height :
+    auto fixed_height_units = context.allocated_height >= 0 ? context.allocated_height :
         computed_content_axis(style,true,context.height,-1,vertical_decoration);
+    if (natural_images_ && box.node && box.node->tag_name == "img" && box.children.empty() &&
+        context.allocated_width < 0 && context.allocated_height < 0) {
+        const auto natural = natural_image_content_size(style, natural_images_->retained(*box.node),
+            context.width, context.height, horizontal_decoration, vertical_decoration);
+        if (natural.valid) {
+            content_width_units = natural.width;
+            fixed_height_units = natural.height;
+        }
+    }
     if (content_width_units < 0 || fixed_height_units < -1) {
         const auto result = layout_box(box,project_size_edge(context.x),project_size_edge(context.y),
             project_size_edge(context.width),height,depth);
@@ -1862,6 +1883,7 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
     }
     const auto auto_height = std::clamp<std::int64_t>(std::max(children_units,ratio_height_units),0,kDimensionPrecisionMaximum);
     const auto content_height_units = context.allocated_height >= 0 ? context.allocated_height :
+        fixed_height_units >= 0 ? fixed_height_units :
         computed_content_axis(style,true,context.height,auto_height,vertical_decoration);
     // A malformed retained value was already refused above while computing the
     // fixed height, before descendants were laid out.
