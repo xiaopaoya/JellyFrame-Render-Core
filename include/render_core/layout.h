@@ -211,8 +211,8 @@ struct LayoutEngineOptions {
     // layout call. Includes failed queries and speculative probes; rollback
     // never refunds work already performed.
     LayoutIntrinsicQueryStatistics* intrinsic_query_statistics = nullptr;
-    // First bounded consumer: empty static block img in an ordinary block
-    // ancestor chain. Inline/picture/Flex/Grid/positioned contexts retain the
+    // Bounded consumers: empty static block img in an ordinary block ancestor
+    // chain, plus admitted shared-inline paragraphs. Other contexts retain the
     // existing fallback. Provider/context are borrowed through each layout call.
     NaturalImageSizingOptions natural_image_sizing;
     SharedInlineLayoutOptions shared_inline;
