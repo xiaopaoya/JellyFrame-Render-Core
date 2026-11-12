@@ -63,20 +63,21 @@ bool PreparedTextView::read(std::size_t index, PreparedTextGlyph& output) const 
 
 bool encode_prepared_text(const PreparedTextGlyph* glyphs, std::size_t count,
                           std::int32_t size, std::uint32_t source_bytes,
-                          std::string& output) noexcept {
+                          std::string& output, std::int32_t initial_x) noexcept {
     if (count > kMaxPreparedTextGlyphs || (count && !glyphs) || size < 0) return false;
     std::uint32_t byte = 0;
-    std::int64_t x = 0;
+    std::int64_t x = initial_x;
     for (std::size_t i = 0; i < count; ++i)
         if (!record_valid(glyphs[i], byte, x)) return false;
     if (byte != source_bytes) return false;
     try {
         std::string draft(kPreparedTextHeaderBytes + count * kPreparedTextRecordBytes, '\0');
         draft[0] = 'J'; draft[1] = 'F'; draft[2] = 'T'; draft[3] = 'P';
-        draft[4] = 1; draft[6] = static_cast<char>(kPreparedTextRecordBytes);
+        draft[4] = initial_x == 0 ? 1 : 2; draft[6] = static_cast<char>(kPreparedTextRecordBytes);
         put(draft, 8, static_cast<std::uint32_t>(count));
         put(draft, 12, static_cast<std::uint32_t>(draft.size()));
         put(draft, 16, static_cast<std::uint32_t>(size)); put(draft, 20, source_bytes);
+        if (initial_x) put(draft, 24, static_cast<std::uint32_t>(initial_x));
         for (std::size_t i = 0; i < count; ++i)
             write_record(draft, kPreparedTextHeaderBytes + i * kPreparedTextRecordBytes, glyphs[i]);
         output.swap(draft);
@@ -87,9 +88,9 @@ bool encode_prepared_text(const PreparedTextGlyph* glyphs, std::size_t count,
 
 bool decode_prepared_text(std::string_view packet, PreparedTextView& output) noexcept {
     if (packet.size() < kPreparedTextHeaderBytes || packet.size() > kMaxPreparedTextBytes ||
-        packet.substr(0, 4) != "JFTP" || packet[4] != 1 || packet[5] ||
+        packet.substr(0, 4) != "JFTP" || (packet[4] != 1 && packet[4] != 2) || packet[5] ||
         static_cast<unsigned char>(packet[6]) != kPreparedTextRecordBytes || packet[7] ||
-        i32(packet, 16) < 0 || u32(packet, 24) || u32(packet, 28)) return false;
+        i32(packet, 16) < 0 || (packet[4] == 1 && u32(packet, 24)) || u32(packet, 28)) return false;
     const auto count = u32(packet, 8);
     if (count > kMaxPreparedTextGlyphs ||
         packet.size() != kPreparedTextHeaderBytes + count * kPreparedTextRecordBytes ||
@@ -98,7 +99,7 @@ bool decode_prepared_text(std::string_view packet, PreparedTextView& output) noe
     draft.packet_ = packet; draft.count_ = count;
     draft.size_q1000_ = i32(packet, 16); draft.source_bytes_ = u32(packet, 20);
     std::uint32_t byte = 0;
-    std::int64_t x = 0;
+    std::int64_t x = packet[4] == 2 ? i32(packet, 24) : 0;
     for (std::size_t i = 0; i < count; ++i) {
         PreparedTextGlyph g;
         if (!draft.read(i, g) || !record_valid(g, byte, x)) return false;

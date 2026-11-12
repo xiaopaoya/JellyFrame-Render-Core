@@ -1,3 +1,4 @@
+﻿#include "shared_inline.h"
 #include "render_core/hit_test.h"
 
 #include "render_core/dom.h"
@@ -102,7 +103,8 @@ HitTestResult HitTester::hit_test_box(const LayoutBox& box, int x, int y,
         }
     }
 
-    if (box.node == nullptr || !contains(box.rect, x, y)) {
+    if (box.node == nullptr || (box.text_layout_cache.shared_inline
+        ? !detail::shared_inline_contains(box, x, y) : !contains(box.rect, x, y))) {
         return {};
     }
     if (box.style.visibility_hidden) {

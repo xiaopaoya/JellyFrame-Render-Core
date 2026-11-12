@@ -40,7 +40,7 @@ bool contains_dirty_node(const std::vector<const Node*>& dirty_text_nodes, const
 }
 
 bool text_box_can_reuse_layout(const LayoutBox& box, const TextMeasureProvider& text_measure) {
-    if (box.node == nullptr || box.node->type != NodeType::Text) {
+    if (box.text_layout_cache.shared_inline || box.node == nullptr || box.node->type != NodeType::Text) {
         return false;
     }
     const std::string text = transformed_render_text(*box.node, box.style.text_transform);

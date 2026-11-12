@@ -80,7 +80,7 @@ rounded Q1000 scalar advances, matching the actual prepared positions.
 resource/glyph IDs, resolved/source scalar, original UTF-8 byte interval, pen X
 and scaled glyph geometry. It does not retain a text pointer, callback/context or
 borrowed font pointer in the records. Their resource IDs must remain resolvable
-to the same assets when consumed. The JFTP v1 packet codec in `prepared_text.h`
+to the same assets when consumed. The JFTP v1/v2 packet codec in `prepared_text.h`
 preserves those per-glyph choices and geometry and decodes to a borrowed,
 allocation-free view. It does not carry source text or raw pointers and does not
 reuse the old single-font packet. `LayoutEngineOptions::text_system` can measure,
@@ -153,3 +153,7 @@ extend supported shaping as required, and migrate Runtime font ownership, stable
 IDs and worker/UI transport. Then delete old providers/HostTextAdapter and obsolete
 font loaders/assets directly, bump the matched ABI/package/codec as necessary.
 No new provider adapter or public compatibility bridge is part of this slice.
+
+Shared neutral inline paragraphs use the same current TextSystem and final
+prepared packets. See [shared inline paragraphs](shared_inline_paragraphs.md)
+for complete-context ownership, Q1000 initial packet offsets and operation limits.

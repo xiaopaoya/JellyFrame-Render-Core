@@ -364,8 +364,8 @@ private:
     }
 
 public:
-    DisplayCommand() = default;
-    explicit DisplayCommand(DisplayCommandType type) { set_type(type); }
+    DisplayCommand() : text(0, '\0') {}
+    explicit DisplayCommand(DisplayCommandType type) : text(0, '\0') { set_type(type); }
     DisplayCommand(const DisplayCommand&) = default;
     DisplayCommand(DisplayCommand&&) noexcept = default;
     DisplayCommand& operator=(DisplayCommand&&) noexcept = default;

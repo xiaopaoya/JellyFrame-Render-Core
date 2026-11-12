@@ -47,6 +47,8 @@ struct NaturalImageSizingOptions {
     NaturalImageSizingStatistics* statistics = nullptr;
 };
 
+namespace detail { struct SharedInlineBinding; }
+
 struct LayoutBox;
 
 struct PreparedTextLine {
@@ -66,6 +68,9 @@ using LayoutBoxPtr = std::unique_ptr<LayoutBox, LayoutBoxDeleter>;
 // This is intentionally owned by the layout box: a layout tree and its layer
 // tree are one frame-local snapshot, so the result cannot outlive its inputs.
 struct TextLayoutCache {
+    // Sparse immutable shared-paragraph binding. Empty on ordinary boxes.
+    // Geometry/packets survive live DOM invalidation for retained-frame damage.
+    std::shared_ptr<const detail::SharedInlineBinding> shared_inline;
     bool valid = false;
     std::string source_text;
     std::string rendered_text;
@@ -170,6 +175,31 @@ class IntrinsicSourceQueryLedger;
 struct NaturalImageSizingFrame;
 }
 
+struct SharedInlineLayoutStatistics {
+    std::size_t attempts = 0;
+    std::size_t accepted = 0;
+    std::size_t refusals = 0;
+    std::size_t members = 0;
+    std::size_t source_bytes = 0;
+    std::size_t queries = 0;
+    std::size_t query_bytes = 0;
+    std::size_t work = 0;
+    // Conservative cumulative explicit new payload acquisitions. Includes failed
+    // attempts and scratch, excludes allocator metadata and a caller's old tree.
+    std::size_t acquired_bytes = 0;
+    std::size_t peak_context_charged_bytes = 0;
+};
+struct SharedInlineLayoutOptions {
+    std::size_t max_attempts = 128;
+    std::size_t max_context_capacity_bytes = 65536;
+    std::size_t max_total_capacity_bytes = 262144;
+    std::size_t max_work = 262144;
+    std::size_t max_queries = 2048;
+    std::size_t max_query_bytes = 262144;
+    // Synchronous output replaced at the end of each public layout call.
+    SharedInlineLayoutStatistics* statistics = nullptr;
+};
+
 struct LayoutEngineOptions {
     std::size_t max_layout_boxes = 4096;
     DiagnosticSink* diagnostics = nullptr;
@@ -185,6 +215,7 @@ struct LayoutEngineOptions {
     // ancestor chain. Inline/picture/Flex/Grid/positioned contexts retain the
     // existing fallback. Provider/context are borrowed through each layout call.
     NaturalImageSizingOptions natural_image_sizing;
+    SharedInlineLayoutOptions shared_inline;
 };
 
 class LayoutEngine {
@@ -241,7 +272,8 @@ private:
                         int containing_height,
                         std::size_t depth) const;
 #endif
-    int layout_inline_children(LayoutBox& box, int content_x, int content_y, int content_width, std::size_t depth) const;
+    int layout_inline_children(LayoutBox& box, int content_x, int content_y, int content_width, std::size_t depth,
+                               std::int64_t precise_width_units = -1) const;
     struct PositionedContext;
     void layout_positioned_children(LayoutBox&, const PositionedContext&, std::size_t depth) const;
     LayoutBoxPtr build_with_arena(const RenderObject& render_tree,

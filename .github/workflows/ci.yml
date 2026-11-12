@@ -63,6 +63,12 @@ jobs:
               env.write(f"EXPECTED_CORE_PROFILE_ID={profile['profileId']}\n")
           PY
 
+      - name: Qualify installed text and shared paragraph contract
+        run: |
+          cmake -S tests/package/text_system_consumer -B build/text-consumer-${{ matrix.profile }} -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/build/install-${{ matrix.profile }}"
+          cmake --build build/text-consumer-${{ matrix.profile }} --parallel
+          ctest --test-dir build/text-consumer-${{ matrix.profile }} --output-on-failure
+
       - name: Configure installed consumer
         run: >-
           cmake -S tests/package/background_multilayer_consumer

@@ -1,4 +1,5 @@
-﻿#include "render_core/dirty_region.h"
+#include "shared_inline.h"
+#include "render_core/dirty_region.h"
 
 #include "render_core/layer_tree.h"
 
@@ -376,6 +377,13 @@ void append_dirty_paint_effect_bounds_from_layout(const LayoutBox& layout,
     while (!pending.empty()) {
         const LayoutBox* current = pending.back();
         pending.pop_back();
+        if (current->text_layout_cache.shared_inline &&
+            current->text_layout_cache.shared_inline->member == 0 &&
+            current->node != nullptr && current->node->dirty_flags != DomDirtyNone) {
+            // Any source/style mutation can move every later paragraph owner.
+            // Both historical and new frozen paragraph extents contribute.
+            merge_dirty_bounds(output, current->node, detail::shared_inline_damage_bounds(*current));
+        }
         if (current->node != nullptr && current->node->local_dirty_flags != DomDirtyNone) {
             merge_dirty_bounds(output,
                                current->node,
