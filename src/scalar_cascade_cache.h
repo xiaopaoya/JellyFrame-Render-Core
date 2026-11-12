@@ -71,8 +71,7 @@ struct ScalarCascadeKey {
     std::string bytes;
     bool valid = true;
     bool append(const char *source, std::size_t size) {
-        if (!valid || size > 2048 - bytes.size())
-            {
+        if (!valid || size > 2048 - bytes.size()) {
             valid = false;
             return false;
         }

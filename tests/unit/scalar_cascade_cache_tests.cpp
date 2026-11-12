@@ -1,6 +1,7 @@
 #include "../../src/scalar_cascade_cache.h"
 #include "render_core/css_parser.h"
 #include "render_core/render_tree.h"
+#include "test_crt_diagnostics.h"
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -491,6 +492,11 @@ void allocation_fallbacks() {
                                          "to force retained copy allocation'}");
     StyleResolver plain(sheet);
     const auto expected = plain.resolve(*node);
+#if !defined(NDEBUG)
+    // Debug STL bookkeeping can allocate inside noexcept constructors.
+    // Allocation-failure injection runs in the Release executable.
+    return;
+#else
     unsigned completed = 0;
     for (bool warm : {false, true}) {
         for (std::ptrdiff_t failure = 0; failure < 24; ++failure) {
@@ -516,6 +522,7 @@ void allocation_fallbacks() {
         }
     }
     check(completed > 24, "cache-local allocation failures fall back to complete ordinary resolution");
+#endif
 }
 void fractional_size_admission() {
     for (unsigned index = 0; index < 11; ++index) {
@@ -603,6 +610,7 @@ void overrides() {
 }
 } // namespace
 int main() {
+    configure_test_crt_diagnostics();
     try {
         contextual_inputs();
         seeds_and_lifetime();

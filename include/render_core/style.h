@@ -591,6 +591,7 @@ private:
 
     void build_rule_index();
     void rebuild_derived_state();
+    void clear_derived_state() noexcept;
     void prepare_context(StyleResolveContext& context, const Node& node) const;
     const std::vector<const CssRule*>& candidate_rules_for(const Node& node) const;
     bool apply_custom_properties_for_node(CustomPropertyMap& inherited,

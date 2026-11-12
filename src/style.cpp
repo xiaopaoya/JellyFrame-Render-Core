@@ -5661,7 +5661,8 @@ StyleResolver::StyleResolver(StyleResolver&& other) noexcept
       options_(std::move(other.options_)),
       statistics_(other.statistics_),
       interaction_state_generation_(other.interaction_state_generation_) {
-    other.rebuild_derived_state();
+    other.stylesheet_ = Stylesheet{};
+    other.clear_derived_state();
     rebuild_derived_state();
 }
 
@@ -5672,13 +5673,14 @@ StyleResolver& StyleResolver::operator=(StyleResolver&& other) noexcept {
         stylesheet_ = std::move(other.stylesheet_);
         options_ = std::move(other.options_);
         statistics_ = other.statistics_;
-        other.rebuild_derived_state();
+        other.stylesheet_ = Stylesheet{};
+        other.clear_derived_state();
         rebuild_derived_state();
     }
     return *this;
 }
 
-void StyleResolver::rebuild_derived_state() {
+void StyleResolver::clear_derived_state() noexcept {
     ++interaction_state_generation_;
     scalar_cache_.reset();
     id_rules_.clear();
@@ -5690,6 +5692,10 @@ void StyleResolver::rebuild_derived_state() {
     background_image_resources_.clear();
     interaction_hints_ = {};
     has_custom_property_declarations_ = false;
+}
+
+void StyleResolver::rebuild_derived_state() {
+    clear_derived_state();
     build_rule_index();
     for (const CssRule& rule : stylesheet_) {
         for (const CssDeclaration& declaration : rule.declarations) {
