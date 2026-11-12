@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cstddef>
 
 namespace jellyframe::detail {
 enum class SizeProperty : std::uint8_t {
@@ -32,6 +33,7 @@ public:
     // LengthPercentage slot and leaves outputs untouched on absence.
     bool read_typed(SizeProperty, SizeKind&, std::int64_t& units,
                     std::int64_t& percentage_units) const noexcept;
+    std::size_t retained_payload_bytes() const noexcept;
     bool empty() const noexcept { return data_ == nullptr; }
     bool equals(const ComputedSizeStorage&) const noexcept;
 private:
