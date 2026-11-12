@@ -118,6 +118,31 @@ the handles. A callback return value does not transfer provider ownership to
 Core. The installed `image_callback_consumer` regression exercises this public
 contract with full and cropped feature profiles.
 
+The same unpublished 0.9.0 / ABI4 candidate adds the opt-in
+`LayoutEngineOptions::natural_image_sizing` contract, gated by
+`JELLYFRAME_NATURAL_IMAGE_LAYOUT_API_VERSION == 1`. The metadata-only callback
+returns the existing `ImageIntrinsicSize` value from the host's immutable image
+snapshot. The first consumer admits empty static block `img` elements with a
+nonempty `src` in an ordinary block ancestor chain. It applies natural dimensions
+to auto axes, preserves typed HTML/CSS sizing and Q1000 geometry, and implements
+ratio/min/max/box-sizing rules. Unknown, invalid or exhausted metadata retains
+the existing layout fallback. Inline paragraphs, picture source selection,
+Flex/Grid contributions and positioned images remain outside this consumer.
+
+One layout call owns a bounded sparse memo, including declined results; default
+limits are 128 queries, 128 entries and 4096 scratch bytes, with a hard ceiling
+of 4096 entries. Allocation precedes host queries. No metadata ownership or
+per-box storage survives the call, and paint/replay use retained geometry.
+The callback/context are borrowed through the synchronous layout call; the host
+uses the same immutable snapshot/source selection for its existing paint
+resolver and retains provider resource bytes through final replay. Metadata
+lookup must not decode/load image bytes or mutate borrowed DOM/data. Resource
+changes require a new layout; old/new snapshot providers can coexist. Both
+definite pixel/HTML axes skip metadata queries; percentage axes can require a
+query because their height basis may remain indefinite. Hosts rebuild and pin
+the source manifest when adopting this additive ABI4 candidate. The installed
+`natural_image_consumer` regression verifies the gated public interface.
+
 
 
 

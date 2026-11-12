@@ -16,6 +16,37 @@
 
 namespace jellyframe {
 
+#define JELLYFRAME_NATURAL_IMAGE_LAYOUT_API_VERSION 1
+
+// Metadata-only lookup into a host-owned immutable resource snapshot. No image
+// decoding/loading, handle resolution, ownership transfer or DOM mutation is
+// requested. Share the same snapshot/source selection with the paint resolver.
+// Known dimensions are density-corrected CSS pixels in 1..8191 on each axis.
+struct NaturalImageSizeProvider {
+    ImageIntrinsicSize (*intrinsic_size)(const Node&, void* context) = nullptr;
+    void* context = nullptr;
+};
+
+struct NaturalImageSizingStatistics {
+    std::size_t queries = 0;
+    std::size_t cache_hits = 0;
+    std::size_t accepted = 0;
+    std::size_t unknown = 0;
+    std::size_t invalid = 0;
+    std::size_t limit_refusals = 0;
+    std::size_t allocation_failures = 0;
+    std::size_t scratch_bytes = 0;
+};
+
+struct NaturalImageSizingOptions {
+    NaturalImageSizeProvider provider;
+    std::size_t max_queries = 128;
+    std::size_t max_memo_entries = 128; // hard ceiling 4096
+    std::size_t max_scratch_bytes = 4096;
+    // Synchronous borrowed output; replaced at the end of each layout call.
+    NaturalImageSizingStatistics* statistics = nullptr;
+};
+
 struct LayoutBox;
 
 struct PreparedTextLine {
@@ -134,7 +165,10 @@ struct LayoutIntrinsicQueryStatistics {
     std::size_t peak_scratch_bytes = 0;
 };
 
-namespace detail { class IntrinsicSourceQueryLedger; }
+namespace detail {
+class IntrinsicSourceQueryLedger;
+struct NaturalImageSizingFrame;
+}
 
 struct LayoutEngineOptions {
     std::size_t max_layout_boxes = 4096;
@@ -147,6 +181,10 @@ struct LayoutEngineOptions {
     // layout call. Includes failed queries and speculative probes; rollback
     // never refunds work already performed.
     LayoutIntrinsicQueryStatistics* intrinsic_query_statistics = nullptr;
+    // First bounded consumer: empty static block img in an ordinary block
+    // ancestor chain. Inline/picture/Flex/Grid/positioned contexts retain the
+    // existing fallback. Provider/context are borrowed through each layout call.
+    NaturalImageSizingOptions natural_image_sizing;
 };
 
 class LayoutEngine {
@@ -169,6 +207,7 @@ private:
     TextMeasureProvider text_measure_;
     LayoutEngineOptions options_;
     detail::IntrinsicSourceQueryLedger* intrinsic_queries_ = nullptr;
+    detail::NaturalImageSizingFrame* natural_images_ = nullptr;
 
     int layout_fixed_table(LayoutBox& box, int x, int y, int available_width, int height, std::size_t depth) const;
     struct PreciseBoxContext;
