@@ -1577,7 +1577,11 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
     paint_generated_inline_content(box, display_list, CssPseudoElement::Before);
 
     ResolvedImageResource content_resource;
-    if (resolve_image_handle(box, ImageResolveKind::Content, 0, options, content_resource)) {
+    const bool emitted_by_shared_inline = box.text_layout_cache.shared_inline &&
+        box.text_layout_cache.shared_inline->member != 0 &&
+        detail::shared_inline_current(*box.text_layout_cache.shared_inline, options.text_system);
+    if (!emitted_by_shared_inline &&
+        resolve_image_handle(box, ImageResolveKind::Content, 0, options, content_resource)) {
         push_image(display_list,
                    content_rect_for(box),
                    content_resource.image_handle,
@@ -1591,9 +1595,27 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
         const auto& binding = *box.text_layout_cache.shared_inline;
         const auto used = display_list.size()-box_command_begin;
         const auto available = remaining_commands-std::min(used, remaining_commands);
+        const auto image_count = binding.snapshot->atomic_placements.size();
         if (binding.member == 0 && binding.snapshot->paragraph.fragments.size() <= available &&
-            detail::shared_inline_current(binding, options.text_system))
-            detail::emit_shared_inline(box, display_list);
+            image_count <= available - std::min(available, binding.snapshot->paragraph.fragments.size()) &&
+            detail::shared_inline_current(binding, options.text_system)) {
+            struct SharedImageContext { const LayerTreeBuilderOptions* options; } image_context{&options};
+            const auto emit_image = [](const LayoutBox& image_box, DisplayList& draft, void* context) -> bool {
+                const auto& builder_options = *static_cast<SharedImageContext*>(context)->options;
+                ResolvedImageResource resource;
+                if (!resolve_image_handle(image_box, ImageResolveKind::Content, 0, builder_options, resource))
+                    return true;
+                const Rect rect = content_rect_for(image_box);
+                if (rect.width <= 0 || rect.height <= 0) return true;
+                const auto command_count = draft.size();
+                push_image(draft, rect, resource.image_handle, image_box.style.object_fit,
+                    image_box.style.object_position, image_box.style.image_rendering,
+                    resolved_border_radius(image_box), resolved_border_radius_y(image_box));
+                return draft.size() == command_count + 1 &&
+                    draft.back().type() == DisplayCommandType::Image;
+            };
+            detail::emit_shared_inline(box, display_list, emit_image, &image_context);
+        }
         return;
     }
     if (box.node != nullptr && box.node->type == NodeType::Text) {
