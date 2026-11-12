@@ -18,6 +18,9 @@ struct ComputedSizeData {
     ComputedSizeData() = default;
     ComputedSizeData(const ComputedSizeData& other) : slots(other.slots), mask(other.mask) {}
 };
+std::size_t ComputedSizeStorage::retained_payload_bytes() const noexcept {
+    return data_ ? sizeof(ComputedSizeData) : 0;
+}
 ComputedSizeStorage::ComputedSizeStorage(const ComputedSizeStorage& other) noexcept : data_(other.data_) {
     if (data_) data_->references.fetch_add(1, std::memory_order_relaxed);
 }

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "render_core/dom.h"
 #include "render_core/computed_size_storage.h"
@@ -482,6 +482,11 @@ struct StyleResolverOptions {
     // their source and declaration count independently.
     std::size_t max_inline_style_bytes = 4096;
     std::size_t max_inline_declarations = 64;
+    // Opt in for repeated cascade inputs. Hard bounds are 16 entries, 32 KiB
+    // accounted payload and 2 KiB per exact key. Unique-input workloads pay
+    // lookup overhead, so hosts choose activation for their workload.
+    std::size_t max_scalar_cache_entries = 0;
+    std::size_t max_scalar_cache_bytes = 0;
 };
 
 struct StyleResolverStatistics {
@@ -491,6 +496,13 @@ struct StyleResolverStatistics {
     std::size_t candidate_cache_misses = 0;
     std::size_t candidate_cache_clears = 0;
     std::size_t candidate_cache_bypasses = 0;
+    std::size_t scalar_cache_hits = 0;
+    std::size_t scalar_cache_misses = 0;
+    std::size_t scalar_cache_bypasses = 0;
+    std::size_t scalar_cache_entries = 0;
+    // Retained cache/entry objects, string capacities and computed-size owners.
+    // Allocator metadata and temporary allocation peaks are excluded.
+    std::size_t scalar_cache_payload_bytes = 0;
 };
 
 struct InteractionInvalidationHints {
@@ -501,7 +513,7 @@ struct InteractionInvalidationHints {
 
 using CustomPropertyMap = std::unordered_map<std::string, std::string>;
 
-namespace detail { struct BackgroundResourceTransaction; }
+namespace detail { struct BackgroundResourceTransaction; struct ScalarCascadeCache; }
 class StyleResolver;
 
 struct StyleLengthResolutionContext {
@@ -534,6 +546,7 @@ struct StyleResolveContext {
 class StyleResolver {
 public:
     explicit StyleResolver(Stylesheet stylesheet, StyleResolverOptions options = {});
+    ~StyleResolver();
     StyleResolver(const StyleResolver& other);
     StyleResolver& operator=(const StyleResolver& other);
     StyleResolver(StyleResolver&& other) noexcept;
@@ -567,6 +580,7 @@ private:
     // Reused only when the bounded cache is full; it never becomes an entry.
     mutable std::vector<const CssRule*> uncached_candidates_;
     mutable StyleResolverStatistics statistics_;
+    mutable std::unique_ptr<detail::ScalarCascadeCache> scalar_cache_;
     InteractionInvalidationHints interaction_hints_;
     std::uint64_t interaction_state_generation_ = 0;
     bool has_custom_property_declarations_ = false;
@@ -586,6 +600,10 @@ private:
     const CustomPropertyMap& custom_properties_for(const Node& node, StyleResolveContext& context) const;
     const std::vector<const CssRule*>& matching_rules_for(const Node& node, StyleResolveContext& context) const;
     Style resolve_with_custom_properties(const Node& node,
+                                         const CustomPropertyMap& custom_properties,
+                                         const std::vector<const CssRule*>* matched_rules,
+                                         const StyleLengthResolutionContext& length_context) const;
+    Style resolve_uncached(const Node& node,
                                          const CustomPropertyMap& custom_properties,
                                          const std::vector<const CssRule*>* matched_rules,
                                          const StyleLengthResolutionContext& length_context) const;
