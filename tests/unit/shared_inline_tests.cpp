@@ -2,6 +2,7 @@
 #include "render_core/html_parser.h"
 #include "render_core/layout.h"
 #include "render_core/hit_test.h"
+#include "render_core/layer_tree.h"
 #include "render_core/software_renderer.h"
 #include "render_core/prepared_text.h"
 #include "render_core/dirty_region.h"
@@ -14,6 +15,7 @@
 #include <stdexcept>
 #include <tuple>
 #include <cstdlib>
+#include <limits>
 #include <new>
 static int allocations_until_failure = -1;
 void* operator new(std::size_t bytes) {
@@ -103,6 +105,47 @@ struct Fixture {
         layers.text_system = &system;
     }
 };
+struct InlineImageState {
+    std::uint32_t handle = 91;
+    std::size_t resolve_calls = 0;
+    bool fail_emission = false;
+    bool resolved = true;
+};
+bool resolve_inline_image(const Node& node, ImageResolveKind kind, std::uint16_t,
+    ResolvedImageResource& result, void* context) {
+    auto& state = *static_cast<InlineImageState*>(context);
+    ++state.resolve_calls;
+    if (kind != ImageResolveKind::Content || node.tag_name != "img" || node.attribute("src") != "tile" ||
+        !state.resolved) return false;
+    result.image_handle = state.handle;
+    return true;
+}
+bool emit_inline_image(const LayoutBox& box, DisplayList& output, void* context) {
+    auto& state = *static_cast<InlineImageState*>(context);
+    if (state.fail_emission) return false;
+    ResolvedImageResource resource;
+    if (!resolve_inline_image(*box.node, ImageResolveKind::Content, 0, resource, &state) ||
+        resource.image_handle == 0) return true;
+    DisplayCommand command;
+    command.set_type(DisplayCommandType::Image);
+    command.rect = box.rect;
+    command.image_paint().image_handle = resource.image_handle;
+    command.image_paint().object_fit = box.style.object_fit;
+    command.image_paint().object_position = box.style.object_position;
+    command.image_paint().image_rendering = box.style.image_rendering;
+    output.push_back(std::move(command));
+    return true;
+}
+bool paint_inline_image(FrameBuffer& target, const ImagePaintRequest& request, void* context) {
+    auto& painted = *static_cast<std::size_t*>(context);
+    if (request.image_handle != 91) return false;
+    ++painted;
+    const auto rect = request.destination;
+    for (int y = std::max(0, rect.y); y < std::min(target.height, rect.y+rect.height); ++y)
+        for (int x = std::max(0, rect.x); x < std::min(target.width, rect.x+rect.width); ++x)
+            target.pixel(x,y) = {220,30,40,255};
+    return true;
+}
 bool equal_pixels(const FrameBuffer& a, const FrameBuffer& b) {
     if (a.pixels.size() != b.pixels.size()) return false;
     for (std::size_t i = 0; i < a.pixels.size(); ++i) {
@@ -110,6 +153,230 @@ bool equal_pixels(const FrameBuffer& a, const FrameBuffer& b) {
         if (x.r!=y.r || x.g!=y.g || x.b!=y.b || x.a!=y.a) return false;
     }
     return true;
+}
+void definite_inline_image_atomic_path() {
+    Fixture f;
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
+        "span{display:inline}img{display:inline;width:7.5px;height:18px}"));
+    auto dom = HtmlParser{}.parse("<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
+    NaturalImageSizingStatistics natural_stats;
+    f.options.natural_image_sizing.statistics = &natural_stats;
+    auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+    const auto& host = find(*layout, "p");
+    const auto& image = find(*layout, "i");
+    const auto binding = host.text_layout_cache.shared_inline;
+    check(binding && detail::shared_inline_current(*binding, &f.system),
+        "definite inline image joins a live shared paragraph");
+    check(binding->snapshot->atomic_placements.size() == 1 && natural_stats.queries == 0,
+        "definite image uses a planner atom without intrinsic metadata queries");
+    check(image.content_geometry.width == 7500 && image.content_geometry.height() == 18000 &&
+        image.content_geometry.height_definite() && image.rect.width == 8 && image.rect.height == 18,
+        "fractional Q1000 width projects around an integer-height atomic box");
+    check(binding->snapshot->atomic_placements.front().extent == 18 &&
+        image.content_geometry.y + image.content_geometry.height() ==
+            static_cast<std::int64_t>(binding->snapshot->paragraph.lines.front().baseline +
+                host.rect.y + binding->snapshot->content_offset_y)*1000,
+        "atomic bottom shares the line text baseline");
+    const auto hit = HitTester{}.hit_test(*layout, image.rect.x+image.rect.width/2,
+        image.rect.y+image.rect.height/2);
+    check(hit && hit.node == image.node, "atomic image rectangle remains an inline hit target");
+
+    InlineImageState state;
+    f.layers.image_resolver = {resolve_inline_image, &state};
+    LayerTreeBuilder layer_builder(f.layers);
+    auto layer_tree = layer_builder.build(*layout);
+    const auto layer_commands = layer_builder.flatten(*layer_tree);
+    std::size_t layer_text_commands = 0, layer_image_commands = 0;
+    std::size_t layer_text_before_image = 0, layer_text_after_image = 0;
+    bool image_seen = false;
+    for (const auto& command : layer_commands) {
+        if (command.type() == DisplayCommandType::Image && command.image_paint().image_handle == state.handle) {
+            ++layer_image_commands;
+            image_seen = true;
+        } else if (command.type() == DisplayCommandType::PreparedText) {
+            ++layer_text_commands;
+            if (image_seen) ++layer_text_after_image;
+            else ++layer_text_before_image;
+        }
+    }
+    check(layer_image_commands == 1 && layer_text_commands == 2 &&
+        layer_text_before_image == 1 && layer_text_after_image == 1,
+        "LayerTree resolves and interleaves typed inline image between prepared text commands");
+    state.resolved = false;
+    auto unresolved_layer = layer_builder.build(*layout);
+    const auto unresolved_commands = layer_builder.flatten(*unresolved_layer);
+    std::size_t unresolved_text_commands = 0, unresolved_image_commands = 0;
+    for (const auto& command : unresolved_commands) {
+        if (command.type() == DisplayCommandType::PreparedText) ++unresolved_text_commands;
+        if (command.type() == DisplayCommandType::Image && command.image_paint().image_handle == state.handle)
+            ++unresolved_image_commands;
+    }
+    check(unresolved_text_commands == 2 && unresolved_image_commands == 0,
+        "unresolved inline image is omitted while its surrounding text remains painted");
+    state.resolved = true;
+    state.resolve_calls = 0;
+    DisplayList display;
+    check(!detail::emit_shared_inline(host, display) && display.empty(),
+        "atomic paragraph refuses emission without an image emitter");
+    state.fail_emission = true;
+    check(!detail::emit_shared_inline(host, display, emit_inline_image, &state) && display.empty(),
+        "image callback refusal discards all prepared text and image commands");
+    state.fail_emission = false;
+    check(detail::emit_shared_inline(host, display, emit_inline_image, &state),
+        "image callback commits the mixed paragraph draft");
+    check(display.size() == 3 && display[0].type() == DisplayCommandType::PreparedText &&
+        display[1].type() == DisplayCommandType::Image && display[2].type() == DisplayCommandType::PreparedText &&
+        display[1].rect.x == image.rect.x && display[1].rect.y == image.rect.y &&
+        display[1].image_paint().image_handle == state.handle,
+        "typed image command is interleaved in source order with text");
+    check(prepared_text_baseline_y(display[0]) == display[0].text_paint().baseline_y &&
+        static_cast<std::int64_t>(image.rect.y+image.rect.height)*1000 ==
+            static_cast<std::int64_t>(prepared_text_baseline_y(display[0]))*1000,
+        "emitted image and prepared text preserve a common baseline");
+    for (const auto& command : display) {
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        PreparedTextView packet;
+        check(decode_prepared_text(command.text, packet), "mixed packet decodes");
+        for (std::size_t i = 0; i < packet.size(); ++i) {
+            PreparedTextGlyph glyph;
+            packet.read(i, glyph);
+            check(glyph.source_codepoint == 'A' || glyph.source_codepoint == 'B',
+                "atomic marker never enters a text glyph packet");
+        }
+    }
+    LayerNode layer;
+    layer.type = LayerType::Root;
+    layer.bounds = {0,0,80,50};
+    layer.display_list = std::move(display);
+    std::size_t painted = 0;
+    SoftwareCompositor::Options paint_options;
+    paint_options.text_system = &f.system;
+    SoftwareCompositor compositor({}, ImagePainter{paint_inline_image, &painted, true}, paint_options);
+    const auto pixels = compositor.render(layer, 80, 50, {255,255,255,255});
+    check(painted == 1 && pixels.pixel(image.rect.x+image.rect.width/2, image.rect.y+image.rect.height/2).r == 220,
+        "mixed shared paragraph rasterizes the callback-backed image pixels");
+
+    const auto original_binding = binding;
+    auto& mutable_image = const_cast<LayoutBox&>(image);
+    const auto original_rect = image.rect;
+    detail::LayoutMutationJournal transaction;
+    auto& mutable_host = const_cast<LayoutBox&>(host);
+    check(transaction.capture(mutable_host, 128) == detail::LayoutMutationJournalStatus::Ready,
+        "journal captures shared image members");
+    int moved_height = 0;
+    check(detail::layout_shared_inline(mutable_host, 9, 11, 40, f.options,
+        moved_height), "second atomic paragraph publication succeeds");
+    transaction.rollback();
+    check(mutable_image.rect.x == original_rect.x && mutable_image.rect.y == original_rect.y &&
+        mutable_image.content_geometry.width == 7500 && mutable_host.text_layout_cache.shared_inline == original_binding,
+        "journal rollback restores atom geometry and owner binding");
+    auto tiny = f.options;
+    tiny.shared_inline.max_total_capacity_bytes = 1;
+    int height = 0;
+    check(!detail::layout_shared_inline(mutable_host, 9, 11, 40, tiny, height) &&
+        mutable_image.rect.x == original_rect.x && mutable_image.rect.y == original_rect.y &&
+        mutable_host.text_layout_cache.shared_inline == original_binding,
+        "resource refusal leaves published image geometry and text untouched");
+    const_cast<Node*>(image.node)->set_attribute("src", "changed");
+    check(!detail::shared_inline_current(*original_binding, &f.system),
+        "source mutation invalidates the image-containing paragraph as a whole");
+
+    StyleResolver changed_styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
+        "span{display:inline}img{display:inline;width:7.5px;height:18px;object-fit:contain}"));
+    auto changed_dom = HtmlParser{}.parse("<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
+    auto changed_layout = LayoutEngine(changed_styles, {}, f.options).layout(*changed_dom, 80, 50);
+    check(!find(*changed_layout, "p").text_layout_cache.shared_inline,
+        "non-Fill object-fit stays on ordinary fallback");
+}
+
+void definite_inline_image_refusal_and_style_proof() {
+    Fixture f;
+    const std::array<const char*, 5> cases{{
+        "<img id='i' width='8' height='18'>",
+        "<img id='i' src='tile' srcset='other 2x'>",
+        "<img id='i' src='tile' sizes='20px'>",
+        "<img id='i' src='tile' style='width:8px;height:50%'>",
+        "<img id='i' src='tile' style='width:8px;height:18.5px'>"
+    }};
+    for (const auto* image_markup : cases) {
+        std::string html = "<div id='p'><span>A";
+        html += image_markup;
+        html += "B</span></div>";
+        auto dom = HtmlParser{}.parse(html);
+        StyleResolver styles(CssParser{}.parse(
+            "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
+            "span{display:inline}img{display:inline;width:8px;height:18px}"));
+        auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+        check(!find(*layout, "p").text_layout_cache.shared_inline,
+            "unsupported image source or size contract declines the whole context");
+    }
+    {
+        auto dom = HtmlParser{}.parse("<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
+        StyleResolver styles(CssParser{}.parse(
+            "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
+            "span{display:inline}img{display:inline}"));
+        auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+        check(!find(*layout, "p").text_layout_cache.shared_inline,
+            "intrinsic or unknown image dimensions remain on the ordinary fallback");
+    }
+    {
+        auto dom = HtmlParser{}.parse("<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
+        const auto append_image_child = [&](auto&& self, Node& node) -> Node* {
+            if (node.attribute("id") == "i") {
+                node.append_child(std::make_unique<Node>(NodeType::Text));
+                node.children.back()->set_text("unexpected");
+                return &node;
+            }
+            for (auto& child : node.children) if (auto* found = self(self, *child)) return found;
+            return nullptr;
+        };
+        check(append_image_child(append_image_child, *dom) != nullptr, "image fixture receives a child");
+        StyleResolver styles(CssParser{}.parse(
+            "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
+            "span{display:inline}img{display:inline;width:8px;height:18px}"));
+        auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+        check(!find(*layout, "p").text_layout_cache.shared_inline,
+            "image children remain outside the atomic subset");
+    }
+    auto dom = HtmlParser{}.parse("<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
+        "span{display:inline}img{display:inline;width:8px;height:18px}"));
+    auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+    const auto& host = find(*layout, "p");
+    const auto binding = host.text_layout_cache.shared_inline;
+    check(binding != nullptr, "eligible image publishes a proof for mutation checks");
+    auto& image = const_cast<LayoutBox&>(find(*layout, "i"));
+    image.style.width = 9;
+    check(!detail::shared_inline_current(*binding, &f.system),
+        "resolved width mutation invalidates atomic image proof");
+}
+
+void definite_inline_image_percent_width() {
+    Fixture f;
+    for (const auto& value : {std::pair<const char*,std::int64_t>{"50%",20000}, {"50.5%",20200}}) {
+        StyleResolver styles(CssParser{}.parse(std::string(
+            "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
+            "span{display:inline}img{display:inline;width:")+value.first+";height:18px}"));
+        auto dom = HtmlParser{}.parse("<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
+        auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+        const auto& host = find(*layout, "p");
+        const auto& image = find(*layout, "i");
+        check(host.text_layout_cache.shared_inline && image.content_geometry.width == value.second,
+            "definite percentage width resolves against the paragraph containing width");
+    }
+    auto dom = HtmlParser{}.parse("<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
+        "span{display:inline}img{display:inline;width:50%;height:18px}"));
+    auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+    auto& host = const_cast<LayoutBox&>(find(*layout, "p"));
+    const auto precise_max = std::numeric_limits<std::int64_t>::max();
+    int height = 0;
+    check(!detail::layout_shared_inline(host, 0, 0, 40, f.options, height, precise_max),
+        "out-of-range percentage basis refuses before multiplication can overflow");
 }
 void partition_and_live_proof() {
     Fixture fixture;
@@ -414,8 +681,9 @@ void limits_and_allocation_failures() {
     check(stats.accepted==1 && stats.acquired_bytes<=f.options.shared_inline.max_total_capacity_bytes,"operation acquisition accounting bounded");
     const auto binding=host.text_layout_cache.shared_inline;
     const auto old=host.children[0]->rect;
-    bool success=false;
     int failures=0;
+#if defined(NDEBUG)
+    bool success=false;
     for(int failure=0;failure<200;++failure) {
         auto options=f.options;
         SharedInlineLayoutStatistics attempt;
@@ -431,6 +699,11 @@ void limits_and_allocation_failures() {
         check(attempt.refusals==1 && attempt.acquired_bytes>0,"failed acquisition remains accounted");
     }
     check(success && failures>10,"allocation failure sweep reaches successful publication");
+#else
+    int height=0;
+    check(detail::layout_shared_inline(host,host.rect.x,host.rect.y,25,f.options,height),
+        "debug build publishes shared paragraph without allocator fault injection");
+#endif
     auto tiny=f.options;
     tiny.shared_inline.max_total_capacity_bytes=1;
     auto refused=LayoutEngine(styles,{},tiny).layout(*dom,100,100);
@@ -443,6 +716,9 @@ void limits_and_allocation_failures() {
 }
 int main() {
     try {
+        definite_inline_image_atomic_path();
+        definite_inline_image_refusal_and_style_proof();
+        definite_inline_image_percent_width();
         partition_and_live_proof();
         refusal_and_rollback();
         mutation_damage_and_tiling();

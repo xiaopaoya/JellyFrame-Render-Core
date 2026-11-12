@@ -20,6 +20,11 @@ struct SharedInlineProof {
     TextAlign align = TextAlign::Start;
     bool nowrap = false;
     bool anywhere = false;
+    bool atomic_image = false;
+    std::string image_source;
+    std::int64_t image_width_units = 0;
+    int image_height = 0;
+    CoreTextAtomicPlacement image_placement{};
 };
 struct SharedInlineMember {
     SharedInlineMember() : fragments(0) {}
@@ -36,7 +41,7 @@ struct SharedInlineOmittedSource {
     std::string source;
 };
 struct SharedInlineSnapshot {
-    SharedInlineSnapshot() : members(0), owners(0), omitted(0) {}
+    SharedInlineSnapshot() : members(0), owners(0), omitted(0), atomic_placements(0) {}
     const TextSystem* system = nullptr;
     std::uint64_t generation = 0;
     std::uint64_t dom_generation = 0;
@@ -50,6 +55,7 @@ struct SharedInlineSnapshot {
     std::vector<SharedInlineMember> members;
     std::vector<std::size_t> owners;
     std::vector<SharedInlineOmittedSource> omitted;
+    std::vector<CoreTextAtomicPlacement> atomic_placements;
     CoreTextParagraphUsage usage;
     std::size_t retained_bytes = 0;
 };
@@ -57,6 +63,9 @@ struct SharedInlineBinding {
     std::shared_ptr<const SharedInlineSnapshot> snapshot;
     std::size_t member = 0;
 };
+// LayerTree supplies a callback that resolves the existing image handle and
+// appends the typed image command to this paragraph's private display draft.
+using SharedInlineImageEmitter = bool (*)(const LayoutBox&, DisplayList&, void* context);
 // All allocation, admission, measurement and geometry happen before publication.
 // A failed attempt leaves every participating box and cache untouched.
 bool layout_shared_inline(LayoutBox&, int x, int y, int width,
@@ -65,5 +74,6 @@ void retire_shared_inline(LayoutBox&) noexcept;
 bool shared_inline_current(const SharedInlineBinding&, const TextSystem*) noexcept;
 bool shared_inline_contains(const LayoutBox&, int x, int y) noexcept;
 Rect shared_inline_damage_bounds(const LayoutBox&) noexcept;
-bool emit_shared_inline(const LayoutBox&, DisplayList&) noexcept;
+bool emit_shared_inline(const LayoutBox&, DisplayList&,
+    SharedInlineImageEmitter = nullptr, void* image_context = nullptr) noexcept;
 }

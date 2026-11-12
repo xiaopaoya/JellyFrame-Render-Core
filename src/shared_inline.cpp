@@ -1,4 +1,5 @@
 #include "render_core/text_normalization.h"
+#include "computed_size_geometry.h"
 #include "shared_inline.h"
 #include <algorithm>
 #include <limits>
@@ -25,7 +26,7 @@ Rect union_rect(Rect a, Rect b) {
 bool empty_edges(const EdgeSizes& e) {
     return e.left == 0 && e.right == 0 && e.top == 0 && e.bottom == 0;
 }
-bool neutral(const Style& s, bool host) {
+bool neutral(const Style& s, bool host, bool allow_image_dimensions = false) {
     if (s.visibility_hidden || s.text_transform != TextTransform::None || s.letter_spacing != 0 ||
         s.text_overflow_ellipsis || s.text_shadow.enabled || s.text_decoration_underline ||
         s.text_decoration_line_through || s.before_content_kind != GeneratedContentKind::None ||
@@ -35,16 +36,73 @@ bool neutral(const Style& s, bool host) {
         s.opacity != 1.0F || !s.transform.empty() || !s.overflow.empty() ||
         s.background_color.a != 0 || s.box_shadow.enabled || s.outline_width != 0 ||
         !empty_edges(s.margin) || !empty_edges(s.padding) || !empty_edges(s.border_width) ||
-        s.width != -1 || s.height != -1 || s.width_percent != -1 || s.height_percent != -1 ||
+        (!allow_image_dimensions && (s.width != -1 || s.height != -1 || s.width_percent != -1 || s.height_percent != -1)) ||
+        (allow_image_dimensions && s.height_percent != -1) ||
         s.min_width != -1 || s.max_width != -1 || s.min_height != -1 || s.max_height != -1 ||
         s.min_width_percent != -1 || s.max_width_percent != -1 ||
         s.min_height_percent != -1 || s.max_height_percent != -1 ||
         s.border_radius != 0 || s.border_radius_percent != -1 || s.border_radius_axes_specified ||
         !s.z_index_auto || s.aspect_ratio_width != 0 || s.aspect_ratio_height != 0 ||
-        s.list_style_type != ListStyleType::None || !s.computed_sizes.empty()) return false;
+        s.list_style_type != ListStyleType::None) return false;
+    if (!allow_image_dimensions && !s.computed_sizes.empty()) return false;
+    if (allow_image_dimensions) {
+        constexpr SizeProperty unsupported[] = {SizeProperty::MinWidth, SizeProperty::MinHeight,
+            SizeProperty::MaxWidth, SizeProperty::MaxHeight, SizeProperty::FlexBasis,
+            SizeProperty::InsetTop, SizeProperty::InsetRight, SizeProperty::InsetBottom, SizeProperty::InsetLeft};
+        for (const auto property : unsupported) {
+            SizeKind kind = SizeKind::Pixels;
+            std::int64_t value = 0, percentage = 0;
+            if (s.computed_sizes.read_typed(property, kind, value, percentage)) return false;
+        }
+    }
     for (const auto& background : s.background_layers)
         if (background.kind != BackgroundLayerKind::None) return false;
     return true;
+}
+bool image_dimensions(const Style& style, std::int64_t containing_width,
+    std::int64_t& width_units, int& height) {
+    if (containing_width < 0 || containing_width > kDimensionPrecisionMaximum) return false;
+    const auto resolve_percent = [&](std::int64_t percent, std::int64_t maximum,
+        std::int64_t scale) {
+        if (percent < 0 || percent > maximum) return false;
+        width_units = scale_size_units(containing_width, percent, scale);
+        return width_units >= 0 && width_units <= kDimensionPrecisionMaximum;
+    };
+    SizeKind kind = SizeKind::Pixels;
+    std::int64_t value = 0, percentage = 0;
+    if (style.computed_sizes.read_typed(SizeProperty::Width, kind, value, percentage)) {
+        if (kind == SizeKind::Pixels) width_units = value;
+        else if (kind == SizeKind::Percent) {
+            if (!resolve_percent(value, 1000000, 100000)) return false;
+        }
+        else return false;
+    } else if (style.width_percent >= 0) {
+        if (!resolve_percent(style.width_percent, 1000, 100)) return false;
+    } else if (style.width >= 0) {
+        width_units = static_cast<std::int64_t>(style.width) * 1000;
+    } else {
+        return false;
+    }
+    if (style.computed_sizes.read_typed(SizeProperty::Height, kind, value, percentage)) {
+        if (kind != SizeKind::Pixels) return false;
+    } else {
+        if (style.height < 0 || style.height_percent >= 0) return false;
+        value = static_cast<std::int64_t>(style.height) * 1000;
+    }
+    if (width_units < 0 || width_units > kDimensionPrecisionMaximum || value < 0 ||
+        value % 1000 != 0 || value / 1000 > std::numeric_limits<int>::max()) return false;
+    height = static_cast<int>(value / 1000);
+    return true;
+}
+bool eligible_inline_image(const Node& node, const Style& style, std::int64_t containing_width,
+    std::int64_t& width_units, int& height) {
+    if (node.type != NodeType::Element || node.tag_name != "img" || !node.children.empty() ||
+        node.attribute("src").empty() || node.attributes.find("srcset") != node.attributes.end() ||
+        node.attributes.find("sizes") != node.attributes.end() ||
+        style.object_fit != ObjectFit::Fill || style.object_position.x_percent != 50 ||
+        style.object_position.y_percent != 50 || style.image_rendering != ImageRendering::Auto ||
+        !neutral(style, false, true)) return false;
+    return image_dimensions(style, containing_width, width_units, height);
 }
 std::array<int, 32> host_geometry(const Style& s) {
     return {{s.width, s.height, s.min_width, s.max_width, s.min_height, s.max_height,
@@ -117,7 +175,8 @@ bool preflight(const Node& node, std::size_t depth, std::size_t& members,
     budget.work(1);
     if (depth > max_depth || members == max_members) return false;
     ++members;
-    if (node.type == NodeType::Text || node.tag_name == "br" || node.tag_name == "wbr") ++owners;
+    if (node.type == NodeType::Text || node.tag_name == "br" || node.tag_name == "wbr" ||
+        node.tag_name == "img") ++owners;
     for (const auto& child : node.children)
         if (!preflight(*child, depth+1, members, owners, budget)) return false;
     return true;
@@ -127,19 +186,26 @@ struct Collector {
     std::vector<CoreTextParagraphSpan> spans;
     std::size_t bytes = 0;
     ContextBudget& budget;
+    std::int64_t containing_width_units = 0;
+    std::vector<CoreTextAtomicGeometry> atomic_geometry;
     bool collect(LayoutBox& box, std::size_t parent, std::size_t depth, std::size_t dom_index = 0, std::size_t render_index = 0) {
         budget.work(1);
-        if (!box.node || depth > max_depth || snapshot.members.size() >= max_members ||
-            !neutral(box.style, depth == 0)) return false;
+        if (!box.node || depth > max_depth || snapshot.members.size() >= max_members) return false;
         const bool text = box.node->type == NodeType::Text;
         const bool marker = box.node->tag_name == "br" || box.node->tag_name == "wbr";
-        if (depth && !text && !marker && box.node->tag_name != "span") return false;
+        const bool image = depth && box.node->tag_name == "img";
+        std::int64_t image_width_units = 0;
+        int image_height = 0;
+        if (image ? !eligible_inline_image(*box.node, box.style, containing_width_units,
+                image_width_units, image_height) : !neutral(box.style, depth == 0)) return false;
+        if (depth && !text && !marker && !image && box.node->tag_name != "span") return false;
         if (box.node->text.size() > max_source-bytes) return false;
         bytes += box.node->text.size();
         budget.statistics.source_bytes += box.node->text.size();
         ++budget.statistics.members;
         budget.capacity(std::max<std::size_t>(15, box.node->text.size())+1+
             std::max<std::size_t>(15, box.node->tag_name.size())+1);
+        if (image) budget.capacity(std::max<std::size_t>(15, box.node->attribute("src").size())+1);
         LayoutTextFont font;
         if (layout_text_font(box.style, font) != S::Ok) return false;
         if (depth && (!same_font(font, snapshot.members[0].proof.font) ||
@@ -151,6 +217,13 @@ struct Collector {
         snapshot.members.back().proof = proof(box, parent);
         snapshot.members.back().proof.dom_index = dom_index;
         snapshot.members.back().proof.render_index = render_index;
+        if (image) {
+            auto& image_proof = snapshot.members.back().proof;
+            image_proof.atomic_image = true;
+            image_proof.image_source = box.node->attribute("src");
+            image_proof.image_width_units = image_width_units;
+            image_proof.image_height = image_height;
+        }
         if (text || marker) {
             if (!box.children.empty()) return false;
             if (!snapshot.system->resolve_family_hash(font.family, font.family)) return false;
@@ -162,6 +235,18 @@ struct Collector {
                 ? CoreTextParagraphSpanKind::ForcedBreak : CoreTextParagraphSpanKind::Opportunity;
             spans.push_back(span);
             snapshot.owners.push_back(member);
+        } else if (image) {
+            if (!box.children.empty()) return false;
+            const auto span_owner = spans.size();
+            auto& image_proof = snapshot.members.back().proof;
+            CoreTextParagraphSpan span;
+            span.font = font;
+            span.line_height = box.style.line_height;
+            span.kind = CoreTextParagraphSpanKind::Atomic;
+            spans.push_back(span);
+            snapshot.owners.push_back(member);
+            image_proof.image_placement.owner = span_owner;
+            atomic_geometry.push_back({span_owner, image_proof.image_width_units, image_proof.image_height});
         }
         std::size_t rendered = 0;
         for (std::size_t i = 0; i < box.node->children.size(); ++i) {
@@ -269,21 +354,25 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         snapshot->dom_generation = snapshot->dom_root->mutation_generation;
         snapshot->content_offset_x = safe_add(host.style.padding.left, host.style.border_width.left);
         snapshot->content_offset_y = safe_add(host.style.padding.top, host.style.border_width.top);
+        CoreTextParagraphOptions paragraph_options;
+        paragraph_options.width_units = precise_width_units < 0
+            ? static_cast<std::int64_t>(std::max(0, width))*1000 : precise_width_units;
+        snapshot->width_units = paragraph_options.width_units;
         snapshot->members.reserve(member_count);
         snapshot->omitted.reserve(member_count);
         snapshot->owners.reserve(owner_count);
-        Collector collector{*snapshot, std::vector<CoreTextParagraphSpan>(0), 0, budget};
+        Collector collector{*snapshot, std::vector<CoreTextParagraphSpan>(0), 0, budget,
+            paragraph_options.width_units, std::vector<CoreTextAtomicGeometry>(0)};
         collector.spans.reserve(owner_count);
+        collector.atomic_geometry.reserve(owner_count);
         budget.capacity((snapshot->members.capacity()-member_count)*sizeof(SharedInlineMember)+
             (snapshot->omitted.capacity()-member_count)*sizeof(SharedInlineOmittedSource)+
             (snapshot->owners.capacity()-owner_count)*sizeof(std::size_t)+
-            (collector.spans.capacity()-owner_count)*sizeof(CoreTextParagraphSpan));
+            (collector.spans.capacity()-owner_count)*sizeof(CoreTextParagraphSpan)+
+            collector.atomic_geometry.capacity()*sizeof(CoreTextAtomicGeometry));
         if (!collector.collect(host, 0, 0) || (collector.spans.empty() || snapshot->members.size() <= 2)) return false;
-        CoreTextParagraphOptions paragraph_options;
         paragraph_options.strut = snapshot->members[0].proof.font;
         if (!snapshot->system->resolve_family_hash(paragraph_options.strut.family, paragraph_options.strut.family)) return false;
-        paragraph_options.width_units = precise_width_units < 0 ? static_cast<std::int64_t>(std::max(0, width))*1000 : precise_width_units;
-        snapshot->width_units = paragraph_options.width_units;
         snapshot->host_geometry = host_geometry(host.style);
         snapshot->host_computed_sizes = host.style.computed_sizes;
         paragraph_options.line_height = host.style.line_height;
@@ -297,8 +386,11 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         limits.max_line_work = options.shared_inline.max_work-std::min(statistics.work, options.shared_inline.max_work);
         limits.max_queries = options.shared_inline.max_queries-std::min(statistics.queries, options.shared_inline.max_queries);
         limits.max_query_bytes = options.shared_inline.max_query_bytes-std::min(statistics.query_bytes, options.shared_inline.max_query_bytes);
+        CoreTextParagraphAtomics atomics;
         if (build_core_text_paragraph(*snapshot->system, collector.spans.data(), collector.spans.size(),
-            paragraph_options, snapshot->paragraph, limits, &budget.usage) != S::Ok) return false;
+            paragraph_options, snapshot->paragraph, limits, &budget.usage,
+            collector.atomic_geometry.data(), collector.atomic_geometry.size(), &atomics) != S::Ok) return false;
+        snapshot->atomic_placements = std::move(atomics.placements);
         snapshot->usage = budget.usage;
         statistics.queries += budget.usage.queries;
         statistics.query_bytes += budget.usage.query_bytes;
@@ -310,10 +402,11 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         // share the remaining operation/context capacity. Never refund it.
         budget.capacity(budget.usage.capacity);
         budget.usage.capacity = 0;
+        const auto fragment_capacity = snapshot->paragraph.lines.size()+snapshot->atomic_placements.size();
         for (auto& member : snapshot->members) {
-            budget.capacity(snapshot->paragraph.lines.size()*sizeof(Rect));
-            member.fragments.reserve(snapshot->paragraph.lines.size());
-            budget.capacity((member.fragments.capacity()-snapshot->paragraph.lines.size())*sizeof(Rect));
+            budget.capacity(fragment_capacity*sizeof(Rect));
+            member.fragments.reserve(fragment_capacity);
+            budget.capacity((member.fragments.capacity()-fragment_capacity)*sizeof(Rect));
         }
         for (const auto& fragment : snapshot->paragraph.fragments) {
             budget.work((fragment.end-fragment.begin)*2+max_depth);
@@ -328,13 +421,31 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
                 member = scope.proof.parent_member;
             }
         }
+        for (const auto& placement : snapshot->atomic_placements) {
+            budget.work(max_depth+1);
+            const auto member_index = snapshot->owners[placement.owner];
+            auto& image = snapshot->members[member_index];
+            image.proof.image_placement = placement;
+            const auto left = floor_pixel(placement.x);
+            const auto right = ceil_pixel(static_cast<std::int64_t>(placement.x)+placement.advance);
+            const Rect bounds{left, placement.top, std::max(0, right-left), placement.extent};
+            auto current = member_index;
+            for (;;) {
+                auto& scope = snapshot->members[current];
+                scope.ink_bounds = union_rect(scope.ink_bounds, bounds);
+                if (current == 0) break;
+                append_fragment(scope, bounds);
+                current = scope.proof.parent_member;
+            }
+        }
         std::vector<std::shared_ptr<const SharedInlineBinding>> bindings(0);
         budget.capacity(snapshot->members.size()*(sizeof(std::shared_ptr<const SharedInlineBinding>)+
             sizeof(SharedInlineBinding)+2*sizeof(void*)));
         bindings.reserve(snapshot->members.size());
         budget.capacity((bindings.capacity()-snapshot->members.size())*sizeof(bindings[0]));
         snapshot->retained_bytes = sizeof(SharedInlineSnapshot)+snapshot->members.capacity()*sizeof(SharedInlineMember)+
-            snapshot->owners.capacity()*sizeof(std::size_t)+snapshot->omitted.capacity()*sizeof(SharedInlineOmittedSource)+snapshot->usage.capacity;
+            snapshot->owners.capacity()*sizeof(std::size_t)+snapshot->omitted.capacity()*sizeof(SharedInlineOmittedSource)+
+            snapshot->atomic_placements.capacity()*sizeof(CoreTextAtomicPlacement)+snapshot->usage.capacity;
         for (std::size_t i = 0; i < snapshot->members.size(); ++i) {
             auto& member = snapshot->members[i];
             bool first = true;
@@ -343,7 +454,7 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
                 first = false;
             }
             snapshot->retained_bytes += member.fragments.capacity()*sizeof(Rect)+member.proof.source.capacity()+
-                member.proof.tag.capacity()+sizeof(SharedInlineBinding)+2*sizeof(void*);
+                member.proof.tag.capacity()+member.proof.image_source.capacity()+sizeof(SharedInlineBinding)+2*sizeof(void*);
             bindings.push_back(std::make_shared<SharedInlineBinding>(SharedInlineBinding{snapshot, i}));
         }
         for (const auto& source : snapshot->omitted)
@@ -356,12 +467,25 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
             auto& box = *const_cast<LayoutBox*>(member.proof.box);
             box.text_layout_cache.shared_inline = std::move(bindings[i]);
             if (i == 0) continue;
-            box.rect = member.bounds;
-            box.rect.x = safe_add(x, box.rect.x);
-            box.rect.y = safe_add(y, box.rect.y);
-            box.content_geometry = {static_cast<std::int64_t>(box.rect.x)*1000,
-                static_cast<std::int64_t>(box.rect.y)*1000, static_cast<std::int64_t>(box.rect.width)*1000,
-                static_cast<std::int64_t>(box.rect.height)*1000, false};
+            if (member.proof.atomic_image) {
+                const auto origin_x = static_cast<std::int64_t>(x);
+                const auto origin_y = static_cast<std::int64_t>(y);
+                const auto image_x = origin_x*1000+member.proof.image_placement.x;
+                const auto image_y = origin_y*1000+static_cast<std::int64_t>(member.proof.image_placement.top)*1000;
+                const auto left = floor_pixel(image_x);
+                const auto right = ceil_pixel(image_x+member.proof.image_placement.advance);
+                box.rect = {left, clamp_int64_to_int(image_y/1000), std::max(0, right-left),
+                    member.proof.image_placement.extent};
+                box.content_geometry = {image_x, image_y, member.proof.image_placement.advance,
+                    static_cast<std::int64_t>(member.proof.image_placement.extent)*1000, true};
+            } else {
+                box.rect = member.bounds;
+                box.rect.x = safe_add(x, box.rect.x);
+                box.rect.y = safe_add(y, box.rect.y);
+                box.content_geometry = {static_cast<std::int64_t>(box.rect.x)*1000,
+                    static_cast<std::int64_t>(box.rect.y)*1000, static_cast<std::int64_t>(box.rect.width)*1000,
+                    static_cast<std::int64_t>(box.rect.height)*1000, false};
+            }
             box.text_layout_cache.valid = false;
         }
         height = snapshot->paragraph.height;
@@ -419,14 +543,31 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
                 parent_box.children[p.render_index].get() != p.box) return false;
         }
         const auto& box = *p.box;
+        if (!p.node) return false;
+        std::int64_t image_width = 0;
+        int image_height = 0;
+        const bool style_current = p.atomic_image
+            ? eligible_inline_image(*p.node, box.style, snapshot.width_units, image_width, image_height) &&
+                image_width == p.image_width_units && image_height == p.image_height &&
+                p.node->attribute("src") == p.image_source
+            : neutral(box.style, i == 0);
         if (box.node != p.node || !p.node || p.node->parent != p.parent ||
             p.node->children.size() != p.dom_children ||
             box.children.size() != p.children || p.node->text != p.source || p.node->tag_name != p.tag ||
-            !neutral(box.style, i == 0)) return false;
+            !style_current) return false;
         const auto& bounds = snapshot.members[i].bounds;
         if (i && (box.rect.width != bounds.width || box.rect.height != bounds.height ||
             static_cast<std::int64_t>(box.rect.x)-bounds.x != origin_x ||
             static_cast<std::int64_t>(box.rect.y)-bounds.y != origin_y)) return false;
+        if (i && p.atomic_image) {
+            const auto expected_x = origin_x*1000+p.image_placement.x;
+            const auto expected_y = origin_y*1000+
+                static_cast<std::int64_t>(p.image_placement.top)*1000;
+            if (box.content_geometry.x != expected_x || box.content_geometry.y != expected_y ||
+                box.content_geometry.width != p.image_placement.advance ||
+                box.content_geometry.height() != static_cast<std::int64_t>(p.image_placement.extent)*1000 ||
+                !box.content_geometry.height_definite()) return false;
+        }
         LayoutTextFont font;
         if (layout_text_font(box.style, font) != S::Ok || !same_font(font, p.font) ||
             !same_color(box.style.color, p.color) || box.style.line_height != p.line_height ||
@@ -472,29 +613,59 @@ Rect shared_inline_damage_bounds(const LayoutBox& box) noexcept {
     return union_rect(box.rect, ink);
 }
 
-bool emit_shared_inline(const LayoutBox& box, DisplayList& display) noexcept {
+bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
+    SharedInlineImageEmitter image_emitter, void* image_context) noexcept {
     try {
     const auto& binding = *box.text_layout_cache.shared_inline;
     const auto& snapshot = *binding.snapshot;
-    if (binding.member != 0) return false;
+    if (binding.member != 0 || !shared_inline_current(binding, snapshot.system) ||
+        (!snapshot.atomic_placements.empty() && !image_emitter)) return false;
     const int origin_x = safe_add(box.rect.x, snapshot.content_offset_x);
     const int origin_y = safe_add(box.rect.y, snapshot.content_offset_y);
     DisplayList draft(0);
-    draft.reserve(snapshot.paragraph.fragments.size());
-    for (const auto& fragment : snapshot.paragraph.fragments) {
-        const auto& member = snapshot.members[snapshot.owners[fragment.owner]];
-        const auto& line = snapshot.paragraph.lines[fragment.line];
-        auto rect = union_rect(fragment_bounds(fragment, line), fragment_ink(fragment, line));
-        rect.x = safe_add(rect.x, origin_x);
-        rect.y = safe_add(rect.y, origin_y);
-        DisplayCommand command;
-        command.set_type(DisplayCommandType::PreparedText);
-        command.rect = rect;
-        command.color = member.proof.color;
-        command.text = fragment.packet;
-        set_prepared_text_origin(command, origin_x, safe_add(origin_y, line.baseline));
-        draft.push_back(std::move(command));
+    draft.reserve(snapshot.paragraph.fragments.size()+snapshot.atomic_placements.size());
+    std::size_t fragment_index = 0, atomic_index = 0;
+    for (std::size_t line_index = 0; line_index < snapshot.paragraph.lines.size(); ++line_index) {
+        const auto has_fragment = [&] {
+            return fragment_index < snapshot.paragraph.fragments.size() &&
+                snapshot.paragraph.fragments[fragment_index].line == line_index;
+        };
+        const auto has_atomic = [&] {
+            return atomic_index < snapshot.atomic_placements.size() &&
+                snapshot.atomic_placements[atomic_index].line == line_index;
+        };
+        while (has_fragment() || has_atomic()) {
+            const bool emit_atomic = has_atomic() && (!has_fragment() ||
+                snapshot.atomic_placements[atomic_index].owner <
+                    snapshot.paragraph.fragments[fragment_index].owner);
+            if (emit_atomic) {
+                const auto& placement = snapshot.atomic_placements[atomic_index++];
+                if (placement.owner >= snapshot.owners.size()) return false;
+                const auto member_index = snapshot.owners[placement.owner];
+                if (member_index >= snapshot.members.size()) return false;
+                const auto* image_box = snapshot.members[member_index].proof.box;
+                if (!image_box || !snapshot.members[member_index].proof.atomic_image ||
+                    !image_emitter(*image_box, draft, image_context)) return false;
+                continue;
+            }
+            const auto& fragment = snapshot.paragraph.fragments[fragment_index++];
+            if (fragment.owner >= snapshot.owners.size() || fragment.line >= snapshot.paragraph.lines.size()) return false;
+            const auto& member = snapshot.members[snapshot.owners[fragment.owner]];
+            const auto& line = snapshot.paragraph.lines[fragment.line];
+            auto rect = union_rect(fragment_bounds(fragment, line), fragment_ink(fragment, line));
+            rect.x = safe_add(rect.x, origin_x);
+            rect.y = safe_add(rect.y, origin_y);
+            DisplayCommand command;
+            command.set_type(DisplayCommandType::PreparedText);
+            command.rect = rect;
+            command.color = member.proof.color;
+            command.text = fragment.packet;
+            set_prepared_text_origin(command, origin_x, safe_add(origin_y, line.baseline));
+            draft.push_back(std::move(command));
+        }
     }
+    if (fragment_index != snapshot.paragraph.fragments.size() ||
+        atomic_index != snapshot.atomic_placements.size()) return false;
     display.reserve(display.size()+draft.size());
     for (auto& command : draft) display.push_back(std::move(command));
     return true;
