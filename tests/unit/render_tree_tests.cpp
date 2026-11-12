@@ -476,6 +476,11 @@ void text_resolver_overloads_skip_element_resolution_work() {
     check(counters.calls == 2 && counters.custom_property_walks_skipped == 2 &&
               counters.selector_lookups_skipped == 2 && counters.cascade_slot_sets_skipped == 2,
           "both direct Text resolver overloads skip custom properties, selectors, and cascade slots");
+    check(counters.selector_lookup_attempts == 0, "Text performs no selector lookup attempts");
+    resolver.resolve(parent);
+    resolver.resolve(parent, context);
+    check(detail::test::text_style_fast_path_counters().selector_lookup_attempts >= 2,
+          "Element resolution still performs selector lookups");
     check(before.candidate_cache_hits == after.candidate_cache_hits &&
               before.candidate_cache_misses == after.candidate_cache_misses,
           "direct Text resolution leaves the element candidate cache untouched");

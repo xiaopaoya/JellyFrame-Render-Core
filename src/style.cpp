@@ -5718,6 +5718,9 @@ void StyleResolver::build_rule_index() {
 }
 
 const std::vector<const CssRule*>& StyleResolver::candidate_rules_for(const Node& node) const {
+#if defined(JELLYFRAME_RENDER_CORE_TEST_HOOKS)
+    detail::test::record_selector_lookup_attempt();
+#endif
     std::string key;
     if (node.type == NodeType::Element) {
         const std::string& id = node.attribute("id");

@@ -13,6 +13,8 @@ TextStyleFastPathCounters text_style_fast_path_counters() {
     return counters;
 }
 
+void record_selector_lookup_attempt() { ++counters.selector_lookup_attempts; }
+
 void record_text_style_fast_path() {
     ++counters.calls;
     ++counters.custom_property_walks_skipped;
