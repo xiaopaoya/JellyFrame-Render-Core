@@ -60,7 +60,8 @@ struct Builder {
     TextRunMetrics measure(std::string_view text,const LayoutTextFont& font) {
         if (font.letters || font.words) throw Failure{S::UnsupportedStyle};
         query(text.size());TextRunMetrics m;const auto result=system.measure(text,font.request(),m);
-        if(result!=S::Ok)throw Failure{result};return m;
+        if(result!=S::Ok) throw Failure{result};
+        return m;
     }
     void normalize(std::size_t count,bool intrinsic=false,CoreTextWhiteSpace whitespace_mode=CoreTextWhiteSpace::Collapse,bool preserved_paragraph=false) {
         preserved=whitespace_mode==CoreTextWhiteSpace::Preserve||whitespace_mode==CoreTextWhiteSpace::PreserveSpaces;
@@ -91,7 +92,9 @@ struct Builder {
             }
             if(spans[i].kind!=Kind::Text){if(!spans[i].source.empty())throw Failure{S::InvalidRequest};++events;}
             if(!spans[i].source.empty()&&!spans[i].source.data())throw Failure{S::InvalidRequest};
-            if(spans[i].source.size()>limits.max_source_bytes-bytes)throw Failure{S::ResourceLimit};bytes+=spans[i].source.size();}
+            if(spans[i].source.size()>limits.max_source_bytes-bytes) throw Failure{S::ResourceLimit};
+            bytes+=spans[i].source.size();
+        }
         const auto text_maximum=std::min(bytes,glyph_limit);
         const auto maximum=text_maximum+std::min(events,glyph_limit-text_maximum);
         capacity(std::max<std::size_t>(15,maximum)+1,1);draft.normalized.reserve(maximum);
@@ -211,7 +214,8 @@ struct Builder {
                 auto raw=preserved_options->tab_font;raw.letters=raw.words=0;
                 const auto space=measure(" ",raw).advance;
                 const auto interval=std::max<std::int64_t>(0,static_cast<std::int64_t>(space)+preserved_options->tab_font.letters+preserved_options->tab_font.words)*preserved_options->tab_size;
-                if(!fits(interval))throw Failure{S::Overflow};tab_interval=static_cast<std::int32_t>(interval);
+                if(!fits(interval)) throw Failure{S::Overflow};
+                tab_interval=static_cast<std::int32_t>(interval);
                 if(interval)tab_half_ch_twice=measure("0",raw).advance;
             }
         }
@@ -253,7 +257,8 @@ struct Builder {
             if(!fits(pen))throw Failure{S::Overflow};
             pen+=measure(run_text(at,next,gaps),font_at(at)).advance;
             previous=true;previous_atomic=false;letters=font_at(at).letters;
-            if(!fits(pen))throw Failure{S::Overflow};at=next;
+            if(!fits(pen)) throw Failure{S::Overflow};
+            at=next;
         }
         const auto result=std::max<std::int64_t>(0,pen-origin);
         if(!fits(result))throw Failure{S::Overflow};
@@ -369,7 +374,8 @@ struct Builder {
                 for(auto i=begin;i<stop;++i) {
                     work(1);auto& g=glyphs[i];const auto x=pen+g.x;
                     const auto glyph_end=x+std::max<std::int64_t>(0,static_cast<std::int64_t>(g.geometry.advance)+(g.source_codepoint==' '?font.words:0));
-                    if(!fits(x)||!fits(glyph_end))throw Failure{S::Overflow};g.x=static_cast<std::int32_t>(x);
+                    if(!fits(x)||!fits(glyph_end)) throw Failure{S::Overflow};
+                    g.x=static_cast<std::int32_t>(x);
                     g.source_begin-=static_cast<std::uint32_t>(begin);g.source_end-=static_cast<std::uint32_t>(begin);
                 }
                 capacity(kPreparedTextHeaderBytes+(stop-begin)*kPreparedTextRecordBytes+1,1);
