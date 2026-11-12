@@ -378,6 +378,72 @@ const LayoutBox* find_text_box(const LayoutBox& box) {
     }
     return nullptr;
 }
+void aligned_prepared_text_stays_inside_its_layout_box() {
+    auto font = asset();
+    TextFontFace face{101, 0, font.font};
+    TextSystem system;
+    assert(system.bind(&face, 1) == S::Ok);
+    LayoutEngineOptions layout_options;
+    layout_options.text_system = &system;
+    LayerTreeBuilderOptions layer_options;
+    layer_options.text_system = &system;
+    SoftwareCompositor::Options compositor_options;
+    compositor_options.text_system = &system;
+
+    for (const std::string tag : {"div", "button"}) {
+        for (const std::string alignment : {"left", "center", "right"}) {
+            for (const bool wrapped : {false, true}) {
+                const int width = wrapped ? 32 : 80;
+                const std::string text = wrapped ? "AB ABA" : "AB";
+                auto document = HtmlParser().parse("<body><" + tag + ">" + text +
+                    "</" + tag + "></body>");
+                StyleResolver resolver(CssParser().parse(
+                    "body { margin: 0; } " + tag + " { margin: 0; padding: 0; border: 0; "
+                    "font-size: 16px; line-height: 20px; width: " + std::to_string(width) +
+                    "px; text-align: " + alignment + "; color: #000000; background: #ffffff; }"));
+                auto layout = LayoutEngine(resolver, {}, layout_options).layout(*document, 120, 80);
+                const LayoutBox* text_box = find_text_box(*layout);
+                assert(text_box != nullptr);
+                const auto& cache = text_box->text_layout_cache;
+                assert(cache.valid && cache.prepared_text);
+                assert(cache.prepared_lines.size() == (wrapped ? 2U : 1U));
+                assert(text_box->rect.width == (wrapped ? 32 : 18));
+                const int outer_offset = alignment == "center" ? (width - text_box->rect.width) / 2
+                    : alignment == "right" ? width - text_box->rect.width : 0;
+                assert(text_box->rect.x == outer_offset);
+                for (const auto& line : cache.prepared_lines) {
+                    const int inner_offset = alignment == "center" ? (text_box->rect.width - line.width) / 2
+                        : alignment == "right" ? text_box->rect.width - line.width : 0;
+                    assert(line.origin_x == text_box->rect.x + inner_offset);
+                }
+                auto layers = LayerTreeBuilder(layer_options).build(*layout);
+                auto flattened = LayerTreeBuilder(layer_options).flatten(*layers);
+                std::size_t line_index = 0;
+                for (const auto& command : flattened) {
+                    if (command.type() != DisplayCommandType::PreparedText) continue;
+                    assert(line_index < cache.prepared_lines.size());
+                    assert(command.rect.x == text_box->rect.x && command.rect.y == text_box->rect.y);
+                    assert(command.rect.width == text_box->rect.width && command.rect.height == text_box->rect.height);
+                    assert(prepared_text_origin_x(command) == cache.prepared_lines[line_index].origin_x);
+                    assert(prepared_text_baseline_y(command) == cache.prepared_lines[line_index].baseline_y);
+                    ++line_index;
+                }
+                assert(line_index == cache.prepared_lines.size());
+                const auto frame = SoftwareCompositor({}, compositor_options).render(
+                    *layers, 120, 80, Color{255, 255, 255, 255});
+                for (const auto& line : cache.prepared_lines) {
+                    std::size_t ink = 0;
+                    for (int y = line.baseline_y - 2; y < line.baseline_y; ++y) {
+                        for (int x = text_box->rect.x; x < text_box->rect.x + text_box->rect.width; ++x) {
+                            ink += frame.pixel(x, y).r < 255;
+                        }
+                    }
+                    assert(ink > 0);
+                }
+            }
+        }
+    }
+}
 void core_layout_refusals_do_not_fall_back_to_host_text() {
     auto a=asset();
     std::array<TextFontFace,2> faces={{{101,17,a.font,normalized_font_family_hash("Core Test")},
@@ -447,6 +513,6 @@ int main(int argc,char** argv) {
 #endif
     if (argc>1) return inspect(argc,argv);
     weights();strikes_and_families();fallback_and_geometry();refusals_and_budgets();
-    prepared_packet_paint();html_layout_to_core_paint();core_layout_refusals_do_not_fall_back_to_host_text();
+    prepared_packet_paint();html_layout_to_core_paint();aligned_prepared_text_stays_inside_its_layout_box();core_layout_refusals_do_not_fall_back_to_host_text();
     std::cout<<"text system selection/geometry/transaction/budget tests passed\n";
 }

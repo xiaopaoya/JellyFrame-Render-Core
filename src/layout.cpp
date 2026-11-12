@@ -2433,10 +2433,12 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
             PreparedTextLine prepared_line;
             const int line_width = ceil_px(static_cast<std::int32_t>(std::min<std::int64_t>(line.advance,
                 std::numeric_limits<std::int32_t>::max())));
+            // The parent inline formatter aligns this text box in its line. Only
+            // align prepared lines inside that box, including shorter wrapped lines.
             const int line_offset = box.style.text_align == TextAlign::Center
-                ? std::max(0, bounded_subtract(usable_text_width, line_width) / 2)
+                ? std::max(0, bounded_subtract(text_width, line_width) / 2)
                 : box.style.text_align == TextAlign::End
-                    ? std::max(0, bounded_subtract(usable_text_width, line_width)) : 0;
+                    ? std::max(0, bounded_subtract(text_width, line_width)) : 0;
             prepared_line.origin_x = bounded_add(text_x, line_offset);
             prepared_line.baseline_y = bounded_add(border_box_y,
                 bounded_add(bounded_non_negative_multiply(std::max(0, line_height), static_cast<int>(line_index)),
