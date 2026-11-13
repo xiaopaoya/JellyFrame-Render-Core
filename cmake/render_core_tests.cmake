@@ -8,6 +8,13 @@ add_test(NAME jellyframe_shared_inline_tests COMMAND jellyframe_shared_inline_te
 add_executable(jellyframe_shared_inline_planner_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shared_inline_planner_tests.cpp")
 target_link_libraries(jellyframe_shared_inline_planner_tests PRIVATE jellyframe_render_core)
 add_test(NAME jellyframe_shared_inline_planner_tests COMMAND jellyframe_shared_inline_planner_tests)
+add_executable(jellyframe_core_text_cluster_map_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/core_text_cluster_map_tests.cpp")
+target_link_libraries(jellyframe_core_text_cluster_map_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_core_text_cluster_map_tests COMMAND jellyframe_core_text_cluster_map_tests)
+if(COMMAND jellyframe_stage_sanitizer_runtime)
+    jellyframe_stage_sanitizer_runtime(jellyframe_core_text_cluster_map_tests)
+endif()
 if(COMMAND jellyframe_stage_sanitizer_runtime)
     jellyframe_stage_sanitizer_runtime(jellyframe_shared_inline_planner_tests)
 endif()
