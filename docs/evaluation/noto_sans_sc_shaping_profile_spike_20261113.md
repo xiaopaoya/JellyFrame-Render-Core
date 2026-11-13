@@ -23,8 +23,9 @@ both pinned dependencies in a temporary target directory, then run:
 ```powershell
 python -m pip install --target $env:TEMP/jf-shaping-spike-deps fontTools==4.60.1 uharfbuzz==0.57.0
 $env:PYTHONPATH = "$env:TEMP/jf-shaping-spike-deps"
+$runtimeRoot = 'E:/path/to/JellyFrame'
 python tools/noto_shaping_profile_spike.py `
-  E:/Workspaces/migration-followup/Runtime-core-release-status-20261113/ports/esp32s3-idf/font/source/noto-sans-sc-2.002/NotoSansSC-Regular.otf
+  "$runtimeRoot/ports/esp32s3-idf/font/source/noto-sans-sc-2.002/NotoSansSC-Regular.otf"
 ```
 
 The prototype parses and applies only GSUB `fwid` and GPOS `kern`, using
