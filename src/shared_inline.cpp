@@ -256,9 +256,7 @@ struct Collector {
         if (image) budget.capacity(std::max<std::size_t>(15, box.node->attribute("src").size())+1);
         LayoutTextFont font;
         if (layout_text_font(box.style, font) != S::Ok) return false;
-        if (depth && (!same_font(font, snapshot.members[0].proof.font) ||
-            box.style.line_height != snapshot.members[0].proof.line_height ||
-            box.style.white_space_nowrap != snapshot.members[0].proof.nowrap ||
+        if (depth && (box.style.white_space_nowrap != snapshot.members[0].proof.nowrap ||
             box.style.overflow_wrap_anywhere != snapshot.members[0].proof.anywhere)) return false;
         const auto member = snapshot.members.size();
         snapshot.members.emplace_back();
