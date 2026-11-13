@@ -158,6 +158,15 @@ bool same_font(const LayoutTextFont& a, const LayoutTextFont& b) {
 bool same_color(Color a, Color b) {
     return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
 }
+int list_item_ordinal(const Node& node) {
+    if (node.parent == nullptr) return 1;
+    int ordinal = 0;
+    for (const auto& sibling : node.parent->children) {
+        if (sibling->type == NodeType::Element && sibling->tag_name == "li") ++ordinal;
+        if (sibling.get() == &node) return std::max(1, ordinal);
+    }
+    return std::max(1, ordinal);
+}
 SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     SharedInlineProof result;
     result.box = &box;
@@ -186,6 +195,22 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     result.after_kind = box.style.after_content_kind;
     result.before_text = box.style.before_content_text;
     result.after_text = box.style.after_content_text;
+    result.before_counter_name = box.style.before_counter_name;
+    result.before_counter_suffix = box.style.before_counter_suffix;
+    result.after_counter_name = box.style.after_counter_name;
+    result.after_counter_suffix = box.style.after_counter_suffix;
+    if (box.node->type == NodeType::Element) {
+        if (box.style.before_content_kind == GeneratedContentKind::Counter &&
+            box.style.before_counter_name == "list-num") {
+            result.before_counter_text = std::to_string(list_item_ordinal(*box.node)) +
+                box.style.before_counter_suffix;
+        }
+        if (box.style.after_content_kind == GeneratedContentKind::Counter &&
+            box.style.after_counter_name == "list-num") {
+            result.after_counter_text = std::to_string(list_item_ordinal(*box.node)) +
+                box.style.after_counter_suffix;
+        }
+    }
     result.before_color = box.style.before_color;
     result.after_color = box.style.after_color;
     result.before_weight = box.style.before_font_weight;
@@ -199,12 +224,14 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     return result;
 }
 bool generated_source_eligible(const Style& style, bool host) {
-    const auto supported = [](GeneratedContentKind kind, const std::string& text) {
+    const auto supported = [](GeneratedContentKind kind, const std::string& text,
+        const std::string& counter_name) {
         return kind == GeneratedContentKind::None ||
-            (kind == GeneratedContentKind::Text && !text.empty());
+            (kind == GeneratedContentKind::Text && !text.empty()) ||
+            (kind == GeneratedContentKind::Counter && counter_name == "list-num");
     };
-    return supported(style.before_content_kind, style.before_content_text) &&
-        supported(style.after_content_kind, style.after_content_text) &&
+    return supported(style.before_content_kind, style.before_content_text, style.before_counter_name) &&
+        supported(style.after_content_kind, style.after_content_text, style.after_counter_name) &&
         !style.before_left_specified && !style.after_left_specified &&
         (!host || style.display == Display::Block);
 }
@@ -283,8 +310,11 @@ struct Collector {
         const auto kind = after ? style.after_content_kind : style.before_content_kind;
         if (kind == GeneratedContentKind::None) return true;
         if (!box.node || box.node->type != NodeType::Element ||
-            kind != GeneratedContentKind::Text || !generated_source_eligible(style, member == 0)) return false;
-        const auto& source = after ? style.after_content_text : style.before_content_text;
+            !generated_source_eligible(style, member == 0)) return false;
+        const auto& source_proof = snapshot.members[member].proof;
+        const auto& source = kind == GeneratedContentKind::Text
+            ? (after ? style.after_content_text : style.before_content_text)
+            : (after ? source_proof.after_counter_text : source_proof.before_counter_text);
         if (source.empty() || source.size() > max_source - bytes) return false;
         Style pseudo_style = style;
         if (after ? style.after_font_weight_specified : style.before_font_weight_specified)
@@ -339,7 +369,13 @@ struct Collector {
         snapshot.members.emplace_back();
         snapshot.members.back().proof = proof(box, parent);
         budget.capacity(snapshot.members.back().proof.before_text.size() +
-            snapshot.members.back().proof.after_text.size() + 2);
+            snapshot.members.back().proof.after_text.size() +
+            snapshot.members.back().proof.before_counter_name.size() +
+            snapshot.members.back().proof.before_counter_suffix.size() +
+            snapshot.members.back().proof.before_counter_text.size() +
+            snapshot.members.back().proof.after_counter_name.size() +
+            snapshot.members.back().proof.after_counter_suffix.size() +
+            snapshot.members.back().proof.after_counter_text.size() + 7);
         snapshot.members.back().proof.dom_index = dom_index;
         snapshot.members.back().proof.render_index = render_index;
         if (image) {
@@ -787,6 +823,14 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
             box.style.font_size != p.font_size ||
             box.style.before_content_kind != p.before_kind || box.style.after_content_kind != p.after_kind ||
             box.style.before_content_text != p.before_text || box.style.after_content_text != p.after_text ||
+            box.style.before_counter_name != p.before_counter_name ||
+            box.style.before_counter_suffix != p.before_counter_suffix ||
+            box.style.after_counter_name != p.after_counter_name ||
+            box.style.after_counter_suffix != p.after_counter_suffix ||
+            ((p.before_kind == GeneratedContentKind::Counter && p.before_counter_name == "list-num") &&
+                p.before_counter_text != std::to_string(list_item_ordinal(*p.node)) + p.before_counter_suffix) ||
+            ((p.after_kind == GeneratedContentKind::Counter && p.after_counter_name == "list-num") &&
+                p.after_counter_text != std::to_string(list_item_ordinal(*p.node)) + p.after_counter_suffix) ||
             !same_color(box.style.before_color, p.before_color) ||
             !same_color(box.style.after_color, p.after_color) ||
             box.style.before_font_weight != p.before_weight || box.style.after_font_weight != p.after_weight ||

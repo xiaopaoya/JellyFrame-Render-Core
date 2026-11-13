@@ -1066,7 +1066,7 @@ void generated_text_fallback_and_invalidation() {
     StyleResolver fallback_styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}div{display:block;width:80px;font-size:16px;line-height:18px}"
         "span{display:inline}#positioned::before{content:'P';left:4px}"
-        "#counter::after{content:counter(list-num)'.'}"));
+        "#counter::after{content:counter(chapter)'.'}"));
     auto fallback_dom = HtmlParser{}.parse(
         "<div id='positioned'><span>A</span></div><div id='counter'><span>B</span></div>");
     auto fallback_layout = LayoutEngine(fallback_styles, {}, options).layout(*fallback_dom, 100, 100);
@@ -1135,6 +1135,60 @@ void generated_text_fallback_and_invalidation() {
         }
     }
     check(updated_glyph, "updated generated source remains present after relayout");
+}
+void generated_list_num_counter_sources() {
+    std::vector<std::pair<unsigned, unsigned>> supported;
+    for (unsigned cp = 32; cp <= 90; ++cp) supported.emplace_back(cp, cp == 32 ? 250U : 500U);
+    auto generated_font = asset(400, 16, 4, 1, supported);
+    TextFontFace face{1, 0, generated_font.font};
+    TextSystem system;
+    check(system.bind(&face, 1) == TextSystemStatus::Ok, "bind counter fixture font");
+    LayoutEngineOptions options; options.text_system = &system;
+    LayerTreeBuilderOptions layer_options; layer_options.text_system = &system;
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}li{display:block}p{display:block;width:120px;font-size:16px;line-height:18px;color:black}"
+        "span{display:inline}#p::before{content:counter(list-num)'.';color:red}"
+        "#member::after{content:counter(list-num)':';color:blue}"));
+    auto dom = HtmlParser{}.parse(
+        "<div id='group'><li>one</li><li>two</li><p id='p'><span id='member'>A</span></p></div>");
+    auto layout = LayoutEngine(styles, {}, options).layout(*dom, 140, 100);
+    const auto& host = find(*layout, "p");
+    check(host.text_layout_cache.shared_inline != nullptr,
+        "ordinary host with list-num before source enters the shared paragraph path");
+    const auto& member = find(*layout, "member");
+    check(member.text_layout_cache.shared_inline != nullptr,
+        "inline member with list-num after source shares its host paragraph");
+    auto layers = LayerTreeBuilder(layer_options).build(*layout);
+    const auto commands = LayerTreeBuilder(layer_options).flatten(*layers);
+    std::string order;
+    for (const auto& command : commands) {
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        PreparedTextView packet;
+        check(decode_prepared_text(command.text, packet), "counter packet decodes");
+        for (std::size_t i = 0; i < packet.size(); ++i) {
+            PreparedTextGlyph glyph;
+            check(packet.read(i, glyph), "counter glyph reads");
+            order.push_back(static_cast<char>(glyph.source_codepoint));
+        }
+    }
+    check(order == "2.A1:",
+        "counter sources resolve the existing sibling ordinal and preserve before/text/after order");
+
+    StyleResolver unsupported_styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}p{display:block;width:120px;font-size:16px;line-height:18px}"
+        "span{display:inline}#p::before{content:counter(chapter)'.'}"));
+    auto unsupported_dom = HtmlParser{}.parse("<p id='p'><span>A</span></p>");
+    auto unsupported_layout = LayoutEngine(unsupported_styles, {}, options).layout(*unsupported_dom, 140, 100);
+    const auto& unsupported_host = find(*unsupported_layout, "p");
+    check(!unsupported_host.text_layout_cache.shared_inline,
+        "unsupported named counters retain ordinary layout fallback");
+    const auto fallback_commands = LayerTreeBuilder(layer_options).flatten(
+        *LayerTreeBuilder(layer_options).build(*unsupported_layout));
+    std::size_t fallback_count = 0;
+    for (const auto& command : fallback_commands)
+        if (command.type() == DisplayCommandType::Text && command.text == "1.") ++fallback_count;
+    check(fallback_count == 1,
+        "unsupported named counter still paints once through established fallback");
 }
 void partition_matrix_and_events() {
     Fixture f;
@@ -1389,6 +1443,7 @@ int main() {
         mutation_damage_and_tiling();
         generated_text_shared_sources();
         generated_text_fallback_and_invalidation();
+        generated_list_num_counter_sources();
         limits_and_allocation_failures();
         cumulative_scratch_acquisitions();
         layout_topology_replacement();
