@@ -53,24 +53,21 @@ hash，让后端选择对应字体，而不把 family 字符串带进 display li
 - 可选的规范化 font-family hash。
 
 重视视觉正确性的宿主应让测量和绘制来自同一个字体引擎。二者不一致时，文本可能被裁切，或换行位置与实际绘制不一致。
-
-`src/render_core/text_adapter.h` 提供 `HostTextAdapter`，用于桥接已经同时提供测量和绘制能力的
-LVGL 或厂商字体引擎。adapter 不持有资源；宿主拥有的 context 必须覆盖 layout 和 render 生命周期：
+直接构造两个回调记录；其中的 context 由宿主借用，必须覆盖 layout 和 render 生命周期：
 
 ```cpp
-HostTextAdapter adapter{measure_text, paint_text, host_font_context};
-LayoutEngine layout(style_resolver, text_measure_provider_from_adapter(adapter));
+TextMeasureProvider measure_provider{host_measure_callback, host_font_context};
+LayoutEngine layout(style_resolver, measure_provider);
 LayerTreeBuilderOptions layer_options;
-layer_options.text_measure = text_measure_provider_from_adapter(adapter);
+layer_options.text_measure = measure_provider;
 LayerTreeBuilder layers(layer_options);
-SoftwareCompositor compositor(text_painter_from_adapter(adapter));
+TextPainter painter{host_paint_callback, host_font_context};
+SoftwareCompositor compositor(painter);
 ```
 
 App 使用文档化的 `letter-spacing` 或 `overflow-wrap: anywhere` 子集时，必须把同一个 measure
 provider 传给 `LayerTreeBuilderOptions::text_measure`。builder 会据此按 layout 使用的同一 advance
 发出 scalar 定位命令。普通文本继续走原有单条 command 路径，构建 layer 时不会查询该 provider。
-
-这个 helper 只是为了让板级 port 的接入形态一致，不会把字体发现、shaping 或 cache 放进核心。
 
 `jellyframe_app_runtime` 中的 `AppFontSet` 使用可选 family-aware callback。generic/未指定 family
 的文本保留紧凑的系统优先 fallback 链；CSS `font-family` 可以先选择 manifest `.jffont` family，

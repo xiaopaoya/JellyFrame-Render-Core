@@ -150,9 +150,9 @@ there is no persistent policy cache or hidden global registration state.
 
 Next route Core layout/count/cache/emission and software paint to this service,
 extend supported shaping as required, and migrate Runtime font ownership, stable
-IDs and worker/UI transport. Then delete old providers/HostTextAdapter and obsolete
-font loaders/assets directly, bump the matched ABI/package/codec as necessary.
-No new provider adapter or public compatibility bridge is part of this slice.
+IDs and worker/UI transport. The convenience host adapter is removed; callback
+provider APIs remain until their Runtime consumers migrate in a coordinated
+ABI/package/codec update.
 
 Shared neutral inline paragraphs use the same current TextSystem and final
 prepared packets. See [shared inline paragraphs](shared_inline_paragraphs.md)

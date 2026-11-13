@@ -60,19 +60,17 @@ Text display commands now carry minimal paint semantics:
 
 Hosts that care about visual correctness should provide both measurement and
 painting from the same font engine. If they disagree, text can be clipped or
-wrapped differently from what is drawn.
-
-`src/render_core/text_adapter.h` provides `HostTextAdapter`, a tiny bridge for LVGL or
-vendor engines that already expose both services. The adapter owns no resources;
-the host-owned context must outlive layout and rendering:
+wrapped differently from what is drawn. Construct the two callback records
+directly; their context is borrowed and must outlive layout and rendering:
 
 ```cpp
-HostTextAdapter adapter{measure_text, paint_text, host_font_context};
-LayoutEngine layout(style_resolver, text_measure_provider_from_adapter(adapter));
+TextMeasureProvider measure_provider{host_measure_callback, host_font_context};
+LayoutEngine layout(style_resolver, measure_provider);
 LayerTreeBuilderOptions layer_options;
-layer_options.text_measure = text_measure_provider_from_adapter(adapter);
+layer_options.text_measure = measure_provider;
 LayerTreeBuilder layers(layer_options);
-SoftwareCompositor compositor(text_painter_from_adapter(adapter));
+TextPainter painter{host_paint_callback, host_font_context};
+SoftwareCompositor compositor(painter);
 ```
 
 When an app uses the documented `letter-spacing` or `overflow-wrap: anywhere`
@@ -80,9 +78,6 @@ subset, pass the same measure provider to `LayerTreeBuilderOptions::text_measure
 The builder then emits scalar-positioned commands using exactly the advances
 used by layout. Ordinary text keeps the old single-command path and does not
 consult this provider during layer construction.
-
-This helper exists to keep board ports consistent. It does not add font
-discovery, shaping or caching to the core.
 
 `AppFontSet` in `jellyframe_app_runtime` uses the optional family-aware
 callbacks. Generic/no-family text keeps the compact system-first fallback chain;
