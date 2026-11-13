@@ -220,6 +220,37 @@ cluster/map costs; proposed limits must be measured on target devices before
 adoption and must share the enclosing operation ledger instead of creating
 independent allowances.
 
+## Resource Model Assessment
+
+The product Noto Sans SC 2.002 OTFs provide a useful storage bound for the
+first profile. The three faces are 8,482,020 bytes (Regular), 8,508,580 bytes
+(Medium), and 8,716,392 bytes (Bold). Their complete raw GSUB+GPOS tables are
+51,962, 51,962, and 52,158 bytes respectively: 156,082 bytes across the three
+weights, before any generated index or alignment. Each OTF exceeds the
+ESP32-S3 port's documented 8 MiB application partition, while the current
+16 px Regular JFFONT2 asset is 716,274 bytes. This makes original-OTF parsing
+an unsuitable first embedded resource path and makes a generated shaping
+profile a plausible size candidate. The table figures are upper bounds for
+carrying the complete layout tables, not measurements of a proposed compact
+profile or of runtime memory.
+
+The shaping lookup output also exposes a resource gap: JFFONT2 addresses
+bitmaps through Unicode scalar mappings, while GSUB can emit glyph IDs that are
+not the scalar's cmap glyph, and GPOS mark lookups can emit zero-advance glyphs
+with nonzero offsets. The profile must therefore provide validated bitmap and
+metric lookup by glyph ID for every glyph the admitted substitutions can
+produce. Appending GSUB/GPOS bytes to a scalar-only JFFONT2 resource would not
+make ligatures or marks drawable.
+
+The current evidence selects a generated, Core-owned shaping-data path for the
+next prototype. It does not select a final JFFONT version, packet format,
+public API, or supported-feature promise. The prototype still needs to prove a
+deterministic resource containing the admitted Script/LangSys lookup closure
+and its glyph-ID catalog, then measure encoded flash size, target load peak,
+scratch, bounded work, and latency on the ESP32-S3 profile. Until those
+measurements pass explicit budgets, scalar JFFONT2 remains the only supported
+behavior and all shaping stays opt-in/experimental.
+
 ## ABI and release implications
 
 `TextSystem`, prepared packet views/records, layout options/cache bindings, and
