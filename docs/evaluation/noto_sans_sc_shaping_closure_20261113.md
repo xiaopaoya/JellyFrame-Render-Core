@@ -43,13 +43,19 @@ JFFONT2 mapping. The inventory is:
 30450 30451 30452 30551 30552
 ```
 
-The eight corpus cases were compared record-for-record with HarfBuzz for each
-face: glyph ID, source cluster, both advances, and both offsets. All 24
+The ten corpus cases were compared record-for-record with HarfBuzz for each
+face: glyph ID, source cluster, both advances, and both offsets. All 30
 comparisons matched. The corpus covers canonical composition, `ffi` ligature,
 English/Simplified-Chinese `locl` control, Chinese punctuation, Latin kerning,
-Bopomofo mark attachment, and a two-mark sequence. The implementation applies
-font-aware canonical composition and the selected SingleSubst, LigatureSubst,
-PairPos formats 1/2, and MarkBasePos format 1 operations needed by this profile.
+Bopomofo single-mark attachment, two double-mark attachment sequences, and the
+`A` plus two-mark sequence. For both `ㄓ` + U+0300 + U+0301 and `ㄓ` + U+0307 +
+U+0300, both marks attach to the same base and the second mark has X/Y offsets
+-360/+600 in all three faces. The second sequence crosses two selected MarkBasePos
+lookups, so it also checks mark recognition across the selected feature closure.
+The separate `A` mark-chain case still has no nonzero attachment and does not
+establish mark-to-mark support. The implementation applies font-aware canonical
+composition and the selected SingleSubst, LigatureSubst, PairPos formats 1/2,
+and MarkBasePos format 1 operations needed by this profile.
 
 At 16 px with 4-bit coverage, the experimental catalogs measured:
 
@@ -74,12 +80,13 @@ device adjustments: GSUB SingleSubst and LigatureSubst; GPOS PairPos formats 1
 and 2; and MarkBasePos format 1. It has no contextual/chained substitutions,
 extension lookups, mark-to-mark or mark-to-ligature, bidi/reordering, fallback,
 wrapping, complete Unicode qualification, or production Core integration.
-Eight examples establish a narrow oracle check, not a general shaping claim.
+Ten examples establish a narrow oracle check, not a general shaping claim.
 
-The next gate is to define a deterministic encoded representation for the
-admitted lookup profile, measure its tables plus GID catalogs, and build an
-isolated N16R8 image to measure flash change. Only if those results fit explicit
-budgets should work proceed to resource validation, bounded reader/work and
-scratch analysis, then device rendering acceptance. Runtime must continue to
-use scalar JFFONT2 behavior until those gates and a reviewed API/resource
+The deterministic lookup-data encoding and its host-side byte measurement are
+recorded in the separate encoded-profile evaluation. The next gate is an
+isolated N16R8 resource-only build that measures linked flash delta. It does
+not qualify a runtime reader or imply support. Only if the size fits an
+explicit budget should work proceed to resource validation, bounded reader/work
+and scratch analysis, then device rendering acceptance. Runtime must continue
+to use scalar JFFONT2 behavior until those gates and a reviewed API/resource
 contract are complete.
