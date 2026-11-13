@@ -10,9 +10,16 @@ generated nodes and incomplete render membership refuse the complete attempt.
 
 ## Current admission
 
-This delivery accepts collapsing ASCII, per-owner registered font requests and
-line-heights, start/center/end alignment, first-line indent, nowrap and anywhere
-wrapping. Host alignment and wrapping policy remain paragraph-wide. Width
+This delivery accepts collapsing ASCII and uniformly preserved ASCII
+whitespace, per-owner registered font requests and line-heights,
+start/center/end alignment, first-line indent, nowrap and anywhere wrapping.
+Preserving contexts such as `pre` retain spaces, tabs, hard line breaks,
+blank lines and trailing spaces; CRLF is one line break even when CR and LF
+belong to different text owners. Tabs use the bounded Core tab-stop policy
+(eight space advances by default). Unsupported preserved characters refuse the
+complete shared attempt and use ordinary layout. `br` remains outside shared
+paragraph admission; `wbr` remains a soft break opportunity. Host alignment and
+wrapping policy remain paragraph-wide. Width
 planning and glyph positions retain Q1000 precision, including
 fractional containing widths. Placement uses the current integer box-origin
 policy. Signed odd half-leading floors the first half and preserves line advance.
@@ -130,16 +137,17 @@ decorated images or arbitrary image styling.
 
 ## Remaining finite migration stages
 
-1. Extend complete source binding for generated/boxless contexts and preserved
-   whitespace/tab/CRLF policies. Mixed registered font requests and per-owner
-   line heights are integrated.
+1. Extend complete source binding for generated/boxless contexts. Mixed
+   registered font requests, per-owner line heights, and the bounded preserved
+   whitespace policy are integrated.
 2. Define and adapt a Core-owned shaping/resource contract before integrating
    the historical shaped-inline source and frozen shaped packets. Its former
    host shape/metrics callbacks and JFGR font-instance packets are incompatible
    with the current Core-owned PreparedText paint contract.
 
 The normal paragraph path, bounded inline-image stage, zero-blur text shadows,
-per-line solid inline-scope backgrounds and the existing propagated
-underline/line-through subset are integrated. Source-topology and shaped-inline
-stages remain pending. The Style model has no overline or complete decoration
-style storage, so those features remain outside this bounded subset.
+per-line solid inline-scope backgrounds, the existing propagated
+underline/line-through subset, and bounded preserved whitespace are integrated.
+Generated/boxless source-topology and shaped-inline stages remain pending. The
+Style model has no overline or complete decoration style storage, so those
+features remain outside this bounded subset.
