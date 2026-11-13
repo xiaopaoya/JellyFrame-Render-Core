@@ -28,11 +28,13 @@ bool empty_edges(const EdgeSizes& e) {
     return e.left == 0 && e.right == 0 && e.top == 0 && e.bottom == 0;
 }
 bool neutral(const Style& s, bool host, bool allow_image_dimensions = false,
-    bool allow_sharp_text_shadow = false, bool allow_inline_background = false) {
+    bool allow_sharp_text_shadow = false, bool allow_inline_background = false,
+    bool allow_text_decoration = false) {
     if (s.visibility_hidden || s.text_transform != TextTransform::None || s.letter_spacing != 0 ||
         s.text_overflow_ellipsis || (s.text_shadow.enabled &&
-            (!allow_sharp_text_shadow || s.text_shadow.blur != 0)) || s.text_decoration_underline ||
-        s.text_decoration_line_through || s.before_content_kind != GeneratedContentKind::None ||
+            (!allow_sharp_text_shadow || s.text_shadow.blur != 0)) ||
+        (!allow_text_decoration && (s.text_decoration_underline || s.text_decoration_line_through)) ||
+        s.before_content_kind != GeneratedContentKind::None ||
         s.after_content_kind != GeneratedContentKind::None) return false;
     if (host) return s.display == Display::Block;
     if (s.display != Display::Inline || s.position_type != PositionType::Static ||
@@ -172,11 +174,14 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     result.color = box.style.color;
     result.background_color = box.style.background_color;
     result.text_shadow = box.style.text_shadow;
+    result.font_size = box.style.font_size;
     result.line_height = box.style.line_height;
     result.indent = box.style.text_indent;
     result.align = box.style.text_align;
     result.nowrap = box.style.white_space_nowrap;
     result.anywhere = box.style.overflow_wrap_anywhere;
+    result.text_decoration_underline = box.style.text_decoration_underline;
+    result.text_decoration_line_through = box.style.text_decoration_line_through;
     return result;
 }
 struct BudgetRefusal {};
@@ -240,7 +245,7 @@ struct Collector {
         ImageIntrinsicSize image_intrinsic{};
         if (image ? !eligible_inline_image(*box.node, box.style, containing_width_units,
                 image_width_units, image_height, natural_images, &image_intrinsic) :
-                !neutral(box.style, depth == 0, false, true, depth != 0)) return false;
+                !neutral(box.style, depth == 0, false, true, depth != 0, true)) return false;
         if (depth && !text && !marker && !image && box.node->tag_name != "span") return false;
         if (box.node->text.size() > max_source-bytes) return false;
         bytes += box.node->text.size();
@@ -370,13 +375,31 @@ void append_fragment(SharedInlineMember& member, Rect fragment) {
     }
     member.fragments.push_back(fragment);
 }
+void text_decoration_rects(Rect rect, int font_size, bool line_through, bool underline,
+    Rect& strike, Rect& under) {
+    const int thickness = std::max(1, font_size / 12);
+    const int inset = std::max(0, font_size / 12);
+    strike = {safe_add(rect.x, inset), rect.y,
+        std::max(0, safe_add(rect.width, safe_negate(safe_add(inset, inset)))), thickness};
+    under = strike;
+    if (line_through)
+        strike.y = safe_add(rect.y, std::max(0, safe_span(thickness, rect.height) / 2));
+    if (underline)
+        under.y = safe_add(rect.y,
+            std::max(0, safe_span(std::max(thickness + 1, font_size / 5), rect.height)));
+}
+std::size_t text_decoration_command_count(Rect rect, int font_size, bool line_through, bool underline) {
+    const int inset = std::max(0, font_size / 12);
+    if (std::max(0, safe_add(rect.width, safe_negate(safe_add(inset, inset)))) <= 0) return 0;
+    return static_cast<std::size_t>(line_through) + static_cast<std::size_t>(underline);
+}
 }
 
 bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
     const LayoutEngineOptions& options, int& height, std::int64_t precise_width_units,
     NaturalImageSizingFrame* natural_images) noexcept {
     if (!host.node || !options.text_system || !options.text_system->ready() || host.children.empty() ||
-        !neutral(host.style, true, false, true)) return false;
+        !neutral(host.style, true, false, true, false, true)) return false;
     SharedInlineLayoutStatistics local_statistics;
     auto& statistics = options.shared_inline.statistics ? *options.shared_inline.statistics : local_statistics;
     if (statistics.attempts >= options.shared_inline.max_attempts) { ++statistics.refusals;return false; }
@@ -457,14 +480,23 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         for (const auto& fragment : snapshot->paragraph.fragments) {
             budget.work((fragment.end-fragment.begin)*2+max_depth);
             const auto bounds = fragment_bounds(fragment, snapshot->paragraph.lines[fragment.line]);
-            const auto ink = fragment_ink(fragment, snapshot->paragraph.lines[fragment.line]);
+            auto ink = fragment_ink(fragment, snapshot->paragraph.lines[fragment.line]);
             auto member = snapshot->owners[fragment.owner];
-            const auto& owner_shadow = snapshot->members[member].proof.text_shadow;
+            const auto& owner_proof = snapshot->members[member].proof;
+            const auto& owner_shadow = owner_proof.text_shadow;
             Rect shadow_ink = ink;
             if (owner_shadow.enabled) {
                 shadow_ink.x = safe_add(shadow_ink.x, owner_shadow.offset_x);
                 shadow_ink.y = safe_add(shadow_ink.y, owner_shadow.offset_y);
             }
+            Rect strike, underline;
+            text_decoration_rects(bounds, owner_proof.font_size,
+                owner_proof.text_decoration_line_through, owner_proof.text_decoration_underline,
+                strike, underline);
+            if (owner_proof.text_decoration_line_through && strike.width > 0)
+                ink = union_rect(ink, strike);
+            if (owner_proof.text_decoration_underline && underline.width > 0)
+                ink = union_rect(ink, underline);
             for (;;) {
                 auto& scope = snapshot->members[member];
                 scope.ink_bounds = union_rect(scope.ink_bounds, ink);
@@ -611,7 +643,7 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
         const bool style_current = p.atomic_image
             ? inline_image_style_eligible(*p.node, box.style) && image_dimensions_current &&
                 p.node->attribute("src") == p.image_source
-            : neutral(box.style, i == 0, false, true, i != 0);
+            : neutral(box.style, i == 0, false, true, i != 0, true);
         if (box.node != p.node || !p.node || p.node->parent != p.parent ||
             p.node->children.size() != p.dom_children ||
             box.children.size() != p.children || p.node->text != p.source || p.node->tag_name != p.tag ||
@@ -638,6 +670,9 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
             box.style.text_shadow.offset_y != p.text_shadow.offset_y ||
             box.style.text_shadow.blur != p.text_shadow.blur ||
             !same_color(box.style.text_shadow.color, p.text_shadow.color) ||
+            box.style.font_size != p.font_size ||
+            box.style.text_decoration_underline != p.text_decoration_underline ||
+            box.style.text_decoration_line_through != p.text_decoration_line_through ||
             box.style.line_height != p.line_height ||
             box.style.text_indent != p.indent || box.style.text_align != p.align ||
             box.style.white_space_nowrap != p.nowrap || box.style.overflow_wrap_anywhere != p.anywhere) return false;
@@ -695,6 +730,12 @@ std::size_t shared_inline_command_count(const SharedInlineBinding& binding,
             if (count == max_count) return 0;
             ++count;
         }
+        const auto& proof = snapshot.members[member].proof;
+        const auto bounds = fragment_bounds(fragment, snapshot.paragraph.lines[fragment.line]);
+        const auto decorations = text_decoration_command_count(bounds, proof.font_size,
+            proof.text_decoration_line_through, proof.text_decoration_underline);
+        if (decorations > max_count-count) return 0;
+        count += decorations;
     }
     for (std::size_t member = 1; member < snapshot.members.size(); ++member) {
         if (snapshot.members[member].proof.background_color.a == 0) continue;
@@ -786,6 +827,29 @@ bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
             command.text = fragment.packet;
             set_prepared_text_origin(command, origin_x, safe_add(origin_y, line.baseline));
             draft.push_back(std::move(command));
+            auto decoration_bounds = fragment_bounds(fragment, line);
+            decoration_bounds.x = safe_add(decoration_bounds.x, origin_x);
+            decoration_bounds.y = safe_add(decoration_bounds.y, origin_y);
+            Rect strike, underline;
+            text_decoration_rects(decoration_bounds, member.proof.font_size,
+                member.proof.text_decoration_line_through, member.proof.text_decoration_underline,
+                strike, underline);
+            if (member.proof.text_decoration_line_through && strike.width > 0) {
+                DisplayCommand strike_command;
+                strike_command.set_type(DisplayCommandType::FillRect);
+                strike_command.rect = strike;
+                strike_command.color = member.proof.color;
+                strike_command.color2 = strike_command.color;
+                draft.push_back(std::move(strike_command));
+            }
+            if (member.proof.text_decoration_underline && underline.width > 0) {
+                DisplayCommand underline_command;
+                underline_command.set_type(DisplayCommandType::FillRect);
+                underline_command.rect = underline;
+                underline_command.color = member.proof.color;
+                underline_command.color2 = underline_command.color;
+                draft.push_back(std::move(underline_command));
+            }
         }
     }
     if (fragment_index != snapshot.paragraph.fragments.size() ||

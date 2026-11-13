@@ -16,8 +16,11 @@ wrapping. Width planning and glyph positions retain Q1000 precision, including
 fractional containing widths. Placement uses the current integer box-origin
 policy. Signed odd half-leading floors the first half and preserves line advance.
 Neutral descendants have zero edges, automatic dimensions, static positioning,
-full opacity, visible text, empty transforms and overflow, and no background,
-shadow, decoration, outline, generated content or independent stacking scope.
+full opacity, visible text, empty transforms and overflow. The bounded shared
+paint subset also admits solid inline-scope backgrounds, zero-blur text shadows,
+and the existing underline/line-through decoration flags; it excludes box
+shadows, blurred text shadows, outlines, generated content and independent
+stacking scopes.
 Unsupported whole contexts continue through the established ordinary formatter.
 Paragraph hosts undergoing temporary Flex/Grid/positioned sizing overrides or
 mixed-size style materialization also use that formatter until their source-style
@@ -126,22 +129,12 @@ decorated images or arbitrary image styling.
 
 ## Remaining finite migration stages
 
-1. Add zero-blur text shadows to shared paragraphs by replaying the frozen
-   prepared-text packet with the authored offset/color before the foreground.
-   Preserve logical hit/scroll bounds and extend ink damage only. Keep all
-   blurred shadows outside this slice; no font callback is needed.
-2. Add the explicitly admitted propagated text-decoration subset with bounded
-   command generation and full/tiled/damage parity. Background height policy
-   for the newly integrated solid inline-scope backgrounds is line-height
-   fragment bounds.
-   The current Style model has underline and line-through flags, but no overline
-   or complete decoration style representation; parser/cascade additions must
-   be scoped separately.
-3. Extend complete source binding for generated/boxless contexts, preserved
+1. Extend complete source binding for generated/boxless contexts, preserved
    whitespace/tab/CRLF policies and source-admitted mixed font groups.
-4. Adapt the separately accepted shaped-inline backend and frozen shaped packets.
+2. Adapt the separately accepted shaped-inline backend and frozen shaped packets.
 
-The normal neutral paragraph path and the bounded inline-image stage are
-integrated. Zero-blur text shadows and per-line solid inline-scope backgrounds
-are integrated. The listed decoration and source-topology stages remain
-pending.
+The normal paragraph path, bounded inline-image stage, zero-blur text shadows,
+per-line solid inline-scope backgrounds and the existing propagated
+underline/line-through subset are integrated. Source-topology and shaped-inline
+stages remain pending. The Style model has no overline or complete decoration
+style storage, so those features remain outside this bounded subset.
