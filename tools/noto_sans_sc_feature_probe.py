@@ -5,14 +5,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 
+import fontTools
 import uharfbuzz as hb
 from fontTools.ttLib import TTFont
 
 
 FACES = ("Regular", "Medium", "Bold")
 FEATURES = ("ccmp", "locl", "liga", "kern", "mark", "mkmk")
+FONTTOOLS_VERSION = "4.60.1"
+UHARFBUZZ_VERSION = "0.57.0"
 CASES = (
     ("combining-compose", "A\u0301", "Latn", "en", ()),
     ("common-ligature", "office", "Latn", "en", ()),
@@ -124,12 +128,21 @@ def shape(font_bytes: bytes, text: str, script: str, language: str, feature_over
 def main():
     import argparse
 
+    if fontTools.__version__ != FONTTOOLS_VERSION or hb.__version__ != UHARFBUZZ_VERSION:
+        print(
+            f"requires fontTools=={FONTTOOLS_VERSION} and uharfbuzz=={UHARFBUZZ_VERSION}; "
+            f"found fontTools=={fontTools.__version__} and uharfbuzz=={hb.__version__}",
+            file=sys.stderr,
+        )
+        return 2
+
     parser = argparse.ArgumentParser()
     parser.add_argument("font_dir", type=Path)
     args = parser.parse_args()
     result = {
         "oracle": "HarfBuzz via uharfbuzz 0.57.0",
-        "fontToolsExpected": "4.60.1",
+        "fontToolsVersion": fontTools.__version__,
+        "uharfbuzzVersion": hb.__version__,
         "requestedFeatures": FEATURES,
         "cases": [],
         "faces": {},

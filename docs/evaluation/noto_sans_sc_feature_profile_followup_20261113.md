@@ -22,14 +22,20 @@ The product OTFs are CFF OpenType fonts with 1000 units per em. The runtime
 JFFONT2 is a scalar bitmap-glyph resource and has no GSUB/GPOS data; this probe
 reads the OTF sources directly.
 
-Verified on Python 3.11 with fontTools 4.60.1 and uharfbuzz 0.57.0:
+Verified on Python 3.11 with fontTools 4.60.1 and uharfbuzz 0.57.0. The script
+enforces both Python package versions and exits with status 2 on a mismatch.
+Set the font directory to the checked-out Runtime source location:
 
 ```powershell
 python -m pip install --target $env:TEMP/jf-shaping-spike-deps fontTools==4.60.1 uharfbuzz==0.57.0
 $env:PYTHONPATH = "$env:TEMP/jf-shaping-spike-deps"
-python tools/noto_sans_sc_feature_probe.py `
-  E:/Workspaces/migration-followup/Runtime-core-release-status-20261113/ports/esp32s3-idf/font/source/noto-sans-sc-2.002
+$runtimeFontDir = 'E:/Workspaces/migration-followup/Runtime/ports/esp32s3-idf/font/source/noto-sans-sc-2.002'
+python tools/noto_sans_sc_feature_probe.py $runtimeFontDir
 ```
+
+Replace the example Runtime checkout path as needed; the script takes the
+directory as its only positional argument and reads the three named OTF files
+from it.
 
 The script emits JSON containing Script/LangSys feature closure, selected
 lookup IDs and decoded subtable counts, per-face source hashes, and HarfBuzz
