@@ -1596,9 +1596,9 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
         const auto used = display_list.size()-box_command_begin;
         const auto available = remaining_commands-std::min(used, remaining_commands);
         const auto image_count = binding.snapshot->atomic_placements.size();
-        if (binding.member == 0 && binding.snapshot->paragraph.fragments.size() <= available &&
-            image_count <= available - std::min(available, binding.snapshot->paragraph.fragments.size()) &&
-            detail::shared_inline_current(binding, options.text_system)) {
+        const auto required_commands = detail::shared_inline_command_count(binding, options.text_system);
+        if (binding.member == 0 && required_commands <= available &&
+            image_count <= required_commands && detail::shared_inline_current(binding, options.text_system)) {
             struct SharedImageContext { const LayerTreeBuilderOptions* options; } image_context{&options};
             const auto emit_image = [](const LayoutBox& image_box, DisplayList& draft, void* context) -> bool {
                 const auto& builder_options = *static_cast<SharedImageContext*>(context)->options;

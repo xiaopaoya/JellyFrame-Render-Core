@@ -104,15 +104,41 @@ An unbound box pays the 16-byte empty shared_ptr field. At 4096 boxes that field
 cost is 64 KiB before sparse paragraph storage. Device RAM/performance requires
 separate qualification against the exact consumer package.
 
+## Inline image atomics
+
+The shared paragraph collector accepts bounded `<img>` atomics after Core PR34
+and PR35. An image must have `src`, no children, `srcset` or `sizes`; it uses
+`object-fit: fill`, centered default object position and automatic image
+rendering. Definite width and integral-pixel height are accepted directly.
+Natural sizing also accepts intrinsic dimensions or one authored axis, plus the
+currently supported min/max constraints, through the operation-owned metadata
+memo. Fractional Q1000 width is retained; the final height must be integral.
+Unknown or invalid metadata and unsupported sizing refuse the complete shared
+paragraph attempt so the ordinary layout path remains responsible for it.
+
+Atomic image placement participates in the common line plan and baseline, then
+the layer builder emits one typed Image command between source-ordered text
+fragments. Accepted frame commands retain the resolved resource for replay;
+layout metadata is not queried again during paint or replay. These rules do not
+extend shared-inline admission to replaced elements generally, `srcset`,
+`sizes`, non-default object fitting/positioning, fractional image height,
+decorated images or arbitrary image styling.
+
 ## Remaining finite migration stages
 
-1. Port source-admitted definite and natural inline img atomics through the
-   active metadata-only sizing snapshot, preserving Q1000 advance and baseline.
-2. Port accepted per-line solid scope backgrounds, sharp text shadows and the
-   historical propagated decoration primitives with their bounded paint order.
+1. Add zero-blur text shadows to shared paragraphs by replaying the frozen
+   prepared-text packet with the authored offset/color before the foreground.
+   Preserve logical hit/scroll bounds and extend ink damage only. Keep all
+   blurred shadows outside this slice; no font callback is needed.
+2. Add per-line solid inline-scope backgrounds and the explicitly admitted
+   propagated text-decoration subset with bounded command generation and
+   full/tiled/damage parity. Background height policy must be stated and tested.
+   The current Style model has underline and line-through flags, but no overline
+   or complete decoration style representation; parser/cascade additions must
+   be scoped separately.
 3. Extend complete source binding for generated/boxless contexts, preserved
    whitespace/tab/CRLF policies and source-admitted mixed font groups.
 4. Adapt the separately accepted shaped-inline backend and frozen shaped packets.
 
-The text-only foundation completes the normal neutral paragraph integration.
-The listed stages remain pending accepted migration work.
+The normal neutral paragraph path and the bounded inline-image stage are
+integrated. The listed paint and source-topology stages remain pending.
