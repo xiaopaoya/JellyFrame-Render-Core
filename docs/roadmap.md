@@ -9,7 +9,7 @@ Those consumers decide when a released Core version is adopted.
 ## Current Development Line
 
 Signed `v0.8.0` / ABI `3` is the Runtime production dependency. Core `master` is
-`0.9.0-dev` / ABI `4` at `a600fce8`; its normalized source manifest is
+`0.9.0-dev` / ABI `4` at `eff8ba38`; its normalized source manifest is
 `f0deff48544dccac2e3998f874ff403470f932918466237b866eb6d9a9474c2b` (111
 manifest entries). ABI4 is a qualification track, not yet a signed Runtime
 dependency. Runtime installed consumers cover full/cropped profiles, frame
@@ -40,10 +40,15 @@ it enters the DOM. A malformed-input corpus now protects the behavior.
 ## Next Release Gate
 
 The next Core work is a bounded shaping-data prototype, not an implicit Runtime
-upgrade. Existing `JFFONT2` remains scalar bitmap data; the prototype must use
-the product Noto Sans SC source font as shaping input and compare admitted
-lookup behavior against an independent shaping oracle. No public API or default
-behavior changes until correctness and ESP32 memory/work budgets are measured.
+upgrade. The offline `JFGID1` spike now shows that Core can rasterize a small set
+of non-cmap glyph IDs, and a private cluster/source/owner mapper has synthetic
+coverage tests. Neither integrates shaping or changes `JFFONT2`, JFTP, the
+public API, or default behavior. The next gate is a deterministic generated
+profile for the selected `ccmp`/`locl`/`liga`/`kern`/`mark` closure across all
+three product weights, with complete output-GID inventory and exact HarfBuzz
+comparison. Only after its encoded table/catalog size is measured should an
+isolated N16R8 build measure flash delta; target load peak, scratch, bounded
+work, latency, and physical-device rendering remain later gates.
 
 ABI4 release and adoption remain serial gates:
 

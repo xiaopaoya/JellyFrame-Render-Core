@@ -8,7 +8,7 @@
 ## 当前开发线
 
 带签名的 `v0.8.0` / ABI `3` 是 Runtime 当前生产依赖。Core `master` 为
-`0.9.0-dev` / ABI `4`，提交 `a600fce8`；规范化 source manifest 为
+`0.9.0-dev` / ABI `4`，提交 `eff8ba38`；规范化 source manifest 为
 `f0deff48544dccac2e3998f874ff403470f932918466237b866eb6d9a9474c2b`（111 个
 manifest 条目）。ABI4 仍处于验收轨道，尚不是签名发布的 Runtime 依赖。Runtime
 installed consumers 覆盖 full/cropped profile、frame v9/v10 与 generated-text
@@ -31,10 +31,12 @@ Device OS 镜像验收仍未完成。当前开发线包括：
 
 ## 下一次发布门槛
 
-下一项 Core 工作是有界 shaping 数据原型，而不是隐式升级 Runtime。现有
-`JFFONT2` 仍是 scalar bitmap 数据；原型必须以产品 Noto Sans SC 源字体为 shaping
-输入，并与独立 shaping oracle 对比已准入 lookup 的行为。完成正确性及 ESP32
-内存/工作量测量前，不改公开 API 或默认行为。
+下一项 Core 工作是有界 shaping 数据原型，而不是隐式升级 Runtime。离线 `JFGID1`
+实验已证明可以栅格化一小组非 cmap glyph ID；private cluster/source/owner mapper 也有
+合成映射测试。二者都未集成 shaping，也没有改变 `JFFONT2`、JFTP、公开 API 或默认行为。
+下一道门槛是为三种产品字重生成确定性的 `ccmp`/`locl`/`liga`/`kern`/`mark` 选定 closure，
+完整列举输出 GID，并与 HarfBuzz 精确对照。测出编码后的表与字形目录体积后，再用隔离的
+N16R8 构建测量 flash 增量；目标机加载峰值、scratch、有界工作量、延迟及实机渲染仍是后续门槛。
 
 ABI4 发布与采用仍按顺序经过以下门槛：
 

@@ -210,3 +210,22 @@ jobs:
           name: jellyframe-render-core-source
           path: build/source-dist/
           if-no-files-found: error
+
+  experimental-gid-catalog:
+    name: Experimental GID Catalog
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned offline font preparation dependencies
+        run: python -m pip install -r tools/font_resource_requirements.txt
+
+      - name: Test experimental GID bitmap catalog
+        run: python tests/tools/test_noto_gid_catalog_spike.py
