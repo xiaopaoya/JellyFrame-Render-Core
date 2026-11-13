@@ -1051,6 +1051,91 @@ void generated_text_shared_sources() {
         if (command.type() == DisplayCommandType::Text && command.text == "M") ++marker_count;
     check(marker_count == 1, "li before content remains a single legacy marker command");
 }
+void generated_text_fallback_and_invalidation() {
+    std::vector<std::pair<unsigned, unsigned>> supported;
+    for (unsigned cp = 32; cp <= 90; ++cp) supported.emplace_back(cp, cp == 32 ? 250U : 500U);
+    auto regular = asset(400, 16, 4, 1, supported);
+    auto bold = asset(700, 16, 4, 2, supported);
+    TextFontFace faces[] = {{1, 0, regular.font}, {2, 0, bold.font}};
+    TextSystem system;
+    check(system.bind(faces, 2) == TextSystemStatus::Ok,
+        "bind regular and bold resources for generated-source invalidation");
+    LayoutEngineOptions options; options.text_system = &system;
+    LayerTreeBuilderOptions layer_options; layer_options.text_system = &system;
+
+    StyleResolver fallback_styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}div{display:block;width:80px;font-size:16px;line-height:18px}"
+        "span{display:inline}#positioned::before{content:'P';left:4px}"
+        "#counter::after{content:counter(list-num)'.'}"));
+    auto fallback_dom = HtmlParser{}.parse(
+        "<div id='positioned'><span>A</span></div><div id='counter'><span>B</span></div>");
+    auto fallback_layout = LayoutEngine(fallback_styles, {}, options).layout(*fallback_dom, 100, 100);
+    check(!find(*fallback_layout, "positioned").text_layout_cache.shared_inline,
+        "positioned generated source refuses shared paragraph admission");
+    check(!find(*fallback_layout, "counter").text_layout_cache.shared_inline,
+        "counter generated source refuses shared paragraph admission");
+    auto fallback_layers = LayerTreeBuilder(layer_options).build(*fallback_layout);
+    const auto fallback_commands = LayerTreeBuilder(layer_options).flatten(*fallback_layers);
+    std::size_t positioned_count = 0;
+    std::size_t counter_count = 0;
+    for (const auto& command : fallback_commands) {
+        if (command.type() != DisplayCommandType::Text) continue;
+        positioned_count += command.text == "P";
+        counter_count += command.text == "1.";
+    }
+    check(positioned_count == 1,
+        "positioned generated source paints once through the established fallback");
+    check(counter_count == 1,
+        "counter generated source paints once through the established fallback");
+
+    const auto make_styles = [](const char* color, int weight) {
+        return StyleResolver(CssParser{}.parse(
+            std::string("*{margin:0;padding:0;border:0}div{display:block;width:80px;font-size:16px;line-height:18px;color:black}"
+                "span{display:inline}#p::before{content:'M';color:") + color +
+                ";font-weight:" + std::to_string(weight) + "}"));
+    };
+    auto initial_styles = make_styles("#ff0000", 400);
+    auto dom = HtmlParser{}.parse("<div id='p'><span>A</span></div>");
+    auto initial_layout = LayoutEngine(initial_styles, {}, options).layout(*dom, 100, 100);
+    const auto& initial_host = find(*initial_layout, "p");
+    check(initial_host.text_layout_cache.shared_inline != nullptr,
+        "plain generated text has a shared binding before pseudo-style mutation");
+    const auto binding = initial_host.text_layout_cache.shared_inline;
+    auto& mutable_host = const_cast<LayoutBox&>(initial_host);
+    mutable_host.style.before_color = Color{0, 0, 255, 255};
+    check(!detail::shared_inline_current(*binding, &system),
+        "generated color change invalidates the retained source proof");
+    mutable_host.style.before_color = Color{255, 0, 0, 255};
+    mutable_host.style.before_font_weight = 700;
+    check(!detail::shared_inline_current(*binding, &system),
+        "generated font-weight change invalidates the retained source proof");
+
+    auto updated_styles = make_styles("#0000ff", 700);
+    auto updated_layout = LayoutEngine(updated_styles, {}, options).layout(*dom, 100, 100);
+    const auto& updated_host = find(*updated_layout, "p");
+    check(updated_host.text_layout_cache.shared_inline != nullptr,
+        "updated generated styles publish a fresh shared binding");
+    auto updated_layers = LayerTreeBuilder(layer_options).build(*updated_layout);
+    const auto updated_commands = LayerTreeBuilder(layer_options).flatten(*updated_layers);
+    bool updated_glyph = false;
+    for (const auto& command : updated_commands) {
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        PreparedTextView packet;
+        check(decode_prepared_text(command.text, packet),
+            "updated generated source packet decodes");
+        for (std::size_t i = 0; i < packet.size(); ++i) {
+            PreparedTextGlyph glyph;
+            packet.read(i, glyph);
+            if (glyph.source_codepoint != 'M') continue;
+            updated_glyph = true;
+            check(glyph.resource_id == 2,
+                "updated generated weight selects the matching registered font resource");
+            check(command.color.b == 255 && command.color.r == 0,
+                "updated generated color reaches the prepared paint command");
+        }
+    }
+    check(updated_glyph, "updated generated source remains present after relayout");
+}
 void partition_matrix_and_events() {
     Fixture f;
     const std::string source="A  B A";
@@ -1303,6 +1388,7 @@ int main() {
         refusal_and_rollback();
         mutation_damage_and_tiling();
         generated_text_shared_sources();
+        generated_text_fallback_and_invalidation();
         limits_and_allocation_failures();
         cumulative_scratch_acquisitions();
         layout_topology_replacement();
