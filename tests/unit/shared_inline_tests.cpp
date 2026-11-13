@@ -426,6 +426,120 @@ void natural_inline_image_metadata_path() {
     run("width:20px", {ImageIntrinsicSizeState::Known, 15, 10}, false, 0, 0);
     run("", {ImageIntrinsicSizeState::Unknown, 0, 0}, false, 0, 0);
 }
+void sharp_text_shadow_parity_and_bounds() {
+    Fixture fixture;
+    for (const char* shadow : {"-15px 4px 0 red", "3px -2px 0"}) {
+        const int offset_x = std::string(shadow).find("-15px") == 0 ? -15 : 3;
+        const int offset_y = std::string(shadow).find("4px") != std::string::npos ? 4 : -2;
+        const std::string css = std::string(
+            "*{margin:0;padding:0;border:0}#p{display:block;width:100px;margin-left:20px;"
+            "font-size:16px;line-height:20px;color:blue;text-shadow:") + shadow +
+            "}span{display:inline}";
+        StyleResolver styles(CssParser{}.parse(css));
+        auto shared_dom = HtmlParser{}.parse("<div id='p'><span id='a'>A</span><span>B</span></div>");
+        auto shared_layout = LayoutEngine(styles, {}, fixture.options).layout(*shared_dom, 140, 60);
+        const auto& host = find(*shared_layout, "p");
+        check(host.text_layout_cache.shared_inline != nullptr,
+              "zero-blur shadow remains eligible for complete shared paragraph");
+        const auto& owner = find(*shared_layout, "a");
+        const auto& binding = *host.text_layout_cache.shared_inline;
+        check(detail::shared_inline_command_count(binding, &fixture.system) == 4,
+              "each shared text fragment reserves one shadow and one foreground command");
+        auto shared_layers = LayerTreeBuilder(fixture.layers).build(*shared_layout);
+        check(shared_layers->display_list.size() == 4,
+              "sharp shadow commands are included in bounded shared display output");
+        for (std::size_t i = 0; i < shared_layers->display_list.size(); i += 2) {
+            const auto& shadow_command = shared_layers->display_list[i];
+            const auto& text_command = shared_layers->display_list[i + 1];
+            check(shadow_command.type() == DisplayCommandType::PreparedText &&
+                text_command.type() == DisplayCommandType::PreparedText &&
+                shadow_command.text == text_command.text,
+                "shadow reuses the exact frozen prepared packet before foreground text");
+            check(shadow_command.text_paint().origin_x == text_command.text_paint().origin_x + offset_x &&
+                shadow_command.text_paint().baseline_y == text_command.text_paint().baseline_y + offset_y,
+                "prepared glyph origin follows signed shadow offsets");
+            check(shadow_command.rect.x == text_command.rect.x + offset_x &&
+                shadow_command.rect.y == text_command.rect.y + offset_y,
+                "shadow paint bounds follow signed shadow offsets");
+        }
+        const auto shadow_color = shared_layers->display_list.front().color;
+        if (std::string(shadow).find("red") != std::string::npos)
+            check(shadow_color.r > shadow_color.g && shadow_color.r > shadow_color.b,
+                  "explicit shadow color is retained");
+        else
+            check(shadow_color.r == owner.style.color.r && shadow_color.g == owner.style.color.g &&
+                shadow_color.b == owner.style.color.b,
+                "currentColor shadow resolves from the owner text color");
+
+        auto ordinary_options = fixture.options;
+        ordinary_options.shared_inline.max_attempts = 0;
+        auto ordinary_dom = HtmlParser{}.parse("<div id='p'><span id='a'>A</span><span>B</span></div>");
+        auto ordinary_layout = LayoutEngine(styles, {}, ordinary_options).layout(*ordinary_dom, 140, 60);
+        check(find(*ordinary_layout, "p").text_layout_cache.shared_inline == nullptr,
+              "ordinary shadow path is a control with shared optimization disabled");
+        auto ordinary_layers = LayerTreeBuilder(fixture.layers).build(*ordinary_layout);
+        SoftwareCompositor::Options paint;
+        paint.text_system = &fixture.system;
+        SoftwareCompositor compositor({}, paint);
+        const auto shared_pixels = compositor.render(*shared_layers, 140, 60, {255,255,255,255});
+        LayerNode foreground_only;
+        LayerNode shadows_only;
+        for (std::size_t i = 0; i < shared_layers->display_list.size(); i += 2) {
+            shadows_only.display_list.push_back(shared_layers->display_list[i]);
+            foreground_only.display_list.push_back(shared_layers->display_list[i + 1]);
+        }
+        const auto foreground_pixels = compositor.render(foreground_only, 140, 60, {255,255,255,255});
+        const auto shadow_pixels = compositor.render(shadows_only, 140, 60, {255,255,255,255});
+        check(!equal_pixels(shared_pixels, foreground_pixels) &&
+            !equal_pixels(shadow_pixels, FrameBuffer(140, 60, {255,255,255,255})),
+            "offset shadow packets contribute visible pixels before foreground text");
+        FrameBuffer tiled(140, 60, {255,255,255,255});
+        for (int y = 0; y < 60; y += 7) {
+            Rect clip{0,y,140,std::min(7,60-y)};
+            compositor.render_into(*shared_layers, tiled, {255,255,255,255}, &clip, 1);
+        }
+        check(equal_pixels(shared_pixels, tiled), "shadow packet clips compose to the full frame");
+
+        const auto shadow_rect = shared_layers->display_list.front().rect;
+        const auto damage = detail::shared_inline_damage_bounds(host);
+        bool shadow_ink_covered = true;
+        for (int y = 0; y < shadow_pixels.height; ++y) {
+            for (int x = 0; x < shadow_pixels.width; ++x) {
+                const auto pixel = shadow_pixels.pixel(x, y);
+                if (pixel.r == 255 && pixel.g == 255 && pixel.b == 255) continue;
+                if (x < damage.x || y < damage.y || x >= safe_edge(damage.x, damage.width) ||
+                    y >= safe_edge(damage.y, damage.height)) shadow_ink_covered = false;
+            }
+        }
+        check(shadow_ink_covered, "paragraph dirty bounds cover every painted shadow ink pixel");
+        const auto& shadow_owner = find(*shared_layout, "a");
+        const auto hit = HitTester{}.hit_test(*shared_layout,
+            shadow_rect.x, shadow_rect.y + shadow_rect.height / 2);
+        const auto& owner_binding = *shadow_owner.text_layout_cache.shared_inline;
+        const auto& owner_member = owner_binding.snapshot->members[owner_binding.member];
+        check(shadow_owner.rect.width == owner_member.bounds.width &&
+            shadow_owner.rect.height == owner_member.bounds.height,
+            "shadow ink does not expand the owner's logical geometry");
+        if (offset_x < 0) {
+            check(!detail::shared_inline_contains(shadow_owner, shadow_rect.x,
+                    shadow_rect.y + shadow_rect.height / 2) && (!hit || hit.node != shadow_owner.node),
+                  "negative shadow-only pixels do not expand the logical hit target");
+        }
+
+        auto low_budget = fixture.layers;
+        low_budget.max_display_commands = 3;
+        auto limited = LayerTreeBuilder(low_budget).build(*shared_layout);
+        check(glyphs(*limited).empty(),
+              "display budget below the complete shadow paragraph emits no partial text");
+    }
+
+    StyleResolver blurred(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}#p{width:100px;font-size:16px;text-shadow:1px 1px 2px red}span{display:inline}"));
+    auto blurred_dom = HtmlParser{}.parse("<div id='p'><span>A</span><span>B</span></div>");
+    auto blurred_layout = LayoutEngine(blurred, {}, fixture.options).layout(*blurred_dom, 140, 60);
+    check(find(*blurred_layout, "p").text_layout_cache.shared_inline == nullptr,
+          "blurred shadows remain on the established whole-paragraph fallback");
+}
 void partition_and_live_proof() {
     Fixture fixture;
     for (const char* align : {"start", "center", "end"}) {
@@ -768,6 +882,7 @@ int main() {
         definite_inline_image_refusal_and_style_proof();
         definite_inline_image_percent_width();
         natural_inline_image_metadata_path();
+        sharp_text_shadow_parity_and_bounds();
         partition_and_live_proof();
         refusal_and_rollback();
         mutation_damage_and_tiling();

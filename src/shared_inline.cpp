@@ -27,9 +27,11 @@ Rect union_rect(Rect a, Rect b) {
 bool empty_edges(const EdgeSizes& e) {
     return e.left == 0 && e.right == 0 && e.top == 0 && e.bottom == 0;
 }
-bool neutral(const Style& s, bool host, bool allow_image_dimensions = false) {
+bool neutral(const Style& s, bool host, bool allow_image_dimensions = false,
+    bool allow_sharp_text_shadow = false) {
     if (s.visibility_hidden || s.text_transform != TextTransform::None || s.letter_spacing != 0 ||
-        s.text_overflow_ellipsis || s.text_shadow.enabled || s.text_decoration_underline ||
+        s.text_overflow_ellipsis || (s.text_shadow.enabled &&
+            (!allow_sharp_text_shadow || s.text_shadow.blur != 0)) || s.text_decoration_underline ||
         s.text_decoration_line_through || s.before_content_kind != GeneratedContentKind::None ||
         s.after_content_kind != GeneratedContentKind::None) return false;
     if (host) return s.display == Display::Block;
@@ -110,7 +112,7 @@ bool image_dimensions(const Style& style, std::int64_t containing_width,
 bool inline_image_style_eligible(const Node& node, const Style& style) {
     if (node.type != NodeType::Element || node.tag_name != "img" || !node.children.empty() ||
         node.attribute("src").empty() || node.attributes.find("srcset") != node.attributes.end() ||
-        node.attributes.find("sizes") != node.attributes.end() ||
+        node.attributes.find("sizes") != node.attributes.end() || style.text_shadow.enabled ||
         style.object_fit != ObjectFit::Fill || style.object_position.x_percent != 50 ||
         style.object_position.y_percent != 50 || style.image_rendering != ImageRendering::Auto ||
         !neutral(style, false, true)) return false;
@@ -168,6 +170,7 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     result.tag = box.node->tag_name;
     layout_text_font(box.style, result.font);
     result.color = box.style.color;
+    result.text_shadow = box.style.text_shadow;
     result.line_height = box.style.line_height;
     result.indent = box.style.text_indent;
     result.align = box.style.text_align;
@@ -236,7 +239,7 @@ struct Collector {
         ImageIntrinsicSize image_intrinsic{};
         if (image ? !eligible_inline_image(*box.node, box.style, containing_width_units,
                 image_width_units, image_height, natural_images, &image_intrinsic) :
-                !neutral(box.style, depth == 0)) return false;
+                !neutral(box.style, depth == 0, false, true)) return false;
         if (depth && !text && !marker && !image && box.node->tag_name != "span") return false;
         if (box.node->text.size() > max_source-bytes) return false;
         bytes += box.node->text.size();
@@ -372,7 +375,7 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
     const LayoutEngineOptions& options, int& height, std::int64_t precise_width_units,
     NaturalImageSizingFrame* natural_images) noexcept {
     if (!host.node || !options.text_system || !options.text_system->ready() || host.children.empty() ||
-        !neutral(host.style, true)) return false;
+        !neutral(host.style, true, false, true)) return false;
     SharedInlineLayoutStatistics local_statistics;
     auto& statistics = options.shared_inline.statistics ? *options.shared_inline.statistics : local_statistics;
     if (statistics.attempts >= options.shared_inline.max_attempts) { ++statistics.refusals;return false; }
@@ -455,9 +458,16 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
             const auto bounds = fragment_bounds(fragment, snapshot->paragraph.lines[fragment.line]);
             const auto ink = fragment_ink(fragment, snapshot->paragraph.lines[fragment.line]);
             auto member = snapshot->owners[fragment.owner];
+            const auto& owner_shadow = snapshot->members[member].proof.text_shadow;
+            Rect shadow_ink = ink;
+            if (owner_shadow.enabled) {
+                shadow_ink.x = safe_add(shadow_ink.x, owner_shadow.offset_x);
+                shadow_ink.y = safe_add(shadow_ink.y, owner_shadow.offset_y);
+            }
             for (;;) {
                 auto& scope = snapshot->members[member];
                 scope.ink_bounds = union_rect(scope.ink_bounds, ink);
+                if (owner_shadow.enabled) scope.ink_bounds = union_rect(scope.ink_bounds, shadow_ink);
                 if (member == 0) break;
                 append_fragment(scope, bounds);
                 member = scope.proof.parent_member;
@@ -600,7 +610,7 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
         const bool style_current = p.atomic_image
             ? inline_image_style_eligible(*p.node, box.style) && image_dimensions_current &&
                 p.node->attribute("src") == p.image_source
-            : neutral(box.style, i == 0);
+            : neutral(box.style, i == 0, false, true);
         if (box.node != p.node || !p.node || p.node->parent != p.parent ||
             p.node->children.size() != p.dom_children ||
             box.children.size() != p.children || p.node->text != p.source || p.node->tag_name != p.tag ||
@@ -620,7 +630,14 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
         }
         LayoutTextFont font;
         if (layout_text_font(box.style, font) != S::Ok || !same_font(font, p.font) ||
-            !same_color(box.style.color, p.color) || box.style.line_height != p.line_height ||
+            !same_color(box.style.color, p.color) ||
+            box.style.text_shadow.enabled != p.text_shadow.enabled ||
+            box.style.text_shadow.uses_current_color != p.text_shadow.uses_current_color ||
+            box.style.text_shadow.offset_x != p.text_shadow.offset_x ||
+            box.style.text_shadow.offset_y != p.text_shadow.offset_y ||
+            box.style.text_shadow.blur != p.text_shadow.blur ||
+            !same_color(box.style.text_shadow.color, p.text_shadow.color) ||
+            box.style.line_height != p.line_height ||
             box.style.text_indent != p.indent || box.style.text_align != p.align ||
             box.style.white_space_nowrap != p.nowrap || box.style.overflow_wrap_anywhere != p.anywhere) return false;
     }
@@ -663,6 +680,20 @@ Rect shared_inline_damage_bounds(const LayoutBox& box) noexcept {
     return union_rect(box.rect, ink);
 }
 
+std::size_t shared_inline_command_count(const SharedInlineBinding& binding,
+    const TextSystem* system) noexcept {
+    if (!shared_inline_current(binding, system) || binding.member != 0) return 0;
+    const auto& snapshot = *binding.snapshot;
+    std::size_t count = snapshot.paragraph.fragments.size() + snapshot.atomic_placements.size();
+    for (const auto& fragment : snapshot.paragraph.fragments) {
+        if (fragment.owner >= snapshot.owners.size()) return 0;
+        const auto member = snapshot.owners[fragment.owner];
+        if (member >= snapshot.members.size()) return 0;
+        if (snapshot.members[member].proof.text_shadow.enabled) ++count;
+    }
+    return count;
+}
+
 bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
     SharedInlineImageEmitter image_emitter, void* image_context) noexcept {
     try {
@@ -673,7 +704,10 @@ bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
     const int origin_x = safe_add(box.rect.x, snapshot.content_offset_x);
     const int origin_y = safe_add(box.rect.y, snapshot.content_offset_y);
     DisplayList draft(0);
-    draft.reserve(snapshot.paragraph.fragments.size()+snapshot.atomic_placements.size());
+    const auto command_count = shared_inline_command_count(binding, snapshot.system);
+    if (command_count == 0 && (!snapshot.paragraph.fragments.empty() ||
+        !snapshot.atomic_placements.empty())) return false;
+    draft.reserve(command_count);
     std::size_t fragment_index = 0, atomic_index = 0;
     for (std::size_t line_index = 0; line_index < snapshot.paragraph.lines.size(); ++line_index) {
         const auto has_fragment = [&] {
@@ -705,6 +739,21 @@ bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
             auto rect = union_rect(fragment_bounds(fragment, line), fragment_ink(fragment, line));
             rect.x = safe_add(rect.x, origin_x);
             rect.y = safe_add(rect.y, origin_y);
+            const auto& shadow = member.proof.text_shadow;
+            if (shadow.enabled) {
+                Rect shadow_rect = rect;
+                shadow_rect.x = safe_add(shadow_rect.x, shadow.offset_x);
+                shadow_rect.y = safe_add(shadow_rect.y, shadow.offset_y);
+                DisplayCommand shadow_command;
+                shadow_command.set_type(DisplayCommandType::PreparedText);
+                shadow_command.rect = shadow_rect;
+                shadow_command.color = shadow.uses_current_color ? member.proof.color : shadow.color;
+                shadow_command.text = fragment.packet;
+                set_prepared_text_origin(shadow_command,
+                    safe_add(origin_x, shadow.offset_x),
+                    safe_add(safe_add(origin_y, line.baseline), shadow.offset_y));
+                draft.push_back(std::move(shadow_command));
+            }
             DisplayCommand command;
             command.set_type(DisplayCommandType::PreparedText);
             command.rect = rect;

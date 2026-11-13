@@ -17,6 +17,7 @@ struct SharedInlineProof {
     std::string tag;
     LayoutTextFont font;
     Color color;
+    TextShadowStyle text_shadow;
     int line_height = 0;
     int indent = 0;
     TextAlign align = TextAlign::Start;
@@ -79,6 +80,7 @@ void retire_shared_inline(LayoutBox&) noexcept;
 bool shared_inline_current(const SharedInlineBinding&, const TextSystem*) noexcept;
 bool shared_inline_contains(const LayoutBox&, int x, int y) noexcept;
 Rect shared_inline_damage_bounds(const LayoutBox&) noexcept;
+std::size_t shared_inline_command_count(const SharedInlineBinding&, const TextSystem*) noexcept;
 bool emit_shared_inline(const LayoutBox&, DisplayList&,
     SharedInlineImageEmitter = nullptr, void* image_context = nullptr) noexcept;
 }
