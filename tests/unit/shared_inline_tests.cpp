@@ -700,6 +700,54 @@ void propagated_inline_text_decorations() {
     check(glyphs(*limited).empty(),
           "insufficient command budget refuses the complete decorated paragraph");
 }
+void shared_mixed_font_and_line_height_owners() {
+    Fixture fixture;
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}#p{display:block;width:100px;font-size:16px;line-height:20px;color:blue}"
+        "span{display:inline}#large{font-size:24px;line-height:30px;font-weight:700;color:red}"
+        "#small{font-size:12px;line-height:16px;color:green}"));
+    auto dom = HtmlParser{}.parse(
+        "<div id='p'><span id='large'>A</span><span> B</span><span id='small'>A</span><span> B</span></div>");
+    auto layout = LayoutEngine(styles, {}, fixture.options).layout(*dom, 140, 80);
+    const auto& host = find(*layout, "p");
+    check(host.text_layout_cache.shared_inline != nullptr,
+          "same-family mixed-size and mixed-line-height owners share a complete paragraph");
+    const auto& large = find(*layout, "large");
+    const auto& small = find(*layout, "small");
+    const auto& large_proof = large.text_layout_cache.shared_inline->snapshot->members[
+        large.text_layout_cache.shared_inline->member].proof;
+    const auto& small_proof = small.text_layout_cache.shared_inline->snapshot->members[
+        small.text_layout_cache.shared_inline->member].proof;
+    check(large_proof.font.size == 24000 && large_proof.font.weight == 700 &&
+        large_proof.line_height == 30 && large_proof.color.r == large.style.color.r &&
+        small_proof.font.size == 12000 && small_proof.line_height == 16 &&
+        small_proof.color.g == small.style.color.g,
+        "each source owner retains its authored size, weight, line height and color proof");
+    const auto& paragraph = *host.text_layout_cache.shared_inline->snapshot;
+    check(paragraph.paragraph.fragments.size() >= 3 &&
+        paragraph.paragraph.lines.size() == 1 && paragraph.paragraph.lines[0].height >= 30,
+        "line strut accommodates the largest participating font and line height");
+    const auto layers = LayerTreeBuilder(fixture.layers).build(*layout);
+    std::size_t text_commands = 0;
+    for (const auto& command : layers->display_list) {
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        ++text_commands;
+        check(command.text_paint().baseline_y == paragraph.paragraph.lines[0].baseline,
+              "mixed-font owner packets use the shared line baseline");
+    }
+    check(text_commands == paragraph.paragraph.fragments.size(),
+          "all mixed-font source fragments are emitted once");
+    check(detail::shared_inline_current(*host.text_layout_cache.shared_inline, &fixture.system),
+          "the complete mixed-font source and style proof is current");
+
+    auto ordinary_options = fixture.options;
+    ordinary_options.shared_inline.max_attempts = 0;
+    auto ordinary_dom = HtmlParser{}.parse(
+        "<div id='p'><span id='large'>A</span><span> B</span><span id='small'>A</span><span> B</span></div>");
+    auto ordinary = LayoutEngine(styles, {}, ordinary_options).layout(*ordinary_dom, 140, 80);
+    check(find(*ordinary, "p").text_layout_cache.shared_inline == nullptr,
+          "optimization-disabled tree remains an independent ordinary-layout control");
+}
 void partition_and_live_proof() {
     Fixture fixture;
     for (const char* align : {"start", "center", "end"}) {
@@ -1045,6 +1093,7 @@ int main() {
         sharp_text_shadow_parity_and_bounds();
         inline_scope_backgrounds();
         propagated_inline_text_decorations();
+        shared_mixed_font_and_line_height_owners();
         partition_and_live_proof();
         refusal_and_rollback();
         mutation_damage_and_tiling();

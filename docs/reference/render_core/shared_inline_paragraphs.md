@@ -10,9 +10,10 @@ generated nodes and incomplete render membership refuse the complete attempt.
 
 ## Current admission
 
-This delivery accepts collapsing ASCII, one common registered font request and
-line-height, start/center/end alignment, first-line indent, nowrap and anywhere
-wrapping. Width planning and glyph positions retain Q1000 precision, including
+This delivery accepts collapsing ASCII, per-owner registered font requests and
+line-heights, start/center/end alignment, first-line indent, nowrap and anywhere
+wrapping. Host alignment and wrapping policy remain paragraph-wide. Width
+planning and glyph positions retain Q1000 precision, including
 fractional containing widths. Placement uses the current integer box-origin
 policy. Signed odd half-leading floors the first half and preserves line advance.
 Neutral descendants have zero edges, automatic dimensions, static positioning,
@@ -129,9 +130,13 @@ decorated images or arbitrary image styling.
 
 ## Remaining finite migration stages
 
-1. Extend complete source binding for generated/boxless contexts, preserved
-   whitespace/tab/CRLF policies and source-admitted mixed font groups.
-2. Adapt the separately accepted shaped-inline backend and frozen shaped packets.
+1. Extend complete source binding for generated/boxless contexts and preserved
+   whitespace/tab/CRLF policies. Mixed registered font requests and per-owner
+   line heights are integrated.
+2. Define and adapt a Core-owned shaping/resource contract before integrating
+   the historical shaped-inline source and frozen shaped packets. Its former
+   host shape/metrics callbacks and JFGR font-instance packets are incompatible
+   with the current Core-owned PreparedText paint contract.
 
 The normal paragraph path, bounded inline-image stage, zero-blur text shadows,
 per-line solid inline-scope backgrounds and the existing propagated
