@@ -1190,6 +1190,180 @@ void generated_list_num_counter_sources() {
     check(fallback_count == 1,
         "unsupported named counter still paints once through established fallback");
 }
+void native_list_markers_share_paragraphs() {
+    std::vector<std::pair<unsigned, unsigned>> supported;
+    for (unsigned cp = 32; cp <= 90; ++cp) supported.emplace_back(cp, cp == 32 ? 250U : 500U);
+    auto generated_font = asset(400, 16, 4, 1, supported);
+    TextFontFace face{1, 0, generated_font.font};
+    TextSystem system;
+    check(system.bind(&face, 1) == TextSystemStatus::Ok, "bind native-list marker fixture font");
+    TextRunMetrics decimal_prefix_metrics, disc_prefix_metrics;
+    TextFontRequest marker_font;
+    const std::uint32_t marker_family = 1;
+    marker_font.families = &marker_family;
+    marker_font.family_count = 1;
+    marker_font.size_q1000 = 16000;
+    marker_font.weight = 400;
+    check(system.measure("1. ", marker_font, decimal_prefix_metrics) == TextSystemStatus::Ok &&
+        system.measure("* ", marker_font, disc_prefix_metrics) == TextSystemStatus::Ok,
+        "measure native marker prefixes with product-like font metrics");
+    const auto legacy_gutter = 16 + 4;
+    check(decimal_prefix_metrics.advance == legacy_gutter * 1000,
+        "decimal prefix matches legacy 20px marker gutter on the product-like font");
+    check(disc_prefix_metrics.advance == 12 * 1000 &&
+        disc_prefix_metrics.advance / 1000 == legacy_gutter - 8,
+        "disc prefix is measured 8px narrower than the legacy minimum-width gutter");
+    LayoutEngineOptions options; options.text_system = &system;
+    LayerTreeBuilderOptions layer_options; layer_options.text_system = &system;
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}ul{display:block;width:80px}"
+        "li{display:block;width:64px;line-height:18px;font-size:16px;list-style-type:decimal;overflow-wrap:anywhere}"
+        "#disc{list-style-type:disc}span{display:inline}"));
+    auto dom = HtmlParser{}.parse(
+        "<ul id='group'><li id='decimal'><span>ABCDEFGHIJKL</span></li>"
+        "<li id='disc'><span>MNOPQRSTUVWX</span></li></ul>");
+    auto layout = LayoutEngine(styles, {}, options).layout(*dom, 100, 120);
+    const auto& decimal = find(*layout, "decimal");
+    const auto& disc = find(*layout, "disc");
+    check(decimal.text_layout_cache.shared_inline != nullptr &&
+        disc.text_layout_cache.shared_inline != nullptr,
+        "decimal and disc list items enter shared paragraph layout");
+    auto layers = LayerTreeBuilder(layer_options).build(*layout);
+    const auto commands = LayerTreeBuilder(layer_options).flatten(*layers);
+    std::string order;
+    std::vector<Rect> decimal_rects;
+    std::int32_t decimal_marker_x = 0, decimal_text_x = 0;
+    Rect marker_rect;
+    for (const auto& command : commands) {
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        PreparedTextView packet;
+        check(decode_prepared_text(command.text, packet), "native-list shared packet decodes");
+        for (std::size_t i = 0; i < packet.size(); ++i) {
+            PreparedTextGlyph glyph;
+            check(packet.read(i, glyph), "native-list packet glyph reads");
+            if (command.rect.y < disc.rect.y) {
+                const auto glyph_x = glyph.x + command.text_paint().origin_x * 1000;
+                if (glyph.source_codepoint == '1') {
+                    decimal_marker_x = glyph_x;
+                    marker_rect = command.rect;
+                    order.push_back('1');
+                    order.push_back('.');
+                } else if (glyph.source_codepoint == 'A') {
+                    decimal_text_x = glyph_x;
+                }
+                if (glyph.source_codepoint != '1' && glyph.source_codepoint != '.')
+                    order.push_back(static_cast<char>(glyph.source_codepoint));
+            }
+        }
+        if (command.rect.y >= decimal.rect.y && command.rect.y < disc.rect.y)
+            decimal_rects.push_back(command.rect);
+    }
+    check(order == "1.ABCDEFGHIJKL",
+        "native decimal glyph sources precede item text exactly once");
+    std::size_t legacy_marker_commands = 0;
+    for (const auto& command : commands)
+        if (command.type() == DisplayCommandType::Text &&
+            (command.text == "1." || command.text == "*")) ++legacy_marker_commands;
+    check(legacy_marker_commands == 0, "shared decimal and disc suppress separate legacy marker painting");
+    check(decimal_rects.size() >= 3, "narrow list item wraps into continuation lines");
+    check(decimal_marker_x == (decimal.rect.x - legacy_gutter) * 1000 &&
+        decimal_text_x == decimal.rect.x * 1000,
+        "decimal marker preserves legacy gutter origin while text starts at content origin");
+    check(marker_rect.x == decimal.rect.x - legacy_gutter && marker_rect.y == decimal.rect.y &&
+        marker_rect.height == std::max(decimal.rect.height, 20),
+        "decimal marker overlay preserves the legacy Text command box geometry");
+    std::size_t disc_marker_count = 0;
+    bool disc_marker_at_legacy_gutter = false;
+    for (const auto& command : commands) {
+        if (command.type() != DisplayCommandType::PreparedText || command.rect.y < disc.rect.y) continue;
+        PreparedTextView packet;
+        if (!decode_prepared_text(command.text, packet)) continue;
+        for (std::size_t i = 0; i < packet.size(); ++i) {
+            PreparedTextGlyph glyph;
+            if (!packet.read(i, glyph) || glyph.source_codepoint != '*') continue;
+            ++disc_marker_count;
+            disc_marker_at_legacy_gutter = glyph.x + command.text_paint().origin_x * 1000 ==
+                (disc.rect.x - legacy_gutter) * 1000;
+        }
+    }
+    check(disc_marker_count == 1 && disc_marker_at_legacy_gutter,
+        "disc overlay also preserves the legacy marker origin exactly once");
+    const auto& paragraph = decimal.text_layout_cache.shared_inline->snapshot->paragraph;
+    check(paragraph.normalized == "ABCDEFGHIJKL" && paragraph.lines.size() >= 2 &&
+        paragraph.lines[1].baseline > paragraph.lines.front().baseline,
+        "marker overlay leaves paragraph source and body line breaking unchanged");
+    bool continuation_hangs_at_content = false;
+    for (const auto& rect : decimal_rects)
+        if (rect.y > marker_rect.y && std::abs(rect.x - decimal.rect.x) <= 1) continuation_hangs_at_content = true;
+    check(continuation_hangs_at_content,
+        "continuation lines remain at item content origin within one pixel of glyph ink bearing");
+    const auto marker_hit = HitTester{}.hit_test(*layers,
+        marker_rect.x + std::max(0, marker_rect.width / 2),
+        marker_rect.y + std::max(0, marker_rect.height / 2));
+    check(marker_hit && marker_hit.node == decimal.node,
+        "outside marker hit maps to its list item owner");
+
+    auto& group = find_node(*dom, "group");
+    const auto old_binding = decimal.text_layout_cache.shared_inline;
+    check(old_binding && detail::shared_inline_current(*old_binding, &system),
+        "initial list ordinal binding is current");
+    auto preceding = std::make_unique<Node>(NodeType::Element);
+    preceding->tag_name = "li";
+    preceding->append_child(std::make_unique<Node>(NodeType::Text));
+    preceding->children.front()->text = "Z";
+    group.insert_child(std::move(preceding), 0);
+    check(!detail::shared_inline_current(*old_binding, &system),
+        "sibling insertion invalidates the retained marker ordinal source proof");
+    auto renumbered = LayoutEngine(styles, {}, options).layout(*dom, 100, 120);
+    const auto& second_decimal = find(*renumbered, "decimal");
+    check(second_decimal.text_layout_cache.shared_inline != nullptr,
+        "renumbered list item republishes through shared paragraph path");
+    const auto renumbered_commands = LayerTreeBuilder(layer_options).flatten(
+        *LayerTreeBuilder(layer_options).build(*renumbered));
+    bool saw_two = false;
+    for (const auto& command : renumbered_commands) {
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        PreparedTextView packet;
+        if (!decode_prepared_text(command.text, packet)) continue;
+        for (std::size_t i = 0; i < packet.size(); ++i) {
+            PreparedTextGlyph glyph;
+            if (packet.read(i, glyph) && glyph.source_codepoint == '2') saw_two = true;
+        }
+    }
+    check(saw_two, "sibling insertion recomputes the decimal marker as 2");
+
+    StyleResolver override_styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}li{display:block;width:80px;list-style-type:decimal}"
+        "span{display:inline}#item::before{content:'X'}"));
+    auto override_dom = HtmlParser{}.parse("<ul><li id='item'><span>A</span></li></ul>");
+    auto override_layout = LayoutEngine(override_styles, {}, options).layout(*override_dom, 100, 60);
+    const auto& override_item = find(*override_layout, "item");
+    check(!override_item.text_layout_cache.shared_inline,
+        "li ::before marker override stays on its established fallback path");
+    const auto override_commands = LayerTreeBuilder(layer_options).flatten(
+        *LayerTreeBuilder(layer_options).build(*override_layout));
+    std::size_t override_count = 0, native_decimal_count = 0;
+    for (const auto& command : override_commands) {
+        if (command.type() != DisplayCommandType::Text) continue;
+        override_count += command.text == "X";
+        native_decimal_count += command.text == "1.";
+    }
+    check(override_count == 1 && native_decimal_count == 0,
+        "li ::before replaces rather than duplicates its native decimal marker");
+
+    auto refused_options = options;
+    refused_options.shared_inline.max_total_capacity_bytes = 1;
+    auto refused_layout = LayoutEngine(styles, {}, refused_options).layout(*dom, 100, 120);
+    check(!find(*refused_layout, "decimal").text_layout_cache.shared_inline,
+        "shared list marker budget refusal leaves the ordinary list layout active");
+    const auto refused_commands = LayerTreeBuilder(layer_options).flatten(
+        *LayerTreeBuilder(layer_options).build(*refused_layout));
+    std::size_t refused_marker_count = 0;
+    for (const auto& command : refused_commands)
+        if (command.type() == DisplayCommandType::Text && command.text == "2.") ++refused_marker_count;
+    check(refused_marker_count == 1,
+        "budget refusal paints the legacy marker exactly once");
+}
 void partition_matrix_and_events() {
     Fixture f;
     const std::string source="A  B A";
@@ -1444,6 +1618,7 @@ int main() {
         generated_text_shared_sources();
         generated_text_fallback_and_invalidation();
         generated_list_num_counter_sources();
+        native_list_markers_share_paragraphs();
         limits_and_allocation_failures();
         cumulative_scratch_acquisitions();
         layout_topology_replacement();

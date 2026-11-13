@@ -8,6 +8,24 @@
 #include <stdexcept>
 
 namespace jellyframe::detail {
+int shared_list_item_ordinal(const Node& node) noexcept {
+    if (!node.parent) return 1;
+    int ordinal = 0;
+    for (const auto& sibling : node.parent->children) {
+        if (sibling->type == NodeType::Element && sibling->tag_name == "li") ++ordinal;
+        if (sibling.get() == &node) return std::max(1, ordinal);
+    }
+    return std::max(1, ordinal);
+}
+int shared_list_marker_width(std::string_view text, int font_size) noexcept {
+    std::int64_t units = 0;
+    for (char ch : text) {
+        units = std::min<std::int64_t>(std::numeric_limits<int>::max(),
+                                       units + (ch == '.' || ch == ' ' ? 4 : 8));
+    }
+    const std::int64_t width = (static_cast<std::int64_t>(std::max(0, font_size)) * units + 7) / 14;
+    return std::max(font_size, clamp_int64_to_int(width));
+}
 namespace {
 constexpr std::size_t max_members = 128;
 constexpr std::size_t max_depth = 32;
@@ -45,8 +63,7 @@ bool neutral(const Style& s, bool host, bool allow_image_dimensions = false,
             s.min_height != -1 || s.max_height != -1 || s.min_width_percent != -1 ||
             s.max_width_percent != -1 || s.min_height_percent != -1 || s.max_height_percent != -1)) ||
         s.border_radius != 0 || s.border_radius_percent != -1 || s.border_radius_axes_specified ||
-        !s.z_index_auto || s.aspect_ratio_width != 0 || s.aspect_ratio_height != 0 ||
-        s.list_style_type != ListStyleType::None) return false;
+        !s.z_index_auto || s.aspect_ratio_width != 0 || s.aspect_ratio_height != 0) return false;
     if (!allow_image_dimensions && !s.computed_sizes.empty()) return false;
     if (allow_image_dimensions) {
         constexpr SizeProperty unsupported[] = {SizeProperty::FlexBasis,
@@ -158,15 +175,6 @@ bool same_font(const LayoutTextFont& a, const LayoutTextFont& b) {
 bool same_color(Color a, Color b) {
     return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
 }
-int list_item_ordinal(const Node& node) {
-    if (node.parent == nullptr) return 1;
-    int ordinal = 0;
-    for (const auto& sibling : node.parent->children) {
-        if (sibling->type == NodeType::Element && sibling->tag_name == "li") ++ordinal;
-        if (sibling.get() == &node) return std::max(1, ordinal);
-    }
-    return std::max(1, ordinal);
-}
 SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     SharedInlineProof result;
     result.box = &box;
@@ -202,12 +210,12 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     if (box.node->type == NodeType::Element) {
         if (box.style.before_content_kind == GeneratedContentKind::Counter &&
             box.style.before_counter_name == "list-num") {
-            result.before_counter_text = std::to_string(list_item_ordinal(*box.node)) +
+            result.before_counter_text = std::to_string(shared_list_item_ordinal(*box.node)) +
                 box.style.before_counter_suffix;
         }
         if (box.style.after_content_kind == GeneratedContentKind::Counter &&
             box.style.after_counter_name == "list-num") {
-            result.after_counter_text = std::to_string(list_item_ordinal(*box.node)) +
+            result.after_counter_text = std::to_string(shared_list_item_ordinal(*box.node)) +
                 box.style.after_counter_suffix;
         }
     }
@@ -221,6 +229,8 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     result.after_weight_specified = box.style.after_font_weight_specified;
     result.before_left_specified = box.style.before_left_specified;
     result.after_left_specified = box.style.after_left_specified;
+    result.list_style_type = box.style.list_style_type;
+    if (box.node->tag_name == "li") result.list_ordinal = shared_list_item_ordinal(*box.node);
     return result;
 }
 bool generated_source_eligible(const Style& style, bool host) {
@@ -533,10 +543,15 @@ std::size_t text_decoration_command_count(Rect rect, int font_size, bool line_th
 bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
     const LayoutEngineOptions& options, int& height, std::int64_t precise_width_units,
     NaturalImageSizingFrame* natural_images) noexcept {
-    if (!host.node || host.node->tag_name == "li" || !options.text_system ||
+    const bool list_item = host.node && host.node->type == NodeType::Element && host.node->tag_name == "li";
+    const bool native_list_marker = list_item &&
+        (host.style.list_style_type == ListStyleType::Decimal || host.style.list_style_type == ListStyleType::Disc);
+    if (!host.node || !options.text_system ||
         !options.text_system->ready() || host.children.empty() ||
         !neutral(host.style, true, false, true, false, true) ||
-        !generated_source_eligible(host.style, true)) return false;
+        !generated_source_eligible(host.style, true) ||
+        (list_item && (!native_list_marker || host.style.text_align != TextAlign::Start ||
+            host.style.before_content_kind != GeneratedContentKind::None))) return false;
     SharedInlineLayoutStatistics local_statistics;
     auto& statistics = options.shared_inline.statistics ? *options.shared_inline.statistics : local_statistics;
     if (statistics.attempts >= options.shared_inline.max_attempts) { ++statistics.refusals;return false; }
@@ -578,7 +593,49 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
             (snapshot->owner_paints.capacity()-owner_count)*sizeof(SharedInlineSnapshot::OwnerPaint)+
             (collector.spans.capacity()-owner_count)*sizeof(CoreTextParagraphSpan)+
             collector.atomic_geometry.capacity()*sizeof(CoreTextAtomicGeometry));
-        if (!collector.collect(host, 0, 0) || (collector.spans.empty() || snapshot->members.size() <= 2)) return false;
+        std::string native_marker;
+        if (native_list_marker) {
+            native_marker = host.style.list_style_type == ListStyleType::Decimal
+                ? std::to_string(shared_list_item_ordinal(*host.node)) + "." : "*";
+            if (native_marker.size() > max_source ||
+                statistics.queries >= options.shared_inline.max_queries ||
+                budget.usage.queries >= options.shared_inline.max_queries - statistics.queries ||
+                statistics.query_bytes > options.shared_inline.max_query_bytes ||
+                budget.usage.query_bytes > options.shared_inline.max_query_bytes - statistics.query_bytes ||
+                native_marker.size() > options.shared_inline.max_query_bytes - statistics.query_bytes - budget.usage.query_bytes ||
+                native_marker.size() > options.shared_inline.max_work - std::min(statistics.work, options.shared_inline.max_work) ||
+                budget.usage.work > options.shared_inline.max_work - std::min(statistics.work, options.shared_inline.max_work) - native_marker.size())
+                return false;
+            budget.capacity(native_marker.size() + 1);
+            LayoutTextFont marker_font;
+            if (layout_text_font(host.style, marker_font) != S::Ok ||
+                !snapshot->system->resolve_family_hash(marker_font.family, marker_font.family)) return false;
+            ++budget.usage.queries;
+            budget.usage.query_bytes += native_marker.size();
+            budget.usage.work += native_marker.size();
+            TextRunMetrics marker_metrics;
+            if (snapshot->system->measure(native_marker, marker_font.request(), marker_metrics) != S::Ok)
+                return false;
+            const auto marker_width = shared_list_marker_width(native_marker, host.style.font_size);
+            const auto marker_x = -safe_add(marker_width, 4);
+            budget.capacity(sizeof(PreparedTextGlyph)*marker_metrics.glyph_count + marker_metrics.glyph_count* kPreparedTextRecordBytes + kPreparedTextHeaderBytes);
+            std::vector<PreparedTextGlyph> marker_glyphs;
+            marker_glyphs.resize(marker_metrics.glyph_count);
+            TextRunMetrics prepared_metrics;
+            if (snapshot->system->prepare(native_marker, marker_font.request(), marker_glyphs.data(),
+                    marker_glyphs.size(), prepared_metrics) != S::Ok ||
+                !encode_prepared_text(marker_glyphs.data(), marker_glyphs.size(),
+                    marker_font.size, static_cast<std::uint32_t>(native_marker.size()), snapshot->marker.packet))
+                return false;
+            budget.capacity(snapshot->marker.packet.capacity() + 1);
+            snapshot->marker.present = true;
+            snapshot->marker.origin_x = safe_add(marker_x, -snapshot->content_offset_x);
+            snapshot->marker.bounds = {snapshot->marker.origin_x, 0, marker_width,
+                std::max(host.rect.height, host.style.font_size + 4)};
+            snapshot->marker.color = host.style.color;
+        }
+        if (!collector.collect(host, 0, 0) ||
+            collector.spans.empty() || snapshot->members.size() <= 2) return false;
         paragraph_options.strut = snapshot->members[0].proof.font;
         if (!snapshot->system->resolve_family_hash(paragraph_options.strut.family, paragraph_options.strut.family)) return false;
         snapshot->host_geometry = host_geometry(host.style);
@@ -598,13 +655,31 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         CoreTextLayoutLimits limits;
         limits.max_prepared_glyphs = options.max_prepared_text_glyphs;
         limits.max_capacity_bytes = budget.remaining_capacity();
-        limits.max_line_work = options.shared_inline.max_work-std::min(statistics.work, options.shared_inline.max_work);
-        limits.max_queries = options.shared_inline.max_queries-std::min(statistics.queries, options.shared_inline.max_queries);
-        limits.max_query_bytes = options.shared_inline.max_query_bytes-std::min(statistics.query_bytes, options.shared_inline.max_query_bytes);
+        const auto remaining_work = options.shared_inline.max_work-
+            std::min(statistics.work, options.shared_inline.max_work);
+        const auto remaining_queries = options.shared_inline.max_queries-
+            std::min(statistics.queries, options.shared_inline.max_queries);
+        const auto remaining_query_bytes = options.shared_inline.max_query_bytes-
+            std::min(statistics.query_bytes, options.shared_inline.max_query_bytes);
+        limits.max_line_work = remaining_work-std::min(budget.usage.work, remaining_work);
+        limits.max_queries = remaining_queries-std::min(budget.usage.queries, remaining_queries);
+        limits.max_query_bytes = remaining_query_bytes-
+            std::min(budget.usage.query_bytes, remaining_query_bytes);
         CoreTextParagraphAtomics atomics;
-        if (build_core_text_paragraph(*snapshot->system, collector.spans.data(), collector.spans.size(),
+        const auto paragraph_status = build_core_text_paragraph(*snapshot->system,
+            collector.spans.data(), collector.spans.size(),
             paragraph_options, snapshot->paragraph, limits, &budget.usage,
-            collector.atomic_geometry.data(), collector.atomic_geometry.size(), &atomics, preserved) != S::Ok) return false;
+            collector.atomic_geometry.data(), collector.atomic_geometry.size(), &atomics, preserved);
+        if (paragraph_status != S::Ok) return false;
+        if (snapshot->marker.present && !snapshot->paragraph.lines.empty()) {
+            snapshot->marker.bounds.y = snapshot->paragraph.lines.front().top - snapshot->content_offset_y;
+            snapshot->marker.bounds.height = std::max(snapshot->paragraph.height, host.style.font_size + 4);
+            if (snapshot->members.front().fragments.capacity() == snapshot->members.front().fragments.size())
+                budget.capacity(sizeof(Rect));
+            snapshot->members.front().fragments.push_back(snapshot->marker.bounds);
+            snapshot->members.front().ink_bounds = union_rect(snapshot->members.front().ink_bounds,
+                snapshot->marker.bounds);
+        }
         snapshot->atomic_placements = std::move(atomics.placements);
         snapshot->usage = budget.usage;
         statistics.queries += budget.usage.queries;
@@ -617,7 +692,8 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         // share the remaining operation/context capacity. Never refund it.
         budget.capacity(budget.usage.capacity);
         budget.usage.capacity = 0;
-        const auto fragment_capacity = snapshot->paragraph.lines.size()+snapshot->atomic_placements.size();
+        const auto fragment_capacity = snapshot->paragraph.lines.size()+snapshot->atomic_placements.size()+
+            (snapshot->marker.present ? 1U : 0U);
         for (auto& member : snapshot->members) {
             budget.capacity(fragment_capacity*sizeof(Rect));
             member.fragments.reserve(fragment_capacity);
@@ -828,9 +904,9 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
             box.style.after_counter_name != p.after_counter_name ||
             box.style.after_counter_suffix != p.after_counter_suffix ||
             ((p.before_kind == GeneratedContentKind::Counter && p.before_counter_name == "list-num") &&
-                p.before_counter_text != std::to_string(list_item_ordinal(*p.node)) + p.before_counter_suffix) ||
+                p.before_counter_text != std::to_string(shared_list_item_ordinal(*p.node)) + p.before_counter_suffix) ||
             ((p.after_kind == GeneratedContentKind::Counter && p.after_counter_name == "list-num") &&
-                p.after_counter_text != std::to_string(list_item_ordinal(*p.node)) + p.after_counter_suffix) ||
+                p.after_counter_text != std::to_string(shared_list_item_ordinal(*p.node)) + p.after_counter_suffix) ||
             !same_color(box.style.before_color, p.before_color) ||
             !same_color(box.style.after_color, p.after_color) ||
             box.style.before_font_weight != p.before_weight || box.style.after_font_weight != p.after_weight ||
@@ -840,6 +916,8 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
             box.style.after_font_weight_specified != p.after_weight_specified ||
             box.style.before_left_specified != p.before_left_specified ||
             box.style.after_left_specified != p.after_left_specified ||
+            box.style.list_style_type != p.list_style_type ||
+            (p.tag == "li" && shared_list_item_ordinal(*p.node) != p.list_ordinal) ||
             box.style.text_decoration_underline != p.text_decoration_underline ||
             box.style.text_decoration_line_through != p.text_decoration_line_through ||
             box.style.line_height != p.line_height ||
@@ -859,7 +937,16 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
 bool shared_inline_contains(const LayoutBox& box, int x, int y) noexcept {
     const auto& binding = *box.text_layout_cache.shared_inline;
     if (!shared_inline_current(binding, binding.snapshot->system)) return false;
-    if (binding.member == 0) return contains(box.rect, x, y);
+    if (binding.member == 0) {
+        if (contains(box.rect, x, y)) return true;
+        if (binding.snapshot->marker.present) {
+            auto marker = binding.snapshot->marker.bounds;
+            marker.x = safe_add(marker.x, safe_add(box.rect.x, binding.snapshot->content_offset_x));
+            marker.y = safe_add(marker.y, safe_add(box.rect.y, binding.snapshot->content_offset_y));
+            if (contains(marker, x, y)) return true;
+        }
+        return false;
+    }
     const auto& member = binding.snapshot->members[binding.member];
     const auto dx = static_cast<std::int64_t>(box.rect.x)-member.bounds.x;
     const auto dy = static_cast<std::int64_t>(box.rect.y)-member.bounds.y;
@@ -882,6 +969,12 @@ Rect shared_inline_damage_bounds(const LayoutBox& box) noexcept {
         : static_cast<std::int64_t>(box.rect.y)-member.bounds.y;
     ink.x = clamp_int64_to_int(ink.x+dx);
     ink.y = clamp_int64_to_int(ink.y+dy);
+    if (binding.member == 0 && snapshot.marker.present) {
+        auto marker = snapshot.marker.bounds;
+        marker.x = safe_add(marker.x, safe_add(box.rect.x, snapshot.content_offset_x));
+        marker.y = safe_add(marker.y, safe_add(box.rect.y, snapshot.content_offset_y));
+        ink = union_rect(ink, marker);
+    }
     return union_rect(box.rect, ink);
 }
 
@@ -889,8 +982,12 @@ std::size_t shared_inline_command_count(const SharedInlineBinding& binding,
     const TextSystem* system) noexcept {
     if (!shared_inline_current(binding, system) || binding.member != 0) return 0;
     const auto& snapshot = *binding.snapshot;
-    std::size_t count = snapshot.paragraph.fragments.size() + snapshot.atomic_placements.size();
     const auto max_count = std::numeric_limits<std::size_t>::max();
+    std::size_t count = snapshot.paragraph.fragments.size() + snapshot.atomic_placements.size();
+    if (snapshot.marker.present) {
+        if (count == max_count) return 0;
+        ++count;
+    }
     for (const auto& fragment : snapshot.paragraph.fragments) {
         if (fragment.owner >= snapshot.owners.size()) return 0;
         const auto member = snapshot.owners[fragment.owner];
@@ -928,6 +1025,18 @@ bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
     if (command_count == 0 && (!snapshot.paragraph.fragments.empty() ||
         !snapshot.atomic_placements.empty())) return false;
     draft.reserve(command_count);
+    if (snapshot.marker.present) {
+        DisplayCommand marker;
+        marker.set_type(DisplayCommandType::PreparedText);
+        marker.rect = snapshot.marker.bounds;
+        marker.rect.x = safe_add(marker.rect.x, origin_x);
+        marker.rect.y = safe_add(marker.rect.y, origin_y);
+        marker.color = snapshot.marker.color;
+        marker.text = snapshot.marker.packet;
+        set_prepared_text_origin(marker, safe_add(origin_x, snapshot.marker.origin_x), safe_add(origin_y,
+            snapshot.paragraph.lines.empty() ? 0 : snapshot.paragraph.lines.front().baseline));
+        draft.push_back(std::move(marker));
+    }
     for (std::size_t member_index = 1; member_index < snapshot.members.size(); ++member_index) {
         const auto& member = snapshot.members[member_index];
         if (member.proof.background_color.a == 0) continue;

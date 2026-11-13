@@ -804,32 +804,6 @@ TextCommandAlign text_command_align(TextAlign align) {
     }
 }
 
-int estimate_marker_width(const std::string& text, int font_size) {
-    std::int64_t units = 0;
-    for (char ch : text) {
-        units = std::min<std::int64_t>(std::numeric_limits<int>::max(),
-                                       units + (ch == '.' || ch == ' ' ? 4 : 8));
-    }
-    const std::int64_t width = (static_cast<std::int64_t>(std::max(0, font_size)) * units + 7) / 14;
-    return std::max(font_size, clamp_int64_to_int(width));
-}
-
-int list_item_ordinal(const Node& node) {
-    if (node.parent == nullptr) {
-        return 1;
-    }
-    int ordinal = 0;
-    for (const auto& sibling : node.parent->children) {
-        if (sibling->type == NodeType::Element && sibling->tag_name == "li") {
-            ++ordinal;
-        }
-        if (sibling.get() == &node) {
-            return std::max(1, ordinal);
-        }
-    }
-    return std::max(1, ordinal);
-}
-
 Rect content_rect_for(const LayoutBox& box);
 
 std::string generated_before_text(const LayoutBox& box) {
@@ -837,7 +811,7 @@ std::string generated_before_text(const LayoutBox& box) {
         return box.style.before_content_text;
     }
     if (box.style.before_content_kind == GeneratedContentKind::Counter && box.node != nullptr) {
-        return std::to_string(list_item_ordinal(*box.node)) + box.style.before_counter_suffix;
+        return std::to_string(detail::shared_list_item_ordinal(*box.node)) + box.style.before_counter_suffix;
     }
     return {};
 }
@@ -847,7 +821,7 @@ std::string generated_after_text(const LayoutBox& box) {
         return box.style.after_content_text;
     }
     if (box.style.after_content_kind == GeneratedContentKind::Counter && box.node != nullptr) {
-        return std::to_string(list_item_ordinal(*box.node)) + box.style.after_counter_suffix;
+        return std::to_string(detail::shared_list_item_ordinal(*box.node)) + box.style.after_counter_suffix;
     }
     return {};
 }
@@ -857,7 +831,7 @@ std::string native_marker_text(const LayoutBox& box) {
         return {};
     }
     if (box.style.list_style_type == ListStyleType::Decimal) {
-        return std::to_string(list_item_ordinal(*box.node)) + ".";
+        return std::to_string(detail::shared_list_item_ordinal(*box.node)) + ".";
     }
     if (box.style.list_style_type == ListStyleType::Disc) {
         return "*";
@@ -865,8 +839,12 @@ std::string native_marker_text(const LayoutBox& box) {
     return {};
 }
 
-void paint_list_marker(const LayoutBox& box, DisplayList& display_list) {
+void paint_list_marker(const LayoutBox& box, DisplayList& display_list, const TextSystem* text_system) {
     if (box.node == nullptr || box.node->type != NodeType::Element || box.node->tag_name != "li") {
+        return;
+    }
+    if (box.text_layout_cache.shared_inline && box.text_layout_cache.shared_inline->member == 0 &&
+        detail::shared_inline_current(*box.text_layout_cache.shared_inline, text_system)) {
         return;
     }
     std::string marker = generated_before_text(box);
@@ -882,7 +860,7 @@ void paint_list_marker(const LayoutBox& box, DisplayList& display_list) {
         ? box.style.before_font_weight
         : box.style.font_weight;
     const Color color = generated && box.style.before_color_specified ? box.style.before_color : box.style.color;
-    const int width = estimate_marker_width(marker, box.style.font_size);
+    const int width = detail::shared_list_marker_width(marker, box.style.font_size);
     const int marker_x = generated
         ? box.rect.x + (box.style.before_left_specified ? box.style.before_left : 0)
         : box.rect.x - width - 4;
@@ -1583,7 +1561,7 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
 
     paint_meter_bar(box, display_list);
     paint_form_control(box, display_list);
-    paint_list_marker(box, display_list);
+    paint_list_marker(box, display_list, options.text_system);
     paint_generated_inline_content(box, display_list, CssPseudoElement::Before, options.text_system);
 
     ResolvedImageResource content_resource;

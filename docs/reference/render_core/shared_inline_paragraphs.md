@@ -13,8 +13,11 @@ it does not create an independent pseudo-element box. The existing
 `counter(list-num)` subset also joins the paragraph, resolving the same sibling
 `li` ordinal and suffix as the legacy paint path. Other counter names remain on
 the ordinary fallback path. Unsupported generated content, positioned
-pseudo-elements, list-item pseudo content, and incomplete render membership
-refuse the complete attempt.
+pseudo-elements, list-item `::before` overrides, and incomplete render
+membership refuse the complete attempt. Ordinary decimal and disc `<li>`
+markers are prepared as private first-line overlays at the established marker
+gutter and baseline; they do not participate in body line breaking. Other list
+marker types and list items with non-start alignment retain ordinary layout.
 
 ## Current admission
 
@@ -147,9 +150,9 @@ decorated images or arbitrary image styling.
 
 1. Extend complete source binding for generated/boxless contexts beyond plain
    text `::before`/`::after` and `counter(list-num)` on ordinary block/inline
-   members. Other counter names, list marker integration, positioned
-   pseudo-elements and `display:contents` source mapping remain outside the
-   shared paragraph path. Mixed registered
+   members. Other counter names, positioned pseudo-elements and
+   `display:contents` source mapping remain outside the shared paragraph path.
+   Mixed registered
    font requests, per-owner line heights, bounded preserved whitespace and the
    plain generated-text subset are integrated.
 2. Define and adapt a Core-owned shaping/resource contract before integrating
@@ -157,7 +160,8 @@ decorated images or arbitrary image styling.
    host shape/metrics callbacks and JFGR font-instance packets are incompatible
    with the current Core-owned PreparedText paint contract.
 
-The normal paragraph path, bounded inline-image stage, zero-blur text shadows,
+The normal paragraph path, bounded inline-image stage, native decimal/disc
+list-marker overlays, zero-blur text shadows,
 per-line solid inline-scope backgrounds, the existing propagated
 underline/line-through subset, bounded preserved whitespace, plain generated
 text and the existing `counter(list-num)` subset are integrated.
