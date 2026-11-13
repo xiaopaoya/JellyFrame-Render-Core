@@ -1,5 +1,6 @@
 #pragma once
 #include "core_text_paragraph.h"
+#include <string_view>
 namespace jellyframe::detail {
 
 struct NaturalImageSizingFrame;
@@ -48,6 +49,8 @@ struct SharedInlineProof {
     bool after_weight_specified = false;
     bool before_left_specified = false;
     bool after_left_specified = false;
+    ListStyleType list_style_type = ListStyleType::None;
+    int list_ordinal = 0;
     bool atomic_image = false;
     bool natural_image_sized = false;
     ImageIntrinsicSize image_intrinsic{};
@@ -69,6 +72,13 @@ struct SharedInlineOmittedSource {
     std::size_t parent_member = 0;
     std::size_t dom_index = 0;
     std::string source;
+};
+struct SharedInlineMarker {
+    std::string packet;
+    Rect bounds;
+    int origin_x = 0;
+    Color color;
+    bool present = false;
 };
 struct SharedInlineSnapshot {
     SharedInlineSnapshot() : members(0), owners(0), owner_paints(0), omitted(0), atomic_placements(0) {}
@@ -96,6 +106,7 @@ struct SharedInlineSnapshot {
     std::vector<OwnerPaint> owner_paints;
     std::vector<SharedInlineOmittedSource> omitted;
     std::vector<CoreTextAtomicPlacement> atomic_placements;
+    SharedInlineMarker marker;
     CoreTextParagraphUsage usage;
     std::size_t retained_bytes = 0;
 };
@@ -111,6 +122,8 @@ using SharedInlineImageEmitter = bool (*)(const LayoutBox&, DisplayList&, void* 
 bool layout_shared_inline(LayoutBox&, int x, int y, int width,
     const LayoutEngineOptions&, int& height, std::int64_t precise_width_units = -1,
     NaturalImageSizingFrame* natural_images = nullptr) noexcept;
+int shared_list_item_ordinal(const Node&) noexcept;
+int shared_list_marker_width(std::string_view text, int font_size) noexcept;
 void retire_shared_inline(LayoutBox&) noexcept;
 bool shared_inline_current(const SharedInlineBinding&, const TextSystem*) noexcept;
 bool shared_inline_contains(const LayoutBox&, int x, int y) noexcept;
