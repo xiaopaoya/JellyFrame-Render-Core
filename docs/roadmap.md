@@ -9,14 +9,16 @@ Those consumers decide when a released Core version is adopted.
 ## Current Development Line
 
 Signed `v0.8.0` / ABI `3` is the Runtime production dependency. Core `master` is
-`0.9.0-dev` / ABI `4` at `eff8ba38`; its normalized source manifest is
-`f0deff48544dccac2e3998f874ff403470f932918466237b866eb6d9a9474c2b` (111
-manifest entries). ABI4 is a qualification track, not yet a signed Runtime
-dependency. Runtime installed consumers cover full/cropped profiles, frame
-v9/v10, generated-text replay, and shared-inline native decimal/disc list
-markers; the standalone archive and consumer gates
-run in CI. A signed ABI4 release and named Device OS image acceptance remain
-open. The current development line includes:
+`0.9.0-dev` / ABI `4` at `ef042b26`. ABI4 is a qualification track, not yet a
+signed Runtime dependency. Runtime master `14aa785f` pins this Core revision in
+its full/cropped installed-consumer matrix using CMake package identity
+`aa908e3852afd4a06ed6df6b26a5cc759cfefcd7d39c02270d1304aa633d18c4` across 165
+implementation inputs. Those consumers cover frame v9/v10, generated-text
+replay, and shared-inline native decimal/disc list markers. The bounded shaping
+foundation prototypes are isolated and are not exercised as runtime features.
+The standalone archive and consumer gates run in CI. A signed ABI4 release and
+named Device OS image acceptance remain open. The current development line
+includes:
 
 - LTR horizontal logical size, spacing and inset mapping.
 - Common flex/grid placement (`order`, `align-self`, `place-*`, bounded rows).
@@ -26,6 +28,8 @@ open. The current development line includes:
   viewport-aware units.
 - Command owner/span trace instrumentation and Windows CPU2D comparison
   workloads.
+- A private cluster/source/owner mapper and offline GID bitmap catalog spike,
+  which establish bounded prerequisites for generated shaping resources.
 
 `text-wrap: balance` was explored in historical commit `0fa5c41`, but is not
 present in the current development implementation or capability surface. The
@@ -39,11 +43,11 @@ it enters the DOM. A malformed-input corpus now protects the behavior.
 
 ## Next Release Gate
 
-The next Core work is a bounded shaping-data prototype, not an implicit Runtime
-upgrade. The offline `JFGID1` spike now shows that Core can rasterize a small set
-of non-cmap glyph IDs, and a private cluster/source/owner mapper has synthetic
-coverage tests. Neither integrates shaping or changes `JFFONT2`, JFTP, the
-public API, or default behavior. The next gate is a deterministic generated
+The first shaping-foundation prototypes are merged; they are not an implicit
+Runtime upgrade. The offline `JFGID1` spike shows that Core can rasterize a
+small set of non-cmap glyph IDs, and the private cluster/source/owner mapper has
+synthetic coverage tests. Neither integrates shaping or changes `JFFONT2`,
+JFTP, the public API, or default behavior. The next gate is a deterministic generated
 profile for the selected `ccmp`/`locl`/`liga`/`kern`/`mark` closure across all
 three product weights, with complete output-GID inventory and exact HarfBuzz
 comparison. Only after its encoded table/catalog size is measured should an

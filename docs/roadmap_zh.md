@@ -8,12 +8,14 @@
 ## 当前开发线
 
 带签名的 `v0.8.0` / ABI `3` 是 Runtime 当前生产依赖。Core `master` 为
-`0.9.0-dev` / ABI `4`，提交 `eff8ba38`；规范化 source manifest 为
-`f0deff48544dccac2e3998f874ff403470f932918466237b866eb6d9a9474c2b`（111 个
-manifest 条目）。ABI4 仍处于验收轨道，尚不是签名发布的 Runtime 依赖。Runtime
-installed consumers 覆盖 full/cropped profile、frame v9/v10 与 generated-text
-replay 及 shared-inline decimal/disc list marker；standalone archive 和 consumer 门槛由 CI 验证。签名 ABI4 release 与命名
-Device OS 镜像验收仍未完成。当前开发线包括：
+`0.9.0-dev` / ABI `4`，提交 `ef042b26`。ABI4 仍处于验收轨道，尚不是签名发布的
+Runtime 依赖。Runtime master `14aa785f` 的 full/cropped installed-consumer matrix
+固定此 Core 提交，CMake package identity 为
+`aa908e3852afd4a06ed6df6b26a5cc759cfefcd7d39c02270d1304aa633d18c4`，包含 165 个实现输入。
+消费者覆盖 frame v9/v10、generated-text replay 与 shared-inline native decimal/disc
+list marker。有限 shaping 基础原型保持隔离，不作为 Runtime 特性的验收证据。
+standalone archive 和 consumer 门槛由 CI 验证。签名 ABI4 release 与命名 Device OS
+镜像验收仍未完成。当前开发线包括：
 
 - LTR horizontal writing mode 的逻辑尺寸、间距与 inset 映射。
 - 常用 flex/grid placement（`order`、`align-self`、`place-*`、有界 row）。
@@ -21,6 +23,8 @@ Device OS 镜像验收仍未完成。当前开发线包括：
 - 文字 `letter-spacing`、scalar-safe `overflow-wrap: anywhere` 与 ellipsis。
 - 有界 dirty-region 与圆角光栅热路径、缓存文本布局和 viewport-aware 单位。
 - command owner/span trace 插桩和 Windows CPU2D 对比 workload。
+- private cluster/source/owner mapper 与离线 GID bitmap catalog 原型，为生成 shaping
+  资源提供有界前置基础。
 
 `text-wrap: balance` 曾在历史提交 `0fa5c41` 中探索，但当前开发实现和能力表
 不包含它。旧 candidate evidence 仅作为历史上下文保留，不能作为当前分支的支持证据。
@@ -31,10 +35,10 @@ Device OS 镜像验收仍未完成。当前开发线包括：
 
 ## 下一次发布门槛
 
-下一项 Core 工作是有界 shaping 数据原型，而不是隐式升级 Runtime。离线 `JFGID1`
-实验已证明可以栅格化一小组非 cmap glyph ID；private cluster/source/owner mapper 也有
-合成映射测试。二者都未集成 shaping，也没有改变 `JFFONT2`、JFTP、公开 API 或默认行为。
-下一道门槛是为三种产品字重生成确定性的 `ccmp`/`locl`/`liga`/`kern`/`mark` 选定 closure，
+首批 shaping 基础原型已经合入；这不代表隐式升级 Runtime。离线 `JFGID1` 实验已证明
+可以栅格化一小组非 cmap glyph ID；private cluster/source/owner mapper 也有合成映射测试。
+二者都未集成 shaping，也没有改变 `JFFONT2`、JFTP、公开 API 或默认行为。下一道门槛是
+为三种产品字重生成确定性的 `ccmp`/`locl`/`liga`/`kern`/`mark` 选定 closure，
 完整列举输出 GID，并与 HarfBuzz 精确对照。测出编码后的表与字形目录体积后，再用隔离的
 N16R8 构建测量 flash 增量；目标机加载峰值、scratch、有界工作量、延迟及实机渲染仍是后续门槛。
 
