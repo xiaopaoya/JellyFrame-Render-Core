@@ -235,3 +235,6 @@ jobs:
 
       - name: Test bounded shaping prototype contracts
         run: python tests/tools/test_noto_shaping_closure_prototype.py
+
+      - name: Test encoded shaping profile contracts
+        run: python tests/tools/test_noto_shaping_encoded_spike.py

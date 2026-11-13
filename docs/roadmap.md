@@ -49,13 +49,14 @@ small set of non-cmap glyph IDs, and the private cluster/source/owner mapper has
 synthetic coverage tests. Neither integrates shaping or changes `JFFONT2`,
 JFTP, the public API, or default behavior. The bounded selected-profile
 prototype now produces the same 71-GID missing-output inventory for all three
-product weights and matches eight HarfBuzz cases per face; its three 16 px GID
-catalogs total 23,938 bytes. This is bitmap-catalog size only, not a complete
-shaping resource or runtime budget. The next gate is to define a deterministic
-encoding for the admitted lookup profile and measure table plus catalog size.
-An isolated N16R8 build should then measure flash delta; target load peak,
-scratch, bounded work, latency, and physical-device rendering remain later
-gates. See the closure evaluation for exact inputs and limits.
+product weights and matches ten HarfBuzz cases per face. Its 16 px GID catalogs
+total 23,938 bytes. A deterministic offline lookup-data encoding measures
+41,508 / 41,492 / 41,510 bytes for Regular / Medium / Bold. Catalog and lookup
+figures are separate prototype payloads; neither is a complete resource or
+runtime budget. The next gate is an isolated N16R8 build to measure linked
+flash delta. Target load peak, scratch, bounded work, latency, and
+physical-device rendering remain later gates. See the closure and encoding
+evaluations for exact inputs and limits.
 
 ABI4 release and adoption remain serial gates:
 

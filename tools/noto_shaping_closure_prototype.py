@@ -48,6 +48,8 @@ CASES = (
     ("chinese-punctuation", "中文，。！？", "Hani", "zh-cn"),
     ("latin-kerning", "AVATAR To Wa", "Latn", "en"),
     ("mark-attachment", "ㄓ\u0300", "Bopo", "zh-tw"),
+    ("mark-attachment-double", "ㄓ\u0300\u0301", "Bopo", "zh-tw"),
+    ("mark-attachment-cross-lookup", "ㄓ\u0307\u0300", "Bopo", "zh-tw"),
     ("mark-chain", "A\u0307\u0301", "Latn", "en"),
 )
 
@@ -257,17 +259,40 @@ def _apply_pair_position(font: TTFont, glyphs: list[Glyph], lookup) -> None:
         glyphs[index + 1].y_offset += _value_component(second, "YPlacement")
 
 
-def _apply_mark_position(font: TTFont, glyphs: list[Glyph], lookup) -> None:
+def _mark_glyph_ids(font: TTFont, lookup) -> set[int]:
     if lookup.LookupType != 4:
         raise ValueError(f"expected GPOS MarkBasePos, got lookup type {lookup.LookupType}")
+    return {
+        font.getGlyphID(name)
+        for subtable in lookup.SubTable
+        if subtable.Format == 1
+        for name in subtable.MarkCoverage.glyphs
+    }
+
+
+def _apply_mark_position(font: TTFont, glyphs: list[Glyph], lookup,
+                         mark_glyphs: set[int] | None = None) -> None:
+    if lookup.LookupType != 4:
+        raise ValueError(f"expected GPOS MarkBasePos, got lookup type {lookup.LookupType}")
+    if mark_glyphs is None:
+        mark_glyphs = _mark_glyph_ids(font, lookup)
     for index in range(1, len(glyphs)):
-        anchors = _mark_anchor(font, lookup, glyphs[index - 1].gid, glyphs[index].gid)
+        base_index = index - 1
+        anchors = None
+        while base_index >= 0:
+            anchors = _mark_anchor(font, lookup, glyphs[base_index].gid,
+                                   glyphs[index].gid)
+            if anchors is not None or glyphs[base_index].gid not in mark_glyphs:
+                break
+            base_index -= 1
         if anchors is None:
             continue
         base_x, base_y, mark_x, mark_y = anchors
-        base = glyphs[index - 1]
-        glyphs[index].x_offset += base.x_offset - base.x_advance + base_x - mark_x
-        glyphs[index].y_offset += base.y_offset - base.y_advance + base_y - mark_y
+        base = glyphs[base_index]
+        advance_x = sum(glyph.x_advance for glyph in glyphs[base_index:index])
+        advance_y = sum(glyph.y_advance for glyph in glyphs[base_index:index])
+        glyphs[index].x_offset += base.x_offset - advance_x + base_x - mark_x
+        glyphs[index].y_offset += base.y_offset - advance_y + base_y - mark_y
 
 
 def _canonical_scalars(text: str, cmap: dict[int, str]) -> list[tuple[str, int]]:
@@ -328,12 +353,18 @@ def prototype_shape(font: TTFont, text: str, script: str, language: str) -> list
             raise ValueError(f"unsupported selected GSUB lookup type {lookup.LookupType} ({feature_tag})")
 
     gpos_plan = selected_lookup_plan(font, "GPOS", script, language, ("kern", "mark"))
+    mark_glyphs = set().union(
+        *(_mark_glyph_ids(font, lookup)
+          for feature_tag, lookup_id in gpos_plan
+          if feature_tag == "mark"
+          for lookup in [_lookup(font, "GPOS", lookup_id)])
+    )
     for feature_tag, lookup_id in gpos_plan:
         lookup = _lookup(font, "GPOS", lookup_id)
         if feature_tag == "kern" and lookup.LookupType == 2:
             _apply_pair_position(font, glyphs, lookup)
         elif feature_tag == "mark" and lookup.LookupType == 4:
-            _apply_mark_position(font, glyphs, lookup)
+            _apply_mark_position(font, glyphs, lookup, mark_glyphs)
         else:
             raise ValueError(f"unsupported selected GPOS lookup type {lookup.LookupType} ({feature_tag})")
     return [glyph.as_record() for glyph in glyphs]
