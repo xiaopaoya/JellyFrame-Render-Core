@@ -1560,7 +1560,11 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
         }
     }
     paint_box_shadow(box, display_list, options);
-    paint_canonical_background(box, display_list, options, remaining_commands, box_command_begin);
+    const bool shared_inline_scope = box.text_layout_cache.shared_inline &&
+        box.text_layout_cache.shared_inline->member != 0 &&
+        detail::shared_inline_current(*box.text_layout_cache.shared_inline, options.text_system);
+    if (!shared_inline_scope)
+        paint_canonical_background(box, display_list, options, remaining_commands, box_command_begin);
 
     if (has_border(box.style.border_width)) {
         push_border_rects(display_list,

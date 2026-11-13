@@ -540,6 +540,96 @@ void sharp_text_shadow_parity_and_bounds() {
     check(find(*blurred_layout, "p").text_layout_cache.shared_inline == nullptr,
           "blurred shadows remain on the established whole-paragraph fallback");
 }
+void inline_scope_backgrounds() {
+    Fixture fixture;
+    const std::string css =
+        "*{margin:0;padding:0;border:0}#p{display:block;width:44px;font-size:16px;line-height:20px}"
+        "#outer{background-color:rgba(255,0,0,.5)}#inner{background-color:blue}span{display:inline}";
+    StyleResolver styles(CssParser{}.parse(css));
+    auto dom = HtmlParser{}.parse(
+        "<div id='p'><span id='outer'>AB AB <span id='inner'>AB AB AB AB</span> AB</span></div>");
+    auto layout = LayoutEngine(styles, {}, fixture.options).layout(*dom, 80, 100);
+    const auto& host = find(*layout, "p");
+    check(host.text_layout_cache.shared_inline != nullptr,
+          "solid inline scope backgrounds stay eligible for shared paragraph layout");
+    const auto& outer = find(*layout, "outer");
+    auto& inner = const_cast<LayoutBox&>(find(*layout, "inner"));
+    const auto& outer_binding = *outer.text_layout_cache.shared_inline;
+    const auto& inner_binding = *inner.text_layout_cache.shared_inline;
+    const auto& outer_member = outer_binding.snapshot->members[outer_binding.member];
+    const auto& inner_member = inner_binding.snapshot->members[inner_binding.member];
+    check(outer_member.fragments.size() >= 2,
+          "outer background geometry retains separate line fragments when text wraps");
+    check(inner_member.fragments.size() >= 2,
+          "nested background geometry retains separate line fragments when text wraps");
+
+    auto layers = LayerTreeBuilder(fixture.layers).build(*layout);
+    const auto& commands = layers->display_list;
+    const auto expected_backgrounds = outer_member.fragments.size() + inner_member.fragments.size();
+    check(commands.size() == expected_backgrounds + outer_binding.snapshot->paragraph.fragments.size(),
+          "per-line inline backgrounds are included in exact display command accounting");
+    std::size_t fill_count = 0;
+    while (fill_count < commands.size() && commands[fill_count].type() == DisplayCommandType::FillRect)
+        ++fill_count;
+    check(fill_count == expected_backgrounds,
+          "all inline background fragments paint before text content");
+    for (std::size_t i = 0; i < outer_member.fragments.size(); ++i) {
+        const auto& command = commands[i];
+        const auto expected = outer_member.fragments[i];
+        check(command.rect.x == expected.x + host.rect.x + outer_binding.snapshot->content_offset_x &&
+            command.rect.y == expected.y + host.rect.y + outer_binding.snapshot->content_offset_y &&
+            command.rect.width == expected.width && command.rect.height == expected.height &&
+            command.color.r == 255 && command.color.g == 0 && command.color.b == 0 &&
+            command.color.a >= 127 && command.color.a <= 128,
+            "outer scope emits translucent red backgrounds for each measured line fragment");
+    }
+    for (std::size_t i = 0; i < inner_member.fragments.size(); ++i) {
+        const auto& command = commands[outer_member.fragments.size()+i];
+        check(command.color.r == inner_member.proof.background_color.r &&
+            command.color.g == inner_member.proof.background_color.g &&
+            command.color.b == inner_member.proof.background_color.b &&
+            command.color.a == inner_member.proof.background_color.a,
+            "nested scope background follows the parent background in source nesting order");
+    }
+    LayerNode backgrounds_only;
+    for (std::size_t i = 0; i < expected_backgrounds; ++i)
+        backgrounds_only.display_list.push_back(commands[i]);
+    SoftwareCompositor::Options paint;
+    paint.text_system = &fixture.system;
+    SoftwareCompositor compositor({}, paint);
+    const auto background_pixels = compositor.render(backgrounds_only, 80, 100, {255,255,255,255});
+    const auto red_pixel = background_pixels.pixel(39, 10);
+    check(red_pixel.r == 255 && red_pixel.g >= 127 && red_pixel.g <= 128 &&
+        red_pixel.b >= 127 && red_pixel.b <= 128,
+        "translucent inline background is composited once over the underlying surface");
+
+    const auto pixels = compositor.render(*layers, 80, 100, {255,255,255,255});
+    check(!equal_pixels(pixels, FrameBuffer(80, 100, {255,255,255,255})),
+          "inline scope backgrounds contribute visible pixels");
+    FrameBuffer tiled(80, 100, {255,255,255,255});
+    for (int y = 0; y < 100; y += 13) {
+        Rect clip{0, y, 80, std::min(13, 100-y)};
+        compositor.render_into(*layers, tiled, {255,255,255,255}, &clip, 1);
+    }
+    check(equal_pixels(pixels, tiled),
+          "inline background and foreground packets compose identically across tiled clips");
+    const auto damage = detail::shared_inline_damage_bounds(host);
+    for (std::size_t i = 0; i < expected_backgrounds; ++i) {
+        const auto& rect = commands[i].rect;
+        check(rect.x >= damage.x && rect.y >= damage.y &&
+            safe_edge(rect.x, rect.width) <= safe_edge(damage.x, damage.width) &&
+            safe_edge(rect.y, rect.height) <= safe_edge(damage.y, damage.height),
+            "shared paragraph damage covers every per-line inline background");
+    }
+    auto low_budget = fixture.layers;
+    low_budget.max_display_commands = expected_backgrounds;
+    auto limited = LayerTreeBuilder(low_budget).build(*layout);
+    check(limited->display_list.empty(),
+          "command budget below the complete background and text paragraph emits no partial output");
+    inner.style.background_color = {0, 255, 0, 255};
+    check(!detail::shared_inline_current(inner_binding, &fixture.system),
+          "live inline background changes invalidate the frozen shared paragraph proof");
+}
 void partition_and_live_proof() {
     Fixture fixture;
     for (const char* align : {"start", "center", "end"}) {
@@ -883,6 +973,7 @@ int main() {
         definite_inline_image_percent_width();
         natural_inline_image_metadata_path();
         sharp_text_shadow_parity_and_bounds();
+        inline_scope_backgrounds();
         partition_and_live_proof();
         refusal_and_rollback();
         mutation_damage_and_tiling();
