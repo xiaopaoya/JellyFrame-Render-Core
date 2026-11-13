@@ -63,7 +63,6 @@ set(JELLYFRAME_RENDER_CORE_CORE_PAINT_SOURCES
     src/text_system_paint.cpp
     src/style.cpp
     src/style_repaint.cpp
-    src/text_adapter.cpp
     src/text_backend.cpp
     src/text_layout_reuse.cpp
     src/text_repaint.cpp

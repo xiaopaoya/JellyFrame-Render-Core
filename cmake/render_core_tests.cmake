@@ -118,7 +118,7 @@ set(JELLYFRAME_RENDER_CORE_TEST_SOURCES
     tests/unit/scroll_gesture_tests.cpp
     tests/unit/software_renderer_tests.cpp
     tests/unit/style_repaint_tests.cpp
-    tests/unit/text_adapter_tests.cpp
+    tests/unit/text_provider_tests.cpp
     tests/unit/text_repaint_tests.cpp
     tests/unit/text_scan_tests.cpp
 )

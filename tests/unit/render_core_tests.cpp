@@ -37,7 +37,7 @@ int scroll_blit_tests_main();
 int scroll_gesture_tests_main();
 int software_renderer_tests_main();
 int style_repaint_tests_main();
-int text_adapter_tests_main();
+int text_provider_tests_main();
 int text_repaint_tests_main();
 int text_scan_tests_main();
 
@@ -97,7 +97,7 @@ int main() {
     failed += run_test("scroll_gesture", scroll_gesture_tests_main);
     failed += run_test("software_renderer", software_renderer_tests_main);
     failed += run_test("style_repaint", style_repaint_tests_main);
-    failed += run_test("text_adapter", text_adapter_tests_main);
+    failed += run_test("text_provider", text_provider_tests_main);
     failed += run_test("text_repaint", text_repaint_tests_main);
     failed += run_test("text_scan", text_scan_tests_main);
 

@@ -8,11 +8,10 @@ immutable font resources and provide storage/display access; they do not
 provide text measurement, line metrics, shaping decisions, or glyph-paint
 callbacks.
 
-The public migration is a coordinated ABI change. It removes
-`TextMeasureProvider`, `TextPainter`, `HostTextAdapter`, and the old JFFONT
-resource loader rather than preserving compatibility wrappers. Existing
-products must migrate their font assets and consumers in the same release
-series.
+This pre-release cleanup removes the convenience callback adapter. The existing
+`TextMeasureProvider` and `TextPainter` APIs remain available for consumers
+until their font resources and call sites migrate together in a later ABI
+change. The old JFFONT resource loader also remains until that migration.
 
 ## Contract
 
@@ -40,7 +39,6 @@ series.
 | `BitmapFontResource` and JFFONT0/1 parsing | `FontResource` and JFFONT2 |
 | `TextMeasureProvider` in `LayoutEngine` | `LayoutEngineOptions::text_system` |
 | `TextPainter` in layer/software rendering | Core-prepared text consumed by `TextSystem::paint` |
-| `HostTextAdapter` and adapter factories | No callback bridge |
 | Provider parameters on style/text repaint | Retained Core text snapshots and the bound `TextSystem` |
 | Callback text on Canvas2D | Core text service in the Canvas2D context |
 
@@ -51,11 +49,11 @@ must not silently fall back to host metrics or a second renderer.
 
 ## Migration Order
 
-1. In Core, replace the font resource format and public text-service entry
-   points; migrate layout, layer building, repaint, software rendering, and
-   Canvas2D in the same ABI change. Remove old callback types, loader, adapter,
-   and their compatibility tests. Keep the existing product feature profile
-   opt-in until Runtime coverage and resource delivery pass their gates.
+1. In Core, migrate layout, layer building, repaint, software rendering, and
+   Canvas2D together to the Core text service. Remove the remaining callback
+   types and old resource loader only after those consumers are ready. Keep the
+   existing product feature profile opt-in until Runtime coverage and resource
+   delivery pass their gates.
 2. In Runtime, update the package lock to the reviewed Core ABI, migrate the
    desktop shell, native UI, script worker, benchmark fixtures, and app-font
    packaging to registered Core resources. Remove callback plumbing and old
@@ -72,10 +70,10 @@ must not silently fall back to host metrics or a second renderer.
 ## Mainline Baseline
 
 The starting Core mainline is `0.7.0 / ABI 2` at `1308a640`. It contains the
-callback-based `TextMeasureProvider`, `TextPainter`, `HostTextAdapter`, and
-JFFONT0/1 loader; it has no `CoreTextFrame`, `FontResource`, `TextSystem`, or
-JFTP implementation. The experiment is based on a different implementation
-history (`0.6.2 / ABI 9`), so its feature deltas are reference material, not
+callback-based `TextMeasureProvider` and `TextPainter`, plus the JFFONT0/1
+loader; it has no `CoreTextFrame`, `FontResource`, `TextSystem`, or JFTP
+implementation. The experiment is based on a different implementation history
+(`0.6.2 / ABI 9`), so its feature deltas are reference material, not
 standalone cherry-picks.
 
 This document specifies the migration boundary and release order. It does not
@@ -100,10 +98,11 @@ real-font TextSystem check does use the local Noto Sans SC Regular/Medium/Bold
 sources at 16/24/32 px and passes 21 selection/metric rows covering 126 glyphs.
 Installed-package FontResource and TextSystem consumers pass 1/1 each.
 
-This is still an in-progress, additive source branch. The old JFFONT loader,
-text callbacks, and adapter remain until layout, layer painting, repaint,
-Canvas2D, and Runtime consumers are switched together. Do not open a merge PR
-or publish a package from this intermediate checkpoint.
+This is still an in-progress, additive source branch. The old JFFONT loader and
+text callbacks remain until layout, layer painting, repaint, Canvas2D, and
+Runtime consumers are switched together. The convenience callback adapter is
+removed as a separate pre-release cleanup. Do not publish a package from this
+intermediate checkpoint.
 
 This Core slice adds the JFTP v1 prepared-text packet codec and a bounded
 Core-owned bitmap paint primitive. The decoder allocates no memory; painting
