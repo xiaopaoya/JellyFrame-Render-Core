@@ -9,11 +9,12 @@ Those consumers decide when a released Core version is adopted.
 ## Current Development Line
 
 Signed `v0.8.0` / ABI `3` is the Runtime production dependency. Core `master` is
-`0.9.0-dev` / ABI `4` at `076b8b0f`; its normalized source manifest is
-`5cf5b2e2dd3b9dde6ac8268514f2addd033ddd69f09809b07f6601e49c53c714` (111
+`0.9.0-dev` / ABI `4` at `a600fce8`; its normalized source manifest is
+`f0deff48544dccac2e3998f874ff403470f932918466237b866eb6d9a9474c2b` (111
 manifest entries). ABI4 is a qualification track, not yet a signed Runtime
 dependency. Runtime installed consumers cover full/cropped profiles, frame
-v9/v10 and generated-text replay; the standalone archive and consumer gates
+v9/v10, generated-text replay, and shared-inline native decimal/disc list
+markers; the standalone archive and consumer gates
 run in CI. A signed ABI4 release and named Device OS image acceptance remain
 open. The current development line includes:
 

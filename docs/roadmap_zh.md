@@ -8,11 +8,11 @@
 ## 当前开发线
 
 带签名的 `v0.8.0` / ABI `3` 是 Runtime 当前生产依赖。Core `master` 为
-`0.9.0-dev` / ABI `4`，提交 `076b8b0f`；规范化 source manifest 为
-`5cf5b2e2dd3b9dde6ac8268514f2addd033ddd69f09809b07f6601e49c53c714`（111 个
+`0.9.0-dev` / ABI `4`，提交 `a600fce8`；规范化 source manifest 为
+`f0deff48544dccac2e3998f874ff403470f932918466237b866eb6d9a9474c2b`（111 个
 manifest 条目）。ABI4 仍处于验收轨道，尚不是签名发布的 Runtime 依赖。Runtime
 installed consumers 覆盖 full/cropped profile、frame v9/v10 与 generated-text
-replay；standalone archive 和 consumer 门槛由 CI 验证。签名 ABI4 release 与命名
+replay 及 shared-inline decimal/disc list marker；standalone archive 和 consumer 门槛由 CI 验证。签名 ABI4 release 与命名
 Device OS 镜像验收仍未完成。当前开发线包括：
 
 - LTR horizontal writing mode 的逻辑尺寸、间距与 inset 映射。
