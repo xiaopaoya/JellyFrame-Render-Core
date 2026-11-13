@@ -5,8 +5,13 @@ Block containing nested neutral Inline spans, text and explicit br/wbr markers.
 The TextSystem option activates this foundation. A single direct text child
 keeps the established leaf cache contract. Member boundaries add no wrap cuts.
 The collector also retains exact source-order proof for collapsible whitespace
-text intentionally omitted by RenderTree. Missing non-whitespace sources,
-generated nodes and incomplete render membership refuse the complete attempt.
+text intentionally omitted by RenderTree. Plain text `::before` and `::after`
+sources on an admitted block host or inline member join the same paragraph in
+DOM order and inherit hit ownership from that originating element. The bounded
+generated-text subset carries the originating style's color and font weight;
+it does not create an independent pseudo-element box. Unsupported generated
+content, positioned pseudo-elements, list-item pseudo content, and incomplete
+render membership refuse the complete attempt.
 
 ## Current admission
 
@@ -26,9 +31,9 @@ policy. Signed odd half-leading floors the first half and preserves line advance
 Neutral descendants have zero edges, automatic dimensions, static positioning,
 full opacity, visible text, empty transforms and overflow. The bounded shared
 paint subset also admits solid inline-scope backgrounds, zero-blur text shadows,
-and the existing underline/line-through decoration flags; it excludes box
-shadows, blurred text shadows, outlines, generated content and independent
-stacking scopes.
+the existing underline/line-through decoration flags, and the plain generated-
+text subset described above; it excludes box shadows, blurred text shadows,
+outlines and independent stacking scopes.
 Unsupported whole contexts continue through the established ordinary formatter.
 Paragraph hosts undergoing temporary Flex/Grid/positioned sizing overrides or
 mixed-size style materialization also use that formatter until their source-style
@@ -137,9 +142,12 @@ decorated images or arbitrary image styling.
 
 ## Remaining finite migration stages
 
-1. Extend complete source binding for generated/boxless contexts. Mixed
-   registered font requests, per-owner line heights, and the bounded preserved
-   whitespace policy are integrated.
+1. Extend complete source binding for generated/boxless contexts beyond plain
+   text `::before`/`::after` on ordinary block/inline members. Counter and list
+   marker integration, positioned pseudo-elements and `display:contents`
+   source mapping remain outside the shared paragraph path. Mixed registered
+   font requests, per-owner line heights, bounded preserved whitespace and the
+   plain generated-text subset are integrated.
 2. Define and adapt a Core-owned shaping/resource contract before integrating
    the historical shaped-inline source and frozen shaped packets. Its former
    host shape/metrics callbacks and JFGR font-instance packets are incompatible
@@ -148,6 +156,6 @@ decorated images or arbitrary image styling.
 The normal paragraph path, bounded inline-image stage, zero-blur text shadows,
 per-line solid inline-scope backgrounds, the existing propagated
 underline/line-through subset, and bounded preserved whitespace are integrated.
-Generated/boxless source-topology and shaped-inline stages remain pending. The
-Style model has no overline or complete decoration style storage, so those
-features remain outside this bounded subset.
+Remaining generated/boxless source-topology and shaped-inline stages remain
+pending. The Style model has no overline or complete decoration style storage,
+so those features remain outside this bounded subset.

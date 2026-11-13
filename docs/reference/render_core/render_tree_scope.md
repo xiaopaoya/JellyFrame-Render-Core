@@ -68,8 +68,9 @@ DOM + computed style
 ## Deliberately Deferred
 
 - Anonymous block/inline box generation.
-- Full pseudo-element layout. The current `::before`/`::after` generated-text
-  subset is display-command based.
+- Full pseudo-element layout. Plain text `::before`/`::after` on admitted
+  shared paragraphs is source-ordered with inline text; unsupported pseudo
+  content and independent pseudo boxes retain display-command fallback.
 - Full list marker renderers. Native-lite list markers are display-command
   based.
 - Replaced-element intrinsic sizing.

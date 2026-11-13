@@ -899,8 +899,14 @@ void paint_list_marker(const LayoutBox& box, DisplayList& display_list) {
 
 void paint_generated_inline_content(const LayoutBox& box,
                                     DisplayList& display_list,
-                                    CssPseudoElement pseudo_element) {
+                                    CssPseudoElement pseudo_element,
+                                    const TextSystem* text_system) {
     if (box.node == nullptr || box.node->type != NodeType::Element || box.node->tag_name == "li") {
+        return;
+    }
+    if (box.text_layout_cache.shared_inline &&
+        detail::shared_inline_current(*box.text_layout_cache.shared_inline,
+            text_system)) {
         return;
     }
     const Rect content = content_rect_for(box);
@@ -1578,7 +1584,7 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
     paint_meter_bar(box, display_list);
     paint_form_control(box, display_list);
     paint_list_marker(box, display_list);
-    paint_generated_inline_content(box, display_list, CssPseudoElement::Before);
+    paint_generated_inline_content(box, display_list, CssPseudoElement::Before, options.text_system);
 
     ResolvedImageResource content_resource;
     const bool emitted_by_shared_inline = box.text_layout_cache.shared_inline &&
@@ -2047,7 +2053,7 @@ LayerNodePtr LayerTreeBuilder::build_with_arena(const LayoutBox& root, Monotonic
     build_children(root, *root_layer, arena, root.rect, remaining_commands, display_budget_reported);
     if (!root.style.visibility_hidden) {
         const std::size_t command_begin = root_layer->display_list.size();
-        paint_generated_inline_content(root, root_layer->display_list, CssPseudoElement::After);
+        paint_generated_inline_content(root, root_layer->display_list, CssPseudoElement::After, options_.text_system);
         trim_display_list(root_layer->display_list, command_begin, remaining_commands, display_budget_reported);
         stamp_trace_owner(root_layer->display_list, command_begin, trace_owner_token_for(root, options_));
     }
@@ -2169,7 +2175,8 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
         if (current.exit) {
             if (!current_box->style.visibility_hidden) {
                 const std::size_t command_begin = current_layer.display_list.size();
-                paint_generated_inline_content(*current_box, current_layer.display_list, CssPseudoElement::After);
+                paint_generated_inline_content(*current_box, current_layer.display_list,
+                    CssPseudoElement::After, options_.text_system);
                 translate_display_commands(current_layer.display_list, command_begin, 0, -current.scroll_y);
                 trim_display_list(current_layer.display_list,
                                   command_begin,
