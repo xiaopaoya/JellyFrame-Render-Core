@@ -130,9 +130,10 @@ decorated images or arbitrary image styling.
    prepared-text packet with the authored offset/color before the foreground.
    Preserve logical hit/scroll bounds and extend ink damage only. Keep all
    blurred shadows outside this slice; no font callback is needed.
-2. Add per-line solid inline-scope backgrounds and the explicitly admitted
-   propagated text-decoration subset with bounded command generation and
-   full/tiled/damage parity. Background height policy must be stated and tested.
+2. Add the explicitly admitted propagated text-decoration subset with bounded
+   command generation and full/tiled/damage parity. Background height policy
+   for the newly integrated solid inline-scope backgrounds is line-height
+   fragment bounds.
    The current Style model has underline and line-through flags, but no overline
    or complete decoration style representation; parser/cascade additions must
    be scoped separately.
@@ -141,4 +142,6 @@ decorated images or arbitrary image styling.
 4. Adapt the separately accepted shaped-inline backend and frozen shaped packets.
 
 The normal neutral paragraph path and the bounded inline-image stage are
-integrated. The listed paint and source-topology stages remain pending.
+integrated. Zero-blur text shadows and per-line solid inline-scope backgrounds
+are integrated. The listed decoration and source-topology stages remain
+pending.

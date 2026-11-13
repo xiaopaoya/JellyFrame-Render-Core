@@ -17,6 +17,7 @@ struct SharedInlineProof {
     std::string tag;
     LayoutTextFont font;
     Color color;
+    Color background_color;
     TextShadowStyle text_shadow;
     int line_height = 0;
     int indent = 0;
