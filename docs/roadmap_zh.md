@@ -1,20 +1,19 @@
 # Render Core 活动路线图
 
-> 最后更新：2026-11-06；适用版本：0.8.0 开发线
+> 最后更新：2026-11-13；适用版本：0.9.0-dev / ABI 4 验收线
 
 本文只安排 Render Core 工作，不安排 JellyFrame App Runtime、设备 port、launcher
 策略、JerryScript 或 developer image。何时采用已发布的 Core 版本由其消费者决定。
 
 ## 当前开发线
 
-带签名的 `v0.6.0` 已建立 Core ABI `1`；带签名的 `v0.6.2` 是 Runtime 当前锁定依赖。
-已发布依赖。`0.7.0` 开发线使用 ABI `2`，因为 `CssParserOptions` 新增 preference
-字段会改变 32 位目标上的公开结构布局。当前 `0.8.0` 候选使用 ABI `3`，用于
-Core-owned font/text 协同迁移及其公开结构、renderer 与 Canvas2D API 变化。最近一次同步从
-JellyFrame 主线导入截至 `b1196f67` 的经审阅 Core 改动，取代此前 `0d04dfca` / `8630bf6c`
-同步点。该源版本已通过 monorepo 的桌面、scripting、sanitizer 与 standalone Core
-CI，并已进入验收通过的 WS147 `0.6.2-ws147.2` Developer Image。独立仓库继续
-保留自身 build/install CI 与确定性源码归档，并新增：
+带签名的 `v0.8.0` / ABI `3` 是 Runtime 当前生产依赖。Core `master` 为
+`0.9.0-dev` / ABI `4`，提交 `076b8b0f`；规范化 source manifest 为
+`5cf5b2e2dd3b9dde6ac8268514f2addd033ddd69f09809b07f6601e49c53c714`（111 个
+manifest 条目）。ABI4 仍处于验收轨道，尚不是签名发布的 Runtime 依赖。Runtime
+installed consumers 覆盖 full/cropped profile、frame v9/v10 与 generated-text
+replay；standalone archive 和 consumer 门槛由 CI 验证。签名 ABI4 release 与命名
+Device OS 镜像验收仍未完成。当前开发线包括：
 
 - LTR horizontal writing mode 的逻辑尺寸、间距与 inset 映射。
 - 常用 flex/grid placement（`order`、`align-self`、`place-*`、有界 row）。
@@ -32,7 +31,12 @@ CI，并已进入验收通过的 WS147 `0.6.2-ws147.2` Developer Image。独立�
 
 ## 下一次发布门槛
 
-下一项 Core 工作是候选能力评估，而不是隐式升级 Runtime：
+下一项 Core 工作是有界 shaping 数据原型，而不是隐式升级 Runtime。现有
+`JFFONT2` 仍是 scalar bitmap 数据；原型必须以产品 Noto Sans SC 源字体为 shaping
+输入，并与独立 shaping oracle 对比已准入 lookup 的行为。完成正确性及 ESP32
+内存/工作量测量前，不改公开 API 或默认行为。
+
+ABI4 发布与采用仍按顺序经过以下门槛：
 
 1. 复核候选源码、公开头文件与生成 profile 的改动。
 2. 对接受的能力发布经审查的 signed Core release、确定性源码归档及 SHA-256 sidecar。
@@ -44,7 +48,7 @@ CI，并已进入验收通过的 WS147 `0.6.2-ws147.2` Developer Image。独立�
 在门槛完成前，宿主可用 local source override 做跨仓库开发；生产消费者不得浮动依赖
 此分支。
 
-## 0.6.1 后的候选受理
+## ABI4 验收期间的候选受理
 
 每个新能力必须有作者可复现的需求和有界提案。接受后需要正/负行为测试、三个 target
 desktop capture、capability/diagnostic/recipe 更新；触及 layout 或 paint 时还需 hot-path
