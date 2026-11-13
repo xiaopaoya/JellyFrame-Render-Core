@@ -17,11 +17,11 @@ That JFFONT2 is a scalar-to-bitmap resource; it contains no OpenType shaping
 tables. This experiment reads the OTF directly and does not infer GSUB/GPOS
 from JFFONT2.
 
-Requires Python 3.11, fontTools 4.68.0, and uharfbuzz 0.57.0. Install
-uharfbuzz in a temporary target directory, then run:
+Verified with Python 3.11, fontTools 4.60.1, and uharfbuzz 0.57.0. Install
+both pinned dependencies in a temporary target directory, then run:
 
 ```powershell
-python -m pip install --target $env:TEMP/jf-shaping-spike-deps uharfbuzz
+python -m pip install --target $env:TEMP/jf-shaping-spike-deps fontTools==4.60.1 uharfbuzz==0.57.0
 $env:PYTHONPATH = "$env:TEMP/jf-shaping-spike-deps"
 python tools/noto_shaping_profile_spike.py `
   E:/Workspaces/migration-followup/Runtime-core-release-status-20261113/ports/esp32s3-idf/font/source/noto-sans-sc-2.002/NotoSansSC-Regular.otf
@@ -46,8 +46,10 @@ types are 5 SinglePos, 2 PairPos, and 3 MarkBasePos lookups.
 Selected `fwid` is GSUB lookup 6, type 1, one SingleSubst subtable with 218
 mappings. Selected `kern` is GPOS lookup 5, type 2, with a PairPos format 1
 subtable (142 covered first glyphs, 845 explicit pairs) and a format 2 class
-subtable (358 explicit class-1 assignments, 352 explicit class-2 assignments,
-122 by 105 class matrix). Both have lookup flags 0. The prototype supports
+subtable (359 covered first glyphs, 358 explicit ClassDef1 assignments, 352
+explicit ClassDef2 assignments, 122 by 105 class matrix). Coverage count and
+ClassDef2 assignment count describe different fields. Both have lookup flags
+0. The prototype supports
 these exact representations and refuses unexpected selected lookup types or
 PairPos formats.
 
@@ -61,6 +63,8 @@ PairPos formats.
 Result: 4/4 cases matched HarfBuzz, including the CFF font's nominal advances,
 SingleSubst advance replacement, and pair positioning. The prototype and
 HarfBuzz compared 40 glyph records; mismatches: 0.
+The pinned fontTools 4.60.1 / uharfbuzz 0.57.0 rerun on 2026-11-13 produced
+the same 4/4 exact matches and the same 359-coverage / 352-ClassDef2 counts.
 
 ## Boundary and implications
 
