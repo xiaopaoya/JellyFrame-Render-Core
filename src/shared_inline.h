@@ -19,11 +19,14 @@ struct SharedInlineProof {
     Color color;
     Color background_color;
     TextShadowStyle text_shadow;
+    int font_size = 14;
     int line_height = 0;
     int indent = 0;
     TextAlign align = TextAlign::Start;
     bool nowrap = false;
     bool anywhere = false;
+    bool text_decoration_underline = false;
+    bool text_decoration_line_through = false;
     bool atomic_image = false;
     bool natural_image_sized = false;
     ImageIntrinsicSize image_intrinsic{};

@@ -630,6 +630,76 @@ void inline_scope_backgrounds() {
     check(!detail::shared_inline_current(inner_binding, &fixture.system),
           "live inline background changes invalidate the frozen shared paragraph proof");
 }
+void propagated_inline_text_decorations() {
+    Fixture fixture;
+    const std::string css =
+        "*{margin:0;padding:0;border:0}#p{display:block;width:32px;font-size:16px;line-height:20px;"
+        "text-decoration:underline line-through;color:red}span{display:inline}";
+    StyleResolver styles(CssParser{}.parse(css));
+    auto dom = HtmlParser{}.parse(
+        "<div id='p'><span>A A A A A A</span><span> B B</span></div>");
+    auto layout = LayoutEngine(styles, {}, fixture.options).layout(*dom, 64, 100);
+    const auto& host = find(*layout, "p");
+    check(host.text_layout_cache.shared_inline != nullptr,
+          "existing inherited underline and strike styles remain eligible for shared paragraphs");
+    const auto& snapshot = *host.text_layout_cache.shared_inline->snapshot;
+    std::size_t decorated_fragments = 0;
+    for (const auto& fragment : snapshot.paragraph.fragments) {
+        const auto owner = snapshot.owners[fragment.owner];
+        const auto& proof = snapshot.members[owner].proof;
+        if (proof.text_decoration_underline || proof.text_decoration_line_through)
+            ++decorated_fragments;
+    }
+    check(decorated_fragments >= 2,
+          "wrapping produces multiple text fragments carrying propagated decorations");
+    auto layers = LayerTreeBuilder(fixture.layers).build(*layout);
+    const auto& commands = layers->display_list;
+    check(commands.size() == snapshot.paragraph.fragments.size() + decorated_fragments * 2,
+          "one strike and one underline command are budgeted per decorated line fragment");
+    std::size_t prepared = 0, fill = 0;
+    std::vector<Rect> underline_rects;
+    bool sequence_valid = true;
+    bool underline_after_strike = true;
+    for (std::size_t i = 0; i < commands.size(); ++i) {
+        if (commands[i].type() == DisplayCommandType::PreparedText) {
+            ++prepared;
+            if (i + 2 >= commands.size() || commands[i + 1].type() != DisplayCommandType::FillRect ||
+                commands[i + 2].type() != DisplayCommandType::FillRect) sequence_valid = false;
+            else {
+                ++fill;
+                ++fill;
+                underline_rects.push_back(commands[i + 2].rect);
+                if (commands[i + 1].rect.y >= commands[i + 2].rect.y) underline_after_strike = false;
+            }
+        }
+    }
+    check(sequence_valid && prepared == decorated_fragments && fill == 2 * decorated_fragments,
+          "foreground text is followed by strike and underline commands on each line");
+    check(underline_after_strike,
+          "underline is positioned below line-through within each line fragment");
+    const auto damage = detail::shared_inline_damage_bounds(host);
+    for (const auto& rect : underline_rects)
+        check(rect.y >= damage.y && safe_edge(rect.y, rect.height) <= safe_edge(damage.y, damage.height),
+              "paragraph damage includes propagated underline pixels below the glyph ink");
+
+    SoftwareCompositor::Options paint;
+    paint.text_system = &fixture.system;
+    SoftwareCompositor compositor({}, paint);
+    const auto pixels = compositor.render(*layers, 64, 100, {255,255,255,255});
+    FrameBuffer tiled(64, 100, {255,255,255,255});
+    for (int y = 0; y < 100; y += 9) {
+        Rect clip{0, y, 64, std::min(9, 100-y)};
+        compositor.render_into(*layers, tiled, {255,255,255,255}, &clip, 1);
+    }
+    check(equal_pixels(pixels, tiled),
+          "decoration strokes render identically in full-frame and tiled passes");
+
+    auto low_budget = fixture.layers;
+    low_budget.max_display_commands = commands.size() - 1;
+    auto limited = LayerTreeBuilder(low_budget).build(*layout);
+    check(glyphs(*limited).empty(),
+          "insufficient command budget refuses the complete decorated paragraph");
+}
 void partition_and_live_proof() {
     Fixture fixture;
     for (const char* align : {"start", "center", "end"}) {
@@ -974,6 +1044,7 @@ int main() {
         natural_inline_image_metadata_path();
         sharp_text_shadow_parity_and_bounds();
         inline_scope_backgrounds();
+        propagated_inline_text_decorations();
         partition_and_live_proof();
         refusal_and_rollback();
         mutation_damage_and_tiling();
