@@ -73,6 +73,13 @@ const LayoutBox& find(const LayoutBox& box, const char* id) {
     }
     throw std::out_of_range(id);
 }
+Node& find_node(Node& node, const char* id) {
+    if (node.attribute("id") == id) return node;
+    for (auto& child : node.children) {
+        try { return find_node(*child, id); } catch (const std::out_of_range&) {}
+    }
+    throw std::out_of_range(id);
+}
 using Glyph = std::tuple<unsigned, int, int>;
 std::vector<Glyph> glyphs(const LayerNode& layer) {
     std::vector<Glyph> result;
@@ -748,6 +755,66 @@ void shared_mixed_font_and_line_height_owners() {
     check(find(*ordinary, "p").text_layout_cache.shared_inline == nullptr,
           "optimization-disabled tree remains an independent ordinary-layout control");
 }
+void preserved_whitespace_shared_paragraph() {
+    Asset font = asset(400, 16, 4, 1, {{32,250},{48,500},{65,500},{66,600}});
+    TextFontFace face{1, 0, font.font};
+    TextSystem system;
+    LayoutEngineOptions options;
+    LayerTreeBuilderOptions layers;
+    check(system.bind(&face, 1) == TextSystemStatus::Ok, "bind preserved-text font fixture");
+    options.text_system = &system;
+    layers.text_system = &system;
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}pre{display:block;width:120px;font-size:16px;line-height:20px}"
+        "span{display:inline}"));
+    auto dom = HtmlParser{}.parse(
+        "<pre id='p'>A\tB\r<span>\nA\n</span>\nB  </pre>");
+    auto& pre = find_node(*dom, "p");
+    check(pre.children.size() == 3 && pre.children[1]->tag_name == "span" &&
+        pre.children[1]->children.size() == 1,
+        "parser fixture has text owners on both sides of the inline span");
+    pre.children[0]->set_text("A\tB\r");
+    pre.children[1]->children[0]->set_text("\nA\n");
+    pre.children[2]->set_text("\nB  ");
+    auto layout = LayoutEngine(styles, {}, options).layout(*dom, 140, 120);
+    const auto& host = find(*layout, "p");
+    check(host.text_layout_cache.shared_inline != nullptr,
+          "uniformly preserved ASCII whitespace uses the shared paragraph path");
+    const auto& snapshot = *host.text_layout_cache.shared_inline->snapshot;
+    check(snapshot.preserves_whitespace &&
+        snapshot.paragraph.normalized == "A\tB\nA\n\nB  ",
+        "tab, cross-owner CRLF, blank lines and trailing spaces retain their source policy");
+    check(snapshot.paragraph.lines.size() == 4,
+          "CRLF forms one hard break while consecutive LF preserves an empty line");
+    check(snapshot.paragraph.height == 80,
+          "preserved hard breaks contribute one line strut each");
+    check(detail::shared_inline_current(*host.text_layout_cache.shared_inline, &system),
+          "preserved source ownership and policy proof remain current");
+
+    auto painted = LayerTreeBuilder(layers).build(*layout);
+    SoftwareCompositor::Options paint;
+    paint.text_system = &system;
+    SoftwareCompositor compositor({}, paint);
+    const auto pixels = compositor.render(*painted, 140, 120, {255,255,255,255});
+    FrameBuffer tiled(140, 120, {255,255,255,255});
+    for (int y = 0; y < 120; y += 11) {
+        Rect clip{0, y, 140, std::min(11, 120-y)};
+        compositor.render_into(*painted, tiled, {255,255,255,255}, &clip, 1);
+    }
+    check(equal_pixels(pixels, tiled),
+          "preserved whitespace packets replay identically across tiled clips");
+
+    auto unsupported_dom = HtmlParser{}.parse("<pre id='p'>A\fB</pre>");
+    auto unsupported = LayoutEngine(styles, {}, options).layout(*unsupported_dom, 140, 120);
+    check(find(*unsupported, "p").text_layout_cache.shared_inline == nullptr,
+          "unsupported preserved form-feed text falls back as a complete paragraph");
+
+    auto markers_dom = HtmlParser{}.parse("<pre id='p'>A<wbr>B</pre>");
+    auto markers = LayoutEngine(styles, {}, options).layout(*markers_dom, 140, 120);
+    const auto& marker_host = find(*markers, "p");
+    check(marker_host.text_layout_cache.shared_inline != nullptr,
+          "wbr does not conflict with preserved text mode");
+}
 void partition_and_live_proof() {
     Fixture fixture;
     for (const char* align : {"start", "center", "end"}) {
@@ -1094,6 +1161,7 @@ int main() {
         inline_scope_backgrounds();
         propagated_inline_text_decorations();
         shared_mixed_font_and_line_height_owners();
+        preserved_whitespace_shared_paragraph();
         partition_and_live_proof();
         refusal_and_rollback();
         mutation_damage_and_tiling();

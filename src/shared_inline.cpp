@@ -180,6 +180,8 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     result.align = box.style.text_align;
     result.nowrap = box.style.white_space_nowrap;
     result.anywhere = box.style.overflow_wrap_anywhere;
+    result.preserves_whitespace = box.node->type == NodeType::Text &&
+        preserves_dom_text_whitespace(*box.node);
     result.text_decoration_underline = box.style.text_decoration_underline;
     result.text_decoration_line_through = box.style.text_decoration_line_through;
     return result;
@@ -234,6 +236,15 @@ struct Collector {
     NaturalImageSizingFrame* natural_images = nullptr;
     std::int64_t containing_width_units = 0;
     std::vector<CoreTextAtomicGeometry> atomic_geometry;
+    bool accept_whitespace_mode(const Node& node) {
+        const bool preserves = node.type == NodeType::Text && preserves_dom_text_whitespace(node);
+        if (!snapshot.whitespace_mode_set) {
+            snapshot.whitespace_mode_set = true;
+            snapshot.preserves_whitespace = preserves;
+            return true;
+        }
+        return snapshot.preserves_whitespace == preserves;
+    }
     bool collect(LayoutBox& box, std::size_t parent, std::size_t depth, std::size_t dom_index = 0, std::size_t render_index = 0) {
         budget.work(1);
         if (!box.node || depth > max_depth || snapshot.members.size() >= max_members) return false;
@@ -246,6 +257,7 @@ struct Collector {
         if (image ? !eligible_inline_image(*box.node, box.style, containing_width_units,
                 image_width_units, image_height, natural_images, &image_intrinsic) :
                 !neutral(box.style, depth == 0, false, true, depth != 0, true)) return false;
+        if (text && !accept_whitespace_mode(*box.node)) return false;
         if (depth && !text && !marker && !image && box.node->tag_name != "span") return false;
         if (box.node->text.size() > max_source-bytes) return false;
         bytes += box.node->text.size();
@@ -309,7 +321,7 @@ struct Collector {
             // Preserve its source-order participation and exact membership here.
             if (node.type != NodeType::Text || !node.children.empty() ||
                 (!node.text.empty() && !is_collapsible_whitespace_text(node)) ||
-                node.text.size() > max_source-bytes) return false;
+                node.text.size() > max_source-bytes || !accept_whitespace_mode(node)) return false;
             budget.work(1);
             bytes += node.text.size();
             budget.statistics.source_bytes += node.text.size();
@@ -447,6 +459,13 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         paragraph_options.align = host.style.text_align;
         paragraph_options.nowrap = host.style.white_space_nowrap;
         paragraph_options.anywhere = host.style.overflow_wrap_anywhere;
+        CoreTextPreservedOptions preserved_options;
+        const CoreTextPreservedOptions* preserved = nullptr;
+        if (snapshot->preserves_whitespace) {
+            paragraph_options.whitespace = CoreTextWhiteSpace::Preserve;
+            preserved_options.tab_font = paragraph_options.strut;
+            preserved = &preserved_options;
+        }
         CoreTextLayoutLimits limits;
         limits.max_prepared_glyphs = options.max_prepared_text_glyphs;
         limits.max_capacity_bytes = budget.remaining_capacity();
@@ -456,7 +475,7 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         CoreTextParagraphAtomics atomics;
         if (build_core_text_paragraph(*snapshot->system, collector.spans.data(), collector.spans.size(),
             paragraph_options, snapshot->paragraph, limits, &budget.usage,
-            collector.atomic_geometry.data(), collector.atomic_geometry.size(), &atomics) != S::Ok) return false;
+            collector.atomic_geometry.data(), collector.atomic_geometry.size(), &atomics, preserved) != S::Ok) return false;
         snapshot->atomic_placements = std::move(atomics.placements);
         snapshot->usage = budget.usage;
         statistics.queries += budget.usage.queries;
@@ -661,6 +680,8 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
         }
         LayoutTextFont font;
         if (layout_text_font(box.style, font) != S::Ok || !same_font(font, p.font) ||
+            (p.node->type == NodeType::Text &&
+                p.preserves_whitespace != preserves_dom_text_whitespace(*p.node)) ||
             !same_color(box.style.color, p.color) || !same_color(box.style.background_color, p.background_color) ||
             box.style.text_shadow.enabled != p.text_shadow.enabled ||
             box.style.text_shadow.uses_current_color != p.text_shadow.uses_current_color ||

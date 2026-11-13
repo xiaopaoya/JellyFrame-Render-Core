@@ -25,6 +25,7 @@ struct SharedInlineProof {
     TextAlign align = TextAlign::Start;
     bool nowrap = false;
     bool anywhere = false;
+    bool preserves_whitespace = false;
     bool text_decoration_underline = false;
     bool text_decoration_line_through = false;
     bool atomic_image = false;
@@ -54,6 +55,8 @@ struct SharedInlineSnapshot {
     const TextSystem* system = nullptr;
     std::uint64_t generation = 0;
     std::uint64_t dom_generation = 0;
+    bool whitespace_mode_set = false;
+    bool preserves_whitespace = false;
     const Node* dom_root = nullptr;
     int content_offset_x = 0;
     int content_offset_y = 0;
