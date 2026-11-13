@@ -64,8 +64,9 @@ DOM + computed style
 ## 明确延后
 
 - Anonymous block/inline box generation。
-- 完整 pseudo-element layout。当前 `::before`/`::after` generated text 子集基于
-  display command。
+- 完整 pseudo-element layout。符合共享段落准入条件的普通文本型
+  `::before`/`::after` 会与 inline 文本按 source 顺序合并；不支持的伪元素内容和
+  独立伪元素盒仍使用 display-command 回退。
 - 完整 list marker renderers。现有轻量列表标记同样基于 display command。
 - Replaced-element intrinsic sizing。
 - 完整 CSS stacking-context 语义。

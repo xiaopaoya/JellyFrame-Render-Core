@@ -28,6 +28,20 @@ struct SharedInlineProof {
     bool preserves_whitespace = false;
     bool text_decoration_underline = false;
     bool text_decoration_line_through = false;
+    GeneratedContentKind before_kind = GeneratedContentKind::None;
+    GeneratedContentKind after_kind = GeneratedContentKind::None;
+    std::string before_text;
+    std::string after_text;
+    Color before_color;
+    Color after_color;
+    int before_weight = 400;
+    int after_weight = 400;
+    bool before_color_specified = false;
+    bool after_color_specified = false;
+    bool before_weight_specified = false;
+    bool after_weight_specified = false;
+    bool before_left_specified = false;
+    bool after_left_specified = false;
     bool atomic_image = false;
     bool natural_image_sized = false;
     ImageIntrinsicSize image_intrinsic{};
@@ -51,7 +65,7 @@ struct SharedInlineOmittedSource {
     std::string source;
 };
 struct SharedInlineSnapshot {
-    SharedInlineSnapshot() : members(0), owners(0), omitted(0), atomic_placements(0) {}
+    SharedInlineSnapshot() : members(0), owners(0), owner_paints(0), omitted(0), atomic_placements(0) {}
     const TextSystem* system = nullptr;
     std::uint64_t generation = 0;
     std::uint64_t dom_generation = 0;
@@ -66,6 +80,14 @@ struct SharedInlineSnapshot {
     CoreTextParagraph paragraph;
     std::vector<SharedInlineMember> members;
     std::vector<std::size_t> owners;
+    struct OwnerPaint {
+        Color color;
+        int font_size = 14;
+        TextShadowStyle text_shadow;
+        bool text_decoration_underline = false;
+        bool text_decoration_line_through = false;
+    };
+    std::vector<OwnerPaint> owner_paints;
     std::vector<SharedInlineOmittedSource> omitted;
     std::vector<CoreTextAtomicPlacement> atomic_placements;
     CoreTextParagraphUsage usage;

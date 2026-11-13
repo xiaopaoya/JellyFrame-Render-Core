@@ -914,6 +914,143 @@ void mutation_damage_and_tiling() {
     }
     check(equal_pixels(full,tiled),"tiled clips equal full prepared paragraph composition");
 }
+void generated_text_shared_sources() {
+    std::vector<std::pair<unsigned, unsigned>> supported;
+    for (unsigned cp = 32; cp <= 90; ++cp) supported.emplace_back(cp, cp == 32 ? 250U : 500U);
+    auto generated_font = asset(400, 16, 4, 1, supported);
+    TextFontFace face{1, 0, generated_font.font};
+    TextSystem system;
+    check(system.bind(&face, 1) == TextSystemStatus::Ok, "bind generated fixture font");
+    LayoutEngineOptions options; options.text_system = &system;
+    LayerTreeBuilderOptions layer_options; layer_options.text_system = &system;
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}div{display:block;width:24px;font-size:16px;line-height:18px;color:red;overflow-wrap:anywhere}"
+        "span{display:inline}#p::before{content:'M'}#p::after{content:'C'}"
+        "#a::after{content:'X';color:blue}#b::after{content:'Y';font-weight:700}"));
+    auto dom = HtmlParser{}.parse("<div id='p'><span id='a'>B</span><span id='b'>A</span></div>");
+    auto layout = LayoutEngine(styles, {}, options).layout(*dom, 100, 100);
+    const auto& host = find(*layout, "p");
+    check(host.text_layout_cache.shared_inline != nullptr,
+        "plain before/after sources publish with their containing paragraph");
+    check(host.text_layout_cache.shared_inline->snapshot->paragraph.lines.size() >= 2 &&
+        host.rect.height >= static_cast<int>(host.text_layout_cache.shared_inline->snapshot->paragraph.lines.size()) * 18,
+        "generated advances participate in paragraph wrapping and height");
+    auto layers = LayerTreeBuilder(layer_options).build(*layout);
+    const auto commands = LayerTreeBuilder(layer_options).flatten(*layers);
+    std::string order;
+    for (const auto& command : commands) {
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        PreparedTextView packet;
+        check(decode_prepared_text(command.text, packet), "generated source packet decodes");
+        for (std::size_t i = 0; i < packet.size(); ++i) {
+            PreparedTextGlyph glyph; packet.read(i, glyph);
+            order.push_back(static_cast<char>(glyph.source_codepoint));
+        }
+    }
+    check(order == "MBXAYC", "generated sources paint once in before/text/after source order");
+    const auto host_before = std::find_if(commands.begin(), commands.end(), [](const DisplayCommand& command) {
+        return command.type() == DisplayCommandType::PreparedText && !command.text.empty();
+    });
+    check(host_before != commands.end(), "host before fragment has a prepared paint command");
+    const auto host_hit = HitTester{}.hit_test(*layers, host_before->rect.x + 1, host_before->rect.y + 1);
+    check(host_hit && host_hit.node == host.node,
+        "host generated before source hit maps to its originating host element");
+    const auto no_system_commands = LayerTreeBuilder{}.flatten(*LayerTreeBuilder{}.build(*layout));
+    bool fallback_before = false, fallback_after = false;
+    for (const auto& command : no_system_commands) {
+        if (command.type() != DisplayCommandType::Text) continue;
+        fallback_before = fallback_before || command.text == "M";
+        fallback_after = fallback_after || command.text == "C";
+    }
+    check(fallback_before && fallback_after,
+        "layer build without the bound text system keeps legacy generated paint fallback");
+    const auto& first = find(*layout, "a");
+    check(first.text_layout_cache.shared_inline != nullptr, "generated inline scope retains shared binding");
+    const auto& first_member = first.text_layout_cache.shared_inline->snapshot->members[
+        first.text_layout_cache.shared_inline->member];
+    check(!first_member.fragments.empty(), "generated after fragment contributes to originating scope geometry");
+    const auto hit_rect = first_member.fragments.front();
+    const auto hit = HitTester{}.hit_test(*layers, hit_rect.x + std::max(0, hit_rect.width / 2),
+        hit_rect.y + std::max(0, hit_rect.height / 2));
+    check(hit && hit.node == first.node, "generated inline source hit maps to its originating element");
+    const auto before_rect = detail::shared_inline_damage_bounds(host);
+    SoftwareCompositor::Options paint_options; paint_options.text_system = &system;
+    SoftwareCompositor compositor({}, paint_options);
+    const auto old_pixels = compositor.render(*layers, 100, 100, {255,255,255,255});
+    const auto binding = host.text_layout_cache.shared_inline;
+    const auto old_child_rect = host.children.front()->rect;
+#if defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL != 0
+    check(binding != nullptr, "debug generated paragraph has retained transactional binding");
+#else
+    bool allocation_success = false;
+    for (int fail_at = 0; fail_at < 160; ++fail_at) {
+        allocations_until_failure = fail_at;
+        int height = 0;
+        const bool accepted = detail::layout_shared_inline(const_cast<LayoutBox&>(host),
+            host.rect.x, host.rect.y, host.rect.width, options, height);
+        allocations_until_failure = -1;
+        if (accepted) { allocation_success = true; break; }
+        check(host.text_layout_cache.shared_inline == binding && host.children.front()->rect.x == old_child_rect.x &&
+            host.children.front()->rect.y == old_child_rect.y,
+            "generated allocation refusal preserves all published bindings and geometry");
+    }
+    check(allocation_success, "generated source allocation sweep reaches successful publication");
+#endif
+    auto& mutable_host = const_cast<LayoutBox&>(host);
+    mutable_host.style.before_content_text = "Z";
+    check(!detail::shared_inline_current(*host.text_layout_cache.shared_inline, &system),
+        "generated source mutation invalidates the complete shared binding");
+    check(before_rect.width >= host.rect.width && before_rect.height >= host.rect.height,
+        "historical paragraph damage covers generated source ink and flow geometry");
+    check(equal_pixels(old_pixels, compositor.render(*layers, 100, 100, {255,255,255,255})),
+        "frozen generated packets replay after live source mutation");
+
+    mutable_host.style.before_content_text = "M";
+    find_node(*dom, "p").set_attribute("style", "color:green");
+    auto fresh = LayoutEngine(styles, {}, options).layout(*dom, 100, 100);
+    auto fresh_layers = LayerTreeBuilder(layer_options).build(*fresh);
+    const auto full = compositor.render(*fresh_layers, 100, 100, {255,255,255,255});
+    DirtyRegionOptions dirty_options; dirty_options.viewport = {0,0,100,100};
+    dirty_options.previous_layer_tree = layers.get();
+    dirty_options.current_layer_tree = fresh_layers.get();
+    const auto dirty = compute_dirty_region(*dom, layout.get(), fresh.get(), dirty_options);
+    check(!dirty.rects.empty(), "generated inherited-style mutation produces paragraph damage");
+    auto replay = old_pixels;
+    compositor.render_into(*fresh_layers, replay, {255,255,255,255}, dirty.rects.data(), dirty.rects.size());
+    check(equal_pixels(full, replay), "generated paragraph damage repaint equals a fresh full render");
+    check(equal_pixels(old_pixels, compositor.render(*layers, 100, 100, {255,255,255,255})),
+        "historical generated display list remains immutable after replacement layout");
+
+    auto refused_options = options;
+    refused_options.shared_inline.max_total_capacity_bytes = 1;
+    auto refused = LayoutEngine(styles, {}, refused_options).layout(*dom, 100, 100);
+    const auto& fallback_host = find(*refused, "p");
+    check(!fallback_host.text_layout_cache.shared_inline,
+        "generated source budget refusal keeps ordinary layout fallback");
+    const auto fallback_commands = LayerTreeBuilder(layer_options).flatten(
+        *LayerTreeBuilder(layer_options).build(*refused));
+    bool legacy_before = false, legacy_after = false;
+    for (const auto& command : fallback_commands) {
+        if (command.type() != DisplayCommandType::Text) continue;
+        legacy_before = legacy_before || command.text == "M";
+        legacy_after = legacy_after || command.text == "C";
+    }
+    check(legacy_before && legacy_after, "refusal preserves established generated paint fallback");
+
+    StyleResolver list_styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}li{display:block;width:40px;font-size:16px}span{display:inline}li::before{content:'M'}"));
+    auto list_dom = HtmlParser{}.parse("<li id='p'><span>A</span></li>");
+    auto list_layout = LayoutEngine(list_styles, {}, options).layout(*list_dom, 100, 100);
+    const auto& list_host = find(*list_layout, "p");
+    check(!list_host.text_layout_cache.shared_inline,
+        "list item hosts stay out of shared generated source admission");
+    const auto list_commands = LayerTreeBuilder(layer_options).flatten(
+        *LayerTreeBuilder(layer_options).build(*list_layout));
+    std::size_t marker_count = 0;
+    for (const auto& command : list_commands)
+        if (command.type() == DisplayCommandType::Text && command.text == "M") ++marker_count;
+    check(marker_count == 1, "li before content remains a single legacy marker command");
+}
 void partition_matrix_and_events() {
     Fixture f;
     const std::string source="A  B A";
@@ -1165,6 +1302,7 @@ int main() {
         partition_and_live_proof();
         refusal_and_rollback();
         mutation_damage_and_tiling();
+        generated_text_shared_sources();
         limits_and_allocation_failures();
         cumulative_scratch_acquisitions();
         layout_topology_replacement();
