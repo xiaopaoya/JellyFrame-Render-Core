@@ -32,6 +32,12 @@ struct SharedInlineProof {
     GeneratedContentKind after_kind = GeneratedContentKind::None;
     std::string before_text;
     std::string after_text;
+    std::string before_counter_name;
+    std::string before_counter_suffix;
+    std::string before_counter_text;
+    std::string after_counter_name;
+    std::string after_counter_suffix;
+    std::string after_counter_text;
     Color before_color;
     Color after_color;
     int before_weight = 400;

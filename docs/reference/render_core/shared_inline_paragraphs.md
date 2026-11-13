@@ -9,9 +9,12 @@ text intentionally omitted by RenderTree. Plain text `::before` and `::after`
 sources on an admitted block host or inline member join the same paragraph in
 DOM order and inherit hit ownership from that originating element. The bounded
 generated-text subset carries the originating style's color and font weight;
-it does not create an independent pseudo-element box. Unsupported generated
-content, positioned pseudo-elements, list-item pseudo content, and incomplete
-render membership refuse the complete attempt.
+it does not create an independent pseudo-element box. The existing
+`counter(list-num)` subset also joins the paragraph, resolving the same sibling
+`li` ordinal and suffix as the legacy paint path. Other counter names remain on
+the ordinary fallback path. Unsupported generated content, positioned
+pseudo-elements, list-item pseudo content, and incomplete render membership
+refuse the complete attempt.
 
 ## Current admission
 
@@ -31,8 +34,8 @@ policy. Signed odd half-leading floors the first half and preserves line advance
 Neutral descendants have zero edges, automatic dimensions, static positioning,
 full opacity, visible text, empty transforms and overflow. The bounded shared
 paint subset also admits solid inline-scope backgrounds, zero-blur text shadows,
-the existing underline/line-through decoration flags, and the plain generated-
-text subset described above; it excludes box shadows, blurred text shadows,
+the existing underline/line-through decoration flags, and the generated-text
+subsets described above; it excludes box shadows, blurred text shadows,
 outlines and independent stacking scopes.
 Unsupported whole contexts continue through the established ordinary formatter.
 Paragraph hosts undergoing temporary Flex/Grid/positioned sizing overrides or
@@ -143,9 +146,10 @@ decorated images or arbitrary image styling.
 ## Remaining finite migration stages
 
 1. Extend complete source binding for generated/boxless contexts beyond plain
-   text `::before`/`::after` on ordinary block/inline members. Counter and list
-   marker integration, positioned pseudo-elements and `display:contents`
-   source mapping remain outside the shared paragraph path. Mixed registered
+   text `::before`/`::after` and `counter(list-num)` on ordinary block/inline
+   members. Other counter names, list marker integration, positioned
+   pseudo-elements and `display:contents` source mapping remain outside the
+   shared paragraph path. Mixed registered
    font requests, per-owner line heights, bounded preserved whitespace and the
    plain generated-text subset are integrated.
 2. Define and adapt a Core-owned shaping/resource contract before integrating
@@ -155,7 +159,8 @@ decorated images or arbitrary image styling.
 
 The normal paragraph path, bounded inline-image stage, zero-blur text shadows,
 per-line solid inline-scope backgrounds, the existing propagated
-underline/line-through subset, and bounded preserved whitespace are integrated.
+underline/line-through subset, bounded preserved whitespace, plain generated
+text and the existing `counter(list-num)` subset are integrated.
 Remaining generated/boxless source-topology and shaped-inline stages remain
 pending. The Style model has no overline or complete decoration style storage,
 so those features remain outside this bounded subset.
