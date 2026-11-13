@@ -10,6 +10,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
 SPEC = importlib.util.spec_from_file_location(
     "noto_shaping_closure_prototype", ROOT / "tools" / "noto_shaping_closure_prototype.py")
 spike = importlib.util.module_from_spec(SPEC)
