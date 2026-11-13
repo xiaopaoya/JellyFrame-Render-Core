@@ -37,10 +37,13 @@ standalone archive 和 consumer 门槛由 CI 验证。签名 ABI4 release 与命
 
 首批 shaping 基础原型已经合入；这不代表隐式升级 Runtime。离线 `JFGID1` 实验已证明
 可以栅格化一小组非 cmap glyph ID；private cluster/source/owner mapper 也有合成映射测试。
-二者都未集成 shaping，也没有改变 `JFFONT2`、JFTP、公开 API 或默认行为。下一道门槛是
-为三种产品字重生成确定性的 `ccmp`/`locl`/`liga`/`kern`/`mark` 选定 closure，
-完整列举输出 GID，并与 HarfBuzz 精确对照。测出编码后的表与字形目录体积后，再用隔离的
-N16R8 构建测量 flash 增量；目标机加载峰值、scratch、有界工作量、延迟及实机渲染仍是后续门槛。
+二者都未集成 shaping，也没有改变 `JFFONT2`、JFTP、公开 API 或默认行为。本轮已由
+所选 profile 的 shaping 原型对三种字重生成相同的 71 个 JFFONT2 缺失输出 GID，
+并且每个字重的 8 个样本均与 HarfBuzz 完全一致。三个 16 px GID 位图目录合计 23,938
+字节；这仅是位图目录体积，不是完整 shaping 资源或运行时预算。下一道门槛是为已准入的
+lookup profile 定义确定性编码，并测量 shaping 表与目录总量。之后再用隔离的 N16R8 构建
+测 flash 增量；目标机加载峰值、scratch、有界工作量、延迟及实机渲染仍是后续门槛。具体
+输入、完整 GID 清单及边界见 shaping closure 评估文档。
 
 ABI4 发布与采用仍按顺序经过以下门槛：
 

@@ -212,7 +212,7 @@ jobs:
           if-no-files-found: error
 
   experimental-gid-catalog:
-    name: Experimental GID Catalog
+    name: Experimental Font Resource Spikes
     runs-on: ubuntu-latest
 
     steps:
@@ -227,5 +227,11 @@ jobs:
       - name: Install pinned offline font preparation dependencies
         run: python -m pip install -r tools/font_resource_requirements.txt
 
+      - name: Install pinned shaping oracle dependency
+        run: python -m pip install uharfbuzz==0.57.0
+
       - name: Test experimental GID bitmap catalog
         run: python tests/tools/test_noto_gid_catalog_spike.py
+
+      - name: Test bounded shaping prototype contracts
+        run: python tests/tools/test_noto_shaping_closure_prototype.py
