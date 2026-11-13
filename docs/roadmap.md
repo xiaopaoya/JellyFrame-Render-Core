@@ -1,6 +1,6 @@
 # Render Core Active Roadmap
 
-> Last updated: 2026-11-06; Applies to: 0.8.0 development line
+> Last updated: 2026-11-13; Applies to: 0.9.0-dev / ABI 4 qualification line
 
 This is the Core-only planning document. It does not schedule JellyFrame App
 Runtime, device ports, launcher policy, JerryScript or developer-image work.
@@ -8,16 +8,14 @@ Those consumers decide when a released Core version is adopted.
 
 ## Current Development Line
 
-Signed `v0.6.0` established Core ABI `1`; signed `v0.6.2` is the Runtime's
-currently published dependency. The `0.7.0` line uses ABI `2` because the
-`CssParserOptions` preference field changes its public layout on 32-bit targets.
-The `0.8.0` candidate uses ABI `3` for the coordinated Core-owned font/text
-migration and its public layout, renderer, and Canvas2D API changes. The latest synchronization imports reviewed
-Core changes from JellyFrame mainline through `b1196f67`, superseding the earlier `0d04dfca` /
-`8630bf6c` synchronization point. This source revision passed the monorepo's
-desktop, scripting, sanitizer and standalone-Core CI and was integrated into the
-accepted WS147 `0.6.2-ws147.2` developer image. The standalone line retains its
-own build/install CI and deterministic source archives, and now also includes:
+Signed `v0.8.0` / ABI `3` is the Runtime production dependency. Core `master` is
+`0.9.0-dev` / ABI `4` at `076b8b0f`; its normalized source manifest is
+`5cf5b2e2dd3b9dde6ac8268514f2addd033ddd69f09809b07f6601e49c53c714` (111
+manifest entries). ABI4 is a qualification track, not yet a signed Runtime
+dependency. Runtime installed consumers cover full/cropped profiles, frame
+v9/v10 and generated-text replay; the standalone archive and consumer gates
+run in CI. A signed ABI4 release and named Device OS image acceptance remain
+open. The current development line includes:
 
 - LTR horizontal logical size, spacing and inset mapping.
 - Common flex/grid placement (`order`, `align-self`, `place-*`, bounded rows).
@@ -40,7 +38,13 @@ it enters the DOM. A malformed-input corpus now protects the behavior.
 
 ## Next Release Gate
 
-The next Core change is candidate evaluation, not an implicit Runtime upgrade:
+The next Core work is a bounded shaping-data prototype, not an implicit Runtime
+upgrade. Existing `JFFONT2` remains scalar bitmap data; the prototype must use
+the product Noto Sans SC source font as shaping input and compare admitted
+lookup behavior against an independent shaping oracle. No public API or default
+behavior changes until correctness and ESP32 memory/work budgets are measured.
+
+ABI4 release and adoption remain serial gates:
 
 1. Review the candidate source, public-header and generated-profile changes.
 2. For an accepted capability, publish a reviewed signed Core release and its
@@ -54,7 +58,7 @@ Until those gates are complete, a host may use a local source override for
 cross-repository development, but production consumers must not float on this
 branch.
 
-## Candidate Intake After 0.6.1
+## Candidate Intake During ABI4 Qualification
 
 A new Core capability starts only with an author-facing need and a bounded
 proposal. Each accepted item requires positive and negative behavior tests,
