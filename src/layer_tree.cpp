@@ -572,11 +572,10 @@ const TextLayoutCache* valid_text_layout_cache(const LayoutBox& box,
     while (document_root != nullptr && document_root->parent != nullptr) {
         document_root = document_root->parent;
     }
-    // Dirty flags remain set until presentation; generation rejects old caches
-    // while allowing text freshly laid out in the current mutation transaction.
+    // Dirty flags can remain set while this layout is reused. Validate the
+    // cached run against its text, geometry, style, and font-system inputs.
     if (!cache.valid || box.node == nullptr || box.node->type != NodeType::Text ||
         document_root == nullptr ||
-        cache.document_mutation_generation != document_root->mutation_generation ||
         cache.source_text != box.node->text ||
         cache.viewport_width != box.viewport_width ||
         cache.viewport_height != box.viewport_height ||

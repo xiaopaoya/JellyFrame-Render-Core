@@ -500,6 +500,43 @@ void route_relayout_keeps_prepared_text_while_dom_is_dirty() {
     assert(active_text_box->text_layout_cache.prepared_text);
     assert(active_text_box->text_layout_cache.source_text=="BA");
 }
+void unrelated_input_mutation_preserves_static_prepared_text() {
+    auto font=asset();
+    TextFontFace face{1,0,font.font};
+    TextSystem system;
+    assert(system.bind(&face,1)==S::Ok);
+
+    auto document=HtmlParser().parse(
+        "<body><input id='label' value='AB'><p>AB</p></body>");
+    StyleResolver resolver(CssParser().parse(
+        "body { margin: 0; } p { margin: 0; font-size: 16px; white-space: nowrap; }"));
+    LayoutEngineOptions layout_options;
+    layout_options.text_system=&system;
+    auto layout=LayoutEngine(resolver,{},layout_options).layout(*document,80,40);
+    const LayoutBox* text=find_text_box(*layout);
+    assert(text!=nullptr && text->text_layout_cache.prepared_text);
+
+    Node* input=nullptr;
+    const auto find_input=[&](const auto& self,Node& node)->void {
+        if (node.attribute("id")=="label") input=&node;
+        for (auto& child:node.children) self(self,*child);
+    };
+    find_input(find_input,*document);
+    assert(input!=nullptr);
+    input->set_attribute("value","CDE");
+
+    LayerTreeBuilderOptions layer_options;
+    layer_options.text_system=&system;
+    auto layers=LayerTreeBuilder(layer_options).build(*layout);
+    std::size_t prepared_commands=0;
+    const auto count_prepared=[&](const auto& self,const LayerNode& layer)->void {
+        for (const auto& command:layer.display_list)
+            prepared_commands+=command.type()==DisplayCommandType::PreparedText;
+        for (const auto& child:layer.children) self(self,*child);
+    };
+    count_prepared(count_prepared,*layers);
+    assert(prepared_commands==1);
+}
 bool forbidden_host_measure(const std::string&,int,int,TextMetrics*,void* context) {
     ++*static_cast<unsigned*>(context);
     return false;
@@ -648,6 +685,7 @@ int main(int argc,char** argv) {
     weights();strikes_and_families();fallback_and_geometry();refusals_and_budgets();
     prepared_packet_paint();offset_prepared_packets();installed_shared_paragraph_path();html_layout_to_core_paint();
     route_relayout_keeps_prepared_text_while_dom_is_dirty();aligned_prepared_text_stays_inside_its_layout_box();
+    unrelated_input_mutation_preserves_static_prepared_text();
     core_layout_refusals_do_not_fall_back_to_host_text();
     std::cout<<"text system selection/geometry/transaction/budget tests passed\n";
 }
