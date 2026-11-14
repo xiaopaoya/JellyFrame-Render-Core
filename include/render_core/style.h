@@ -31,6 +31,7 @@ enum class Display : std::uint8_t {
     TableCaption,
     TableColumnGroup,
     TableColumn,
+    Contents,
 };
 
 enum class TableCaptionSide : std::uint8_t { Top, Bottom };
