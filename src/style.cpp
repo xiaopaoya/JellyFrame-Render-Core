@@ -3663,6 +3663,8 @@ bool apply_declaration(Style& style,
             style.display = Display::Block;
         } else if (value == "none") {
             style.display = Display::None;
+        } else if (value == "contents") {
+            style.display = Display::Contents;
         } else if (value == "inline") {
             style.display = Display::Inline;
         } else if (value == "inline-block") {

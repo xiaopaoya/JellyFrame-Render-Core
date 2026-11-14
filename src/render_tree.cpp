@@ -5,6 +5,7 @@
 #include "background_style_access.h"
 
 #include <algorithm>
+#include <deque>
 #include <utility>
 
 namespace jellyframe {
@@ -92,6 +93,11 @@ bool creates_render_object(const Node& node, const Style& style) {
     return true;
 }
 
+bool is_document_root_element(const Node& node) {
+    return node.type == NodeType::Element && node.tag_name == "html" && node.parent != nullptr &&
+        node.parent->tag_name == "document";
+}
+
 bool is_replaced_control(const Node& node) {
     if (node.type != NodeType::Element) {
         return false;
@@ -99,6 +105,16 @@ bool is_replaced_control(const Node& node) {
     return node.tag_name == "input" || node.tag_name == "select" || node.tag_name == "textarea" ||
         node.tag_name == "img" || node.tag_name == "picture" || node.tag_name == "video" ||
         node.tag_name == "audio" || node.tag_name == "iframe";
+}
+
+bool display_contents_computes_to_none(const Node& node) {
+    if (node.type != NodeType::Element) {
+        return false;
+    }
+    return node.tag_name == "input" || node.tag_name == "select" || node.tag_name == "textarea" ||
+        node.tag_name == "img" || node.tag_name == "video" || node.tag_name == "audio" ||
+        node.tag_name == "iframe" || node.tag_name == "canvas" || node.tag_name == "object" ||
+        node.tag_name == "embed";
 }
 
 bool is_first_summary_child(const Node& parent, const Node& child) {
@@ -168,6 +184,7 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
     struct PendingNode {
         const Node* node = nullptr;
         RenderObject* parent = nullptr;
+        const Style* parent_style = nullptr;
     };
 
     StyleResolveContext style_context;
@@ -188,8 +205,9 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
     std::vector<PendingNode> pending;
     pending.reserve(document.children.size());
     for (auto it = document.children.rbegin(); it != document.children.rend(); ++it) {
-        pending.push_back(PendingNode{it->get(), view_raw});
+        pending.push_back(PendingNode{it->get(), view_raw, &view_raw->style});
     }
+    std::deque<Style> contents_styles;
 
     while (!pending.empty()) {
         const PendingNode pending_node = pending.back();
@@ -220,11 +238,30 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
 
         Style style = style_resolver_.resolve(node, style_context);
         if (node.type == NodeType::Text) {
-            inherit_text_style(style, parent.style);
+            inherit_text_style(style, *pending_node.parent_style);
         } else {
-            inherit_element_style(style, parent.style);
+            inherit_element_style(style, *pending_node.parent_style);
         }
         apply_style_override(style, node, options_.style_overrides);
+
+        // The document element retains its root box; replaced elements remain
+        // leaves even when their authored display value is contents.
+        if (style.display == Display::Contents && is_document_root_element(node)) {
+            style.display = Display::Block;
+        } else if (style.display == Display::Contents && display_contents_computes_to_none(node)) {
+            style.display = Display::None;
+        }
+
+        if (style.display == Display::Contents) {
+            contents_styles.push_back(style);
+            const Style* inherited_style = &contents_styles.back();
+            for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
+                if (should_descend_into_child(node, *it->get())) {
+                    pending.push_back(PendingNode{it->get(), &parent, inherited_style});
+                }
+            }
+            continue;
+        }
 
         if (!creates_render_object(node, style)) {
             continue;
@@ -241,7 +278,7 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         if (!is_replaced_control(node)) {
             for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
                 if (should_descend_into_child(node, *it->get())) {
-                    pending.push_back(PendingNode{it->get(), object_raw});
+                    pending.push_back(PendingNode{it->get(), object_raw, &object_raw->style});
                 }
             }
         }

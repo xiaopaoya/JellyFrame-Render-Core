@@ -33,6 +33,18 @@ const RenderObject* find_first_by_tag(const RenderObject& object, const std::str
     return nullptr;
 }
 
+const RenderObject* find_first_by_id(const RenderObject& object, const std::string& id) {
+    if (object.node != nullptr && object.node->type == NodeType::Element && object.node->attribute("id") == id) {
+        return &object;
+    }
+    for (const auto& child : object.children) {
+        if (const RenderObject* found = find_first_by_id(*child, id)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
 const RenderObject* find_first_text(const RenderObject& object) {
     if (object.type == RenderObjectType::Text) {
         return &object;
@@ -300,6 +312,49 @@ void formatting_whitespace_text_is_skipped() {
           "pre whitespace text preserved");
 }
 
+void display_contents_flattens_effective_children_and_preserves_inheritance() {
+    auto document = HtmlParser{}.parse(
+        "<body><main><section id='contents'><span>Text</span></section></main></body>");
+    StyleResolver resolver(CssParser{}.parse(
+        "@supports (display:contents){#contents{display:contents;color:#123456;"
+        "font-size:23px;white-space:nowrap}}"));
+    auto tree = RenderTreeBuilder(resolver).build(*document);
+    const auto* main = find_first_by_tag(*tree, "main");
+    const auto* contents = find_first_by_tag(*tree, "section");
+    const auto* span = find_first_by_tag(*tree, "span");
+    const auto* text = find_first_text(*tree);
+    check(main && contents == nullptr && span && text, "contents element is omitted and descendants remain");
+    check(main->children.size() == 1 && main->children.front()->node == span->node,
+          "effective child is attached to the nearest rendered parent");
+    check(span->style.color.r == 0x12 && span->style.font_size == 23 && span->style.white_space_nowrap,
+          "contents style is retained as the inheritance parent");
+    check(text->style.color.r == 0x12 && text->style.white_space_nowrap,
+          "flattened text inherits through the contents element");
+}
+
+void display_contents_keeps_root_and_replaced_exceptions_and_pre_whitespace() {
+    auto document = HtmlParser{}.parse(
+        "<html><body><div id='pre'><pre style='display:contents'>\n  keep\n</pre></div>"
+        "<picture style='display:contents'><img id='picture-image'></picture>"
+        "<canvas style='display:contents'><span id='canvas-fallback'>Canvas fallback</span></canvas>"
+        "<object style='display:contents'><span id='object-fallback'>Object fallback</span></object>"
+        "<img id='image' style='display:contents'></body></html>");
+    StyleResolver resolver(CssParser{}.parse("html{display:contents}"));
+    auto tree = RenderTreeBuilder(resolver).build(*document);
+    const auto* html = find_first_by_tag(*tree, "html");
+    check(html && html->style.display == Display::Block, "document element retains root box semantics");
+    check(find_first_by_id(*tree, "image") == nullptr, "replaced contents element is suppressed");
+    check(find_first_by_tag(*tree, "picture") == nullptr && find_first_by_tag(*tree, "img") != nullptr,
+          "picture contents retains its effective image child");
+    check(find_first_by_tag(*tree, "canvas") == nullptr &&
+              !render_text_exists(*tree, "Canvas fallback"),
+          "canvas contents does not flatten fallback content");
+    check(find_first_by_tag(*tree, "object") == nullptr &&
+              !render_text_exists(*tree, "Object fallback"),
+          "object contents does not flatten fallback content");
+    check(render_text_exists(*tree, "\n  keep\n"), "preformatted whitespace survives contents flattening");
+}
+
 void render_tree_respects_object_budget() {
     HtmlParser html_parser;
     CssParser css_parser;
@@ -526,6 +581,8 @@ int main() {
         hidden_attribute_skips_rendering();
         closed_details_renders_only_first_summary();
         formatting_whitespace_text_is_skipped();
+        display_contents_flattens_effective_children_and_preserves_inheritance();
+        display_contents_keeps_root_and_replaced_exceptions_and_pre_whitespace();
         inheritance_preserves_local_style_and_parent_values();
         separator_filter_preserves_context_overrides_and_budget();
         text_style_fast_path_preserves_inheritance_and_overrides();

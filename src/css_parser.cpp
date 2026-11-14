@@ -856,7 +856,7 @@ bool is_supported_declaration_feature(std::string_view feature) {
 #endif
     if (property == "display") {
         return supported_keyword(value, {"block", "inline", "inline-block", "flex",
-                                        "inline-flex", "grid", "inline-grid", "none"});
+                                        "inline-flex", "grid", "inline-grid", "none", "contents"});
     }
     if (property == "visibility") {
         return supported_keyword(value, {"visible", "hidden"});
