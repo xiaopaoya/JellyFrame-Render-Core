@@ -914,6 +914,54 @@ void mutation_damage_and_tiling() {
     }
     check(equal_pixels(full,tiled),"tiled clips equal full prepared paragraph composition");
 }
+void decoration_removal_damage_clears_old_ink() {
+    Fixture fixture;
+    auto dom=HtmlParser{}.parse("<div id='p'><span id='text'>AB</span></div>");
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}#p{font-size:16px;line-height:20px;width:40px;"
+        "color:red;text-decoration:underline line-through;text-decoration-color:blue}span{display:inline}"));
+    auto old=LayoutEngine(styles,{},fixture.options).layout(*dom,80,60);
+    auto old_layers=LayerTreeBuilder(fixture.layers).build(*old);
+    SoftwareCompositor::Options paint;paint.text_system=&fixture.system;
+    SoftwareCompositor compositor({},paint);
+    const Color background{255,255,255,255};
+    auto retained=compositor.render(*old_layers,80,60,background);
+
+    std::vector<Rect> old_strokes;
+    const auto& old_commands=old_layers->display_list;
+    for(std::size_t i=0;i<old_commands.size();++i) {
+        if(old_commands[i].type()!=DisplayCommandType::PreparedText) continue;
+        check(i+2<old_commands.size() && old_commands[i+1].type()==DisplayCommandType::FillRect &&
+            old_commands[i+2].type()==DisplayCommandType::FillRect,
+            "decorated text emits strike and underline fill commands");
+        old_strokes.push_back(old_commands[i+1].rect);
+        old_strokes.push_back(old_commands[i+2].rect);
+    }
+    check(old_strokes.size()==2,"old frame contains underline and line-through ink");
+
+    find_node(*dom,"p").set_attribute("style",
+        "font-size:16px;line-height:20px;width:40px;color:red;text-decoration:none");
+    auto fresh=LayoutEngine(styles,{},fixture.options).layout(*dom,80,60);
+    auto fresh_layers=LayerTreeBuilder(fixture.layers).build(*fresh);
+    DirtyRegionOptions dirty_options;dirty_options.viewport={0,0,80,60};dirty_options.expansion_px=0;
+    dirty_options.previous_layer_tree=old_layers.get();dirty_options.current_layer_tree=fresh_layers.get();
+    const auto dirty=compute_dirty_region(*dom,old.get(),fresh.get(),dirty_options);
+    check(dirty.mode==DirtyRegionMode::DirtyRects && !dirty.rects.empty(),
+        "decoration-only removal produces bounded dirty rectangles");
+    std::size_t dirty_area=0;
+    for(const auto& rect:dirty.rects) dirty_area+=static_cast<std::size_t>(rect.width)*rect.height;
+    check(dirty_area<80U*60U,
+        "decoration removal does not fall back to full viewport damage");
+
+    compositor.render_into(*fresh_layers,retained,background,dirty.rects.data(),dirty.rects.size());
+    const auto full=compositor.render(*fresh_layers,80,60,background);
+    check(equal_pixels(full,retained),"decoration-only damage replay matches fresh full render");
+    for(const auto& stroke:old_strokes) {
+        const int x=stroke.x+stroke.width/2,y=stroke.y+stroke.height/2;
+        check(retained.pixel(x,y).r==255 && retained.pixel(x,y).g==255 && retained.pixel(x,y).b==255,
+            "replayed damage erases each old underline and line-through pixel");
+    }
+}
 void generated_text_shared_sources() {
     std::vector<std::pair<unsigned, unsigned>> supported;
     for (unsigned cp = 32; cp <= 90; ++cp) supported.emplace_back(cp, cp == 32 ? 250U : 500U);
@@ -1615,6 +1663,7 @@ int main() {
         partition_and_live_proof();
         refusal_and_rollback();
         mutation_damage_and_tiling();
+        decoration_removal_damage_clears_old_ink();
         generated_text_shared_sources();
         generated_text_fallback_and_invalidation();
         generated_list_num_counter_sources();
