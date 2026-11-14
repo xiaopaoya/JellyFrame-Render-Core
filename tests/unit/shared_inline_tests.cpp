@@ -928,8 +928,15 @@ void decoration_removal_damage_clears_old_ink() {
     auto retained=compositor.render(*old_layers,80,60,background);
 
     std::vector<Rect> old_strokes;
-    for(const auto& command:old_layers->display_list)
-        if(command.type()==DisplayCommandType::FillRect && command.color.b==255) old_strokes.push_back(command.rect);
+    const auto& old_commands=old_layers->display_list;
+    for(std::size_t i=0;i<old_commands.size();++i) {
+        if(old_commands[i].type()!=DisplayCommandType::PreparedText) continue;
+        check(i+2<old_commands.size() && old_commands[i+1].type()==DisplayCommandType::FillRect &&
+            old_commands[i+2].type()==DisplayCommandType::FillRect,
+            "decorated text emits strike and underline fill commands");
+        old_strokes.push_back(old_commands[i+1].rect);
+        old_strokes.push_back(old_commands[i+2].rect);
+    }
     check(old_strokes.size()==2,"old frame contains underline and line-through ink");
 
     find_node(*dom,"p").set_attribute("style",
