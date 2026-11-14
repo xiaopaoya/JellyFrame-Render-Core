@@ -1,7 +1,7 @@
 #pragma once
 
 // Version of the canonical prepared-text packet byte contract.
-#define JELLYFRAME_RENDER_CORE_PREPARED_TEXT_PACKET_VERSION 2
+#define JELLYFRAME_RENDER_CORE_PREPARED_TEXT_PACKET_VERSION 3
 
 #include "render_core/text_system.h"
 
@@ -15,9 +15,10 @@ constexpr std::size_t kMaxPreparedTextGlyphs = 4096;
 constexpr std::size_t kMaxPreparedTextBytes =
     kPreparedTextHeaderBytes + kPreparedTextRecordBytes * kMaxPreparedTextGlyphs;
 
-// Borrowed immutable JFTP v1/v2 packet. V2 carries a signed Q1000 initial
-// glyph X in header bytes 24..27. V1 retains its zero-origin contract. Decoding is allocation-free and never
-// creates typed aliases into potentially unaligned transport storage.
+// Borrowed immutable JFTP packet. V2 carries a signed Q1000 initial glyph X
+// in header bytes 24..27. V1/v2 require cumulative glyph positions; v3 stores
+// each glyph's explicit signed X. Decoding is allocation-free and never creates
+// typed aliases into potentially unaligned transport storage.
 class PreparedTextView {
 public:
     bool valid() const noexcept { return !packet_.empty(); }
@@ -33,12 +34,15 @@ private:
     std::uint32_t source_bytes_ = 0;
 };
 
-// JFTP carries immutable per-glyph choices and fixed-point geometry, not raw
-// pointers or source text. Encode is transactional; decode preserves its view
-// on refusal. This is a packet codec, not a general Unicode shaping format.
+// JFTP carries immutable per-glyph choices, positions and fixed-point geometry,
+// not raw pointers or source text. Encode is transactional; decode preserves
+// its view on refusal. This is a packet codec, not a general Unicode shaping format.
 bool encode_prepared_text(const PreparedTextGlyph* glyphs, std::size_t count,
                           std::int32_t size_q1000, std::uint32_t source_bytes,
                           std::string& output, std::int32_t initial_x_q1000 = 0) noexcept;
+bool encode_positioned_prepared_text(const PreparedTextGlyph* glyphs, std::size_t count,
+                                     std::int32_t size_q1000, std::uint32_t source_bytes,
+                                     std::string& output) noexcept;
 bool decode_prepared_text(std::string_view packet, PreparedTextView& output) noexcept;
 
 } // namespace jellyframe

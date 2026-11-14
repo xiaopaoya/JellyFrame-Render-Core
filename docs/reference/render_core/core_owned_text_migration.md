@@ -1,5 +1,7 @@
 # Core-Owned Font and Text Migration
 
+> **Status note (2026-11-14): The implementation checkpoints below are historical and have been superseded by later Runtime PRs #76, #77, #89, #90, and #92 and Core PRs #55 and #58.** They document the 2026-11-06 source-level state, not current completion status. The current [Runtime ABI4 migration plan](https://github.com/xiaopaoya/JellyFrame/blob/master/docs/render_core_abi4_migration_plan.md) is the status source of record. `TextMeasureProvider` and `TextPainter` remain public APIs, and Runtime still has consumers on callback paths, including ESP32 and desktop compatibility/default paths. Their migration and API retirement are not complete. The current migration worktree additionally implements bounded prepared-text `letter-spacing` with Release CTest and real-font gates passing; it remains subject to Runtime visible-output/repaint qualification before merge. Ellipsis support and provider retirement remain outstanding.
+
 ## Goal
 
 Render Core owns font selection, metrics, scalar text preparation, layout

@@ -3,6 +3,7 @@
 #include <limits>
 #include <new>
 #include <stdexcept>
+#include <vector>
 
 namespace jellyframe {
 namespace {
@@ -24,15 +25,21 @@ unsigned utf8_bytes(std::uint32_t cp) noexcept {
     if (cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return 0;
     return cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
 }
-bool record_valid(const PreparedTextGlyph& g, std::uint32_t& byte, std::int64_t& x) noexcept {
+bool record_valid(const PreparedTextGlyph& g, std::uint32_t& byte, std::int64_t& x,
+                  bool cumulative_positions) noexcept {
     const auto& m = g.geometry;
     const auto width = utf8_bytes(g.source_codepoint);
     if (!g.resource_id || !g.glyph_id || g.glyph_id > 65535 || !utf8_bytes(g.codepoint) ||
         !width || g.source_begin != byte || static_cast<std::uint64_t>(byte) + width != g.source_end ||
-        g.x != x || m.advance < 0 || m.width < 0 || m.height < 0) return false;
+        (cumulative_positions && g.x != x) || m.advance < 0 || m.width < 0 || m.height < 0) return false;
     byte = g.source_end;
-    x += m.advance;
-    return x <= std::numeric_limits<std::int32_t>::max();
+    if (cumulative_positions) {
+        x += m.advance;
+        return x <= std::numeric_limits<std::int32_t>::max();
+    }
+    const auto right = static_cast<std::int64_t>(g.x) + m.advance;
+    return right >= std::numeric_limits<std::int32_t>::min() &&
+        right <= std::numeric_limits<std::int32_t>::max();
 }
 void write_record(std::string& s, std::size_t p, const PreparedTextGlyph& g) noexcept {
     put(s, p, static_cast<std::uint32_t>(g.resource_id));
@@ -68,7 +75,7 @@ bool encode_prepared_text(const PreparedTextGlyph* glyphs, std::size_t count,
     std::uint32_t byte = 0;
     std::int64_t x = initial_x;
     for (std::size_t i = 0; i < count; ++i)
-        if (!record_valid(glyphs[i], byte, x)) return false;
+        if (!record_valid(glyphs[i], byte, x, true)) return false;
     if (byte != source_bytes) return false;
     try {
         std::string draft(kPreparedTextHeaderBytes + count * kPreparedTextRecordBytes, '\0');
@@ -86,11 +93,39 @@ bool encode_prepared_text(const PreparedTextGlyph* glyphs, std::size_t count,
       catch (const std::length_error&) { return false; }
 }
 
+bool encode_positioned_prepared_text(const PreparedTextGlyph* glyphs, std::size_t count,
+                                     std::int32_t size, std::uint32_t source_bytes,
+                                     std::string& output) noexcept {
+    if (count > kMaxPreparedTextGlyphs || (count && !glyphs)) return false;
+    try {
+        std::vector<PreparedTextGlyph> cumulative;
+        cumulative.reserve(count);
+        std::int64_t x = 0;
+        for (std::size_t i = 0; i < count; ++i) {
+            cumulative.push_back(glyphs[i]);
+            cumulative.back().x = static_cast<std::int32_t>(x);
+            x += glyphs[i].geometry.advance;
+            if (x > std::numeric_limits<std::int32_t>::max()) return false;
+        }
+        std::string draft;
+        if (!encode_prepared_text(cumulative.data(), cumulative.size(), size, source_bytes, draft))
+            return false;
+        draft[4] = 3;
+        for (std::size_t i = 0; i < count; ++i)
+            put(draft, kPreparedTextHeaderBytes + i * kPreparedTextRecordBytes + 28,
+                static_cast<std::uint32_t>(glyphs[i].x));
+        output.swap(draft);
+        return true;
+    } catch (const std::bad_alloc&) { return false; }
+      catch (const std::length_error&) { return false; }
+}
+
 bool decode_prepared_text(std::string_view packet, PreparedTextView& output) noexcept {
     if (packet.size() < kPreparedTextHeaderBytes || packet.size() > kMaxPreparedTextBytes ||
-        packet.substr(0, 4) != "JFTP" || (packet[4] != 1 && packet[4] != 2) || packet[5] ||
+        packet.substr(0, 4) != "JFTP" || (packet[4] != 1 && packet[4] != 2 && packet[4] != 3) || packet[5] ||
         static_cast<unsigned char>(packet[6]) != kPreparedTextRecordBytes || packet[7] ||
-        i32(packet, 16) < 0 || (packet[4] == 1 && u32(packet, 24)) || u32(packet, 28)) return false;
+        i32(packet, 16) < 0 || (packet[4] == 1 && u32(packet, 24)) ||
+        (packet[4] == 3 && u32(packet, 24)) || u32(packet, 28)) return false;
     const auto count = u32(packet, 8);
     if (count > kMaxPreparedTextGlyphs ||
         packet.size() != kPreparedTextHeaderBytes + count * kPreparedTextRecordBytes ||
@@ -102,7 +137,7 @@ bool decode_prepared_text(std::string_view packet, PreparedTextView& output) noe
     std::int64_t x = packet[4] == 2 ? i32(packet, 24) : 0;
     for (std::size_t i = 0; i < count; ++i) {
         PreparedTextGlyph g;
-        if (!draft.read(i, g) || !record_valid(g, byte, x)) return false;
+        if (!draft.read(i, g) || !record_valid(g, byte, x, packet[4] != 3)) return false;
     }
     if (byte != draft.source_bytes_) return false;
     output = draft;

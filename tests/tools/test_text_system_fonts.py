@@ -12,7 +12,7 @@ from fontTools.ttLib import TTFont
 ROOT=Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('prepare_font_resource',ROOT/'tools/prepare_font_resource.py')
 tool=importlib.util.module_from_spec(spec);spec.loader.exec_module(tool)
-TEXT='A jg\u2026\u4e2d'
+TEXT='A jg\u2026\u4e2d 10/26 12/29 14/31 16/30'
 
 
 def rounded(value,size,denominator):
@@ -42,8 +42,17 @@ def main():
     outputs=[];reference=None
     for probe in args.probe:
         raw=subprocess.check_output([str(probe),*[str(a['path']) for a in assets]])
-        rows=json.loads(raw)
-        assert len(rows)==21
+        result=json.loads(raw)
+        rows=result['rows']
+        tiny_paints=result['tinyPaints']
+        assert len(rows)==35
+        assert len(tiny_paints)==8
+        for item in tiny_paints:
+            assert item['size'] in (7000,8000)
+            assert item['text'] in ('10/26','12/29','14/31','16/30')
+            assert item['glyphs']==5 and item['advance']>0
+            assert item['visiblePixels']>0
+            assert item['pixelHash']!=0
         for row in rows:
             # Independent CSS search result for the three actual registered weights.
             selected_weight={350:400,400:400,450:500,500:500,550:700,700:700,900:700}[row['weight']]
@@ -64,7 +73,8 @@ def main():
         (args.work/(probe.parent.parent.name+'-'+probe.parent.name+'-'+probe.stem+'-results.json')).write_bytes(raw)
         if reference is None:reference=raw
         else:assert raw==reference,'source/cropped/installed result mismatch'
-        outputs.append(dict(probe=str(probe),rows=len(rows),glyphs=sum(len(r['glyphs']) for r in rows),sha256=hashlib.sha256(raw).hexdigest()))
+        outputs.append(dict(probe=str(probe),rows=len(rows),glyphs=sum(len(r['glyphs']) for r in rows),
+                            tinyPaints=len(tiny_paints),sha256=hashlib.sha256(raw).hexdigest()))
     result=dict(passed=True,faces=len(assets),outputs=outputs,assets=[dict(
         path=str(a['path']),sha256=a['report']['resourceSha256'],sourceSha256=a['report']['sourceSha256'],
         bytes=a['report']['resourceBytes'],weight=a['weight'],size=a['size'],raster=a['report']['raster']) for a in assets])

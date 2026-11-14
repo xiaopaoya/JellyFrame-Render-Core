@@ -6,8 +6,10 @@
 #include "render_core/html_parser.h"
 #include "render_core/layout.h"
 #include "render_core/layer_tree.h"
+#include "render_core/text_backend.h"
 
 #include <array>
+#include <algorithm>
 #include <cassert>
 #include <cstdlib>
 #include <fstream>
@@ -244,7 +246,7 @@ void prepared_packet_paint() {
     };
     TextPaintLimits limits;limits.max_pixels=1;reject_without_write(limits);
     limits={};limits.max_work=1;reject_without_write(limits);
-    auto malformed=packet;malformed[4]=3;PreparedTextView preserved=view;
+    auto malformed=packet;malformed[4]=4;PreparedTextView preserved=view;
     assert(!decode_prepared_text(malformed,preserved) && preserved.size()==view.size());
     assert(system.paint(preserved,unchanged,{0,0,32,20},7000,12000,ink)==TextSystemStatus::Ok);
 
@@ -614,6 +616,138 @@ void aligned_prepared_text_stays_inside_its_layout_box() {
         }
     }
 }
+void core_prepared_text_applies_bounded_letter_spacing() {
+    auto font = asset();
+    const auto family_hash = normalized_font_family_hash("Core Test");
+    std::array<TextFontFace, 2> faces = {{{101, 102, font.font, family_hash},
+                                          {102, 0, font.font, 0}}};
+    TextSystem system;
+    assert(system.bind(faces.data(), faces.size()) == S::Ok);
+    LayoutEngineOptions layout_options;
+    layout_options.text_system = &system;
+
+    const auto layout_text = [&](const char* css_text) {
+        auto document = HtmlParser().parse("<body><div>AB</div></body>");
+        StyleResolver resolver(CssParser().parse(css_text));
+        return LayoutEngine(resolver, {}, layout_options).layout(*document, 80, 40);
+    };
+    const auto assert_positions = [&](const LayoutBox& box, std::int32_t expected_spacing) {
+        assert(box.text_layout_cache.prepared_text);
+        assert(box.text_layout_cache.prepared_lines.size() == 1);
+        PreparedTextView view;
+        assert(decode_prepared_text(box.text_layout_cache.prepared_lines[0].packet, view));
+        assert(view.size() == 2);
+        PreparedTextGlyph first, second;
+        assert(view.read(0, first) && view.read(1, second));
+        assert(first.x == 0 && second.x == first.geometry.advance + expected_spacing * 1000);
+        assert(second.geometry.bearing_x == -1000);
+    };
+
+    auto positive = layout_text(
+        "div { margin: 0; width: 40px; font-family: 'Core Test'; font-size: 16px; "
+        "line-height: 20px; color: #000000; white-space: nowrap; text-align: right; letter-spacing: 2px; }");
+    const LayoutBox* positive_text = find_text_box(*positive);
+    assert(positive_text != nullptr);
+    assert(positive_text->rect.width >= 20);
+    assert(positive_text->text_layout_cache.prepared_lines[0].width == 20);
+    assert(positive_text->text_layout_cache.prepared_lines[0].origin_x ==
+           positive_text->rect.x + positive_text->rect.width - 20);
+    assert_positions(*positive_text, 2);
+    auto negative = layout_text(
+        "div { margin: 0; width: 40px; font-family: 'Core Test'; font-size: 16px; "
+        "line-height: 20px; white-space: nowrap; letter-spacing: -2px; }");
+    const LayoutBox* negative_text = find_text_box(*negative);
+    assert(negative_text != nullptr);
+    assert(negative_text->rect.width >= 16);
+    assert(negative_text->text_layout_cache.prepared_lines[0].width == 16);
+    assert_positions(*negative_text, -2);
+
+    auto bounded = layout_text(
+        "div { margin: 0; width: 80px; font-family: 'Core Test'; font-size: 16px; "
+        "line-height: 20px; white-space: nowrap; letter-spacing: 100px; }");
+    const LayoutBox* bounded_text = find_text_box(*bounded);
+    assert(bounded_text != nullptr);
+    TextFontRequest request;
+    request.families = &faces[0].family_id;
+    request.family_count = 1;
+    request.size_q1000 = 16000;
+    TextRunMetrics base_metrics;
+    assert(system.measure("AB", request, base_metrics) == S::Ok);
+    const int bounded_spacing = bounded_letter_spacing(16, bounded_text->style.letter_spacing);
+    const std::int64_t expected_advance = static_cast<std::int64_t>(base_metrics.advance) +
+        static_cast<std::int64_t>(bounded_spacing) * 1000;
+    assert(bounded_text->text_layout_cache.prepared_lines[0].width ==
+           (expected_advance + 999) / 1000);
+    assert_positions(*bounded_text, bounded_spacing);
+
+    auto wrapped_document = HtmlParser().parse("<body><div>AB</div></body>");
+    StyleResolver wrapped_resolver(CssParser().parse(
+        "div { margin: 0; width: 18px; font-family: 'Core Test'; font-size: 16px; "
+        "line-height: 20px; overflow-wrap: anywhere; letter-spacing: 2px; }"));
+    auto wrapped = LayoutEngine(wrapped_resolver, {}, layout_options).layout(*wrapped_document, 80, 40);
+    const LayoutBox* wrapped_text = find_text_box(*wrapped);
+    assert(wrapped_text != nullptr && wrapped_text->text_layout_cache.prepared_text);
+    assert((wrapped_text->text_layout_cache.lines == std::vector<std::string>{"A", "B"}));
+    assert(wrapped_text->text_layout_cache.prepared_lines.size() == 2);
+    for (const auto& line : wrapped_text->text_layout_cache.prepared_lines) {
+        PreparedTextView view;
+        PreparedTextGlyph glyph;
+        assert(decode_prepared_text(line.packet, view) && view.size() == 1);
+        assert(view.read(0, glyph) && glyph.x == 0);
+    }
+
+    auto document = HtmlParser().parse("<body><p id='label'>AB</p></body>");
+    StyleResolver resolver(CssParser().parse(
+        "body { margin: 0; } p { margin: 0; width: 40px; height: 24px; padding: 0; "
+        "font-family: 'Core Test'; font-size: 16px; line-height: 20px; color: #000000; "
+        "white-space: nowrap; letter-spacing: 0px; } "
+        "p.spaced { letter-spacing: 2px; }"));
+    LayoutEngineOptions route_layout_options;
+    route_layout_options.text_system = &system;
+    LayerTreeBuilderOptions route_layer_options;
+    route_layer_options.text_system = &system;
+    const auto capture = [&]() {
+        auto render = RenderTreeBuilder(resolver).build(*document);
+        auto layout = LayoutEngine(resolver, {}, route_layout_options).layout(*render, 80, 40);
+        auto layers = LayerTreeBuilder(route_layer_options).build(*layout);
+        auto commands = LayerTreeBuilder(route_layer_options).flatten(*layers);
+        const auto command = std::find_if(commands.begin(), commands.end(), [](const auto& item) {
+            return item.type() == DisplayCommandType::PreparedText;
+        });
+        assert(command != commands.end());
+        PreparedTextView packet;
+        assert(decode_prepared_text(command->text, packet));
+        FrameBuffer frame(80, 40, Color{255, 255, 255, 255});
+        assert(system.paint(packet, frame, command->rect,
+                            static_cast<std::int64_t>(prepared_text_origin_x(*command)) * 1000,
+                            static_cast<std::int64_t>(prepared_text_baseline_y(*command)) * 1000,
+                            command->color) == S::Ok);
+        std::size_t ink = 0;
+        for (const auto& pixel : frame.pixels) ink += pixel.r < 255 || pixel.g < 255 || pixel.b < 255;
+        assert(ink > 0);
+        return frame;
+    };
+    clear_dirty_flags(*document);
+    const FrameBuffer normal_frame = capture();
+    Node* label = nullptr;
+    const auto find_label = [&](const auto& self, Node& node) -> void {
+        if (node.attribute("id") == "label") label = &node;
+        for (auto& child : node.children) self(self, *child);
+    };
+    find_label(find_label, *document);
+    assert(label != nullptr);
+    label->set_attribute("class", "spaced");
+    assert((subtree_dirty_flags(*document) & (DomDirtyStyle | DomDirtyLayout | DomDirtyAttributes)) != 0U);
+    const FrameBuffer spaced_frame = capture();
+    assert(normal_frame.pixels.size() == spaced_frame.pixels.size());
+    bool changed = false;
+    for (std::size_t i = 0; i < normal_frame.pixels.size(); ++i) {
+        const auto left = normal_frame.pixels[i];
+        const auto right = spaced_frame.pixels[i];
+        changed |= left.r != right.r || left.g != right.g || left.b != right.b || left.a != right.a;
+    }
+    assert(changed);
+}
 void core_layout_refusals_do_not_fall_back_to_host_text() {
     auto a=asset();
     std::array<TextFontFace,2> faces={{{101,17,a.font,normalized_font_family_hash("Core Test")},
@@ -648,6 +782,7 @@ void core_layout_refusals_do_not_fall_back_to_host_text() {
     assert(host_calls==0);
 }
 int inspect(int argc,char** argv) {
+    constexpr char probe_text[]="A jg\xe2\x80\xa6\xe4\xb8\xad 10/26 12/29 14/31 16/30";
     std::vector<Asset> assets(static_cast<std::size_t>(argc-1));
     std::vector<TextFontFace> faces(assets.size());
     for (std::size_t i=0;i<assets.size();++i) {
@@ -657,11 +792,11 @@ int inspect(int argc,char** argv) {
         faces[i]={i+1,0,assets[i].font};
     }
     TextSystem system;if (system.bind(faces.data(),faces.size())!=S::Ok) return 4;
-    std::cout<<'[';bool first=true;
-    for (auto size:{15500,24000,28000}) for (auto weight:{350,400,450,500,550,700,900}) {
+    std::cout<<"{\"rows\":[";bool first=true;
+    for (auto size:{7000,8000,15500,24000,28000}) for (auto weight:{350,400,450,500,550,700,900}) {
         TextFontRequest r;r.size_q1000=size;r.weight=static_cast<std::uint16_t>(weight);
-        std::array<PreparedTextGlyph,16> glyphs;TextRunMetrics m;
-        if (system.prepare("A jg\xe2\x80\xa6\xe4\xb8\xad",r,glyphs.data(),glyphs.size(),m)!=S::Ok) return 5;
+        std::array<PreparedTextGlyph,64> glyphs;TextRunMetrics m;
+        if (system.prepare(probe_text,r,glyphs.data(),glyphs.size(),m)!=S::Ok) return 5;
         if (!first) std::cout<<',';first=false;
         std::cout<<"{\"size\":"<<size<<",\"weight\":"<<weight<<",\"primary\":"<<m.primary_resource_id
             <<",\"font\":["<<m.primary_font.ascent<<','<<m.primary_font.descent<<','<<m.primary_font.line_gap
@@ -674,7 +809,46 @@ int inspect(int argc,char** argv) {
         }
         std::cout<<"]}";
     }
-    std::cout<<"]\n";return 0;
+    constexpr std::array<const char*,4> tiny_labels={"10/26","12/29","14/31","16/30"};
+    const Color background{17,29,43,255},ink{235,241,249,255};
+    std::cout<<"],\"tinyPaints\":[";first=true;
+    for (const auto* label:tiny_labels) for (const auto size:{7000,8000}) {
+        TextFontRequest request;request.size_q1000=size;
+        std::array<PreparedTextGlyph,16> glyphs{};TextRunMetrics measured,prepared;
+        if (system.measure(label,request,measured)!=S::Ok ||
+            system.prepare(label,request,glyphs.data(),glyphs.size(),prepared)!=S::Ok ||
+            measured.advance!=prepared.advance || measured.glyph_count!=prepared.glyph_count ||
+            prepared.glyph_count!=std::char_traits<char>::length(label)) return 6;
+        std::size_t source_offset=0;std::int32_t expected_x=0;
+        for (std::size_t i=0;i<prepared.glyph_count;++i) {
+            if (glyphs[i].source_begin!=source_offset || glyphs[i].source_end!=source_offset+1 ||
+                glyphs[i].x!=expected_x) return 7;
+            expected_x+=glyphs[i].geometry.advance;source_offset+=1;
+        }
+        if (expected_x!=prepared.advance) return 8;
+        std::string packet;
+        if (!encode_prepared_text(glyphs.data(),prepared.glyph_count,size,
+                                  static_cast<std::uint32_t>(std::char_traits<char>::length(label)),packet)) return 9;
+        PreparedTextView view;
+        if (!decode_prepared_text(packet,view)) return 10;
+        FrameBuffer rendered(64,20,background),repeat(64,20,background);
+        if (system.paint(view,rendered,{0,0,64,20},1000,13000,ink)!=S::Ok ||
+            system.paint(view,repeat,{0,0,64,20},1000,13000,ink)!=S::Ok) return 11;
+        if (rendered.pixels.size()!=repeat.pixels.size()) return 12;
+        std::size_t visible=0;std::uint32_t hash=2166136261U;
+        for (std::size_t i=0;i<rendered.pixels.size();++i) {
+            const auto& a=rendered.pixels[i];const auto& b=repeat.pixels[i];
+            if (a.r!=b.r || a.g!=b.g || a.b!=b.b || a.a!=b.a) return 13;
+            if (a.r!=background.r || a.g!=background.g || a.b!=background.b || a.a!=background.a) ++visible;
+            for (const auto component:{a.r,a.g,a.b,a.a}) hash=(hash^component)*16777619U;
+        }
+        if (visible==0) return 14;
+        if (!first) std::cout<<',';first=false;
+        std::cout<<"{\"size\":"<<size<<",\"text\":\""<<label
+                 <<"\",\"advance\":"<<prepared.advance<<",\"glyphs\":"<<prepared.glyph_count
+                 <<",\"visiblePixels\":"<<visible<<",\"pixelHash\":"<<hash<<"}";
+    }
+    std::cout<<"]}\n";return 0;
 }
 } // namespace
 int main(int argc,char** argv) {
@@ -685,6 +859,7 @@ int main(int argc,char** argv) {
     weights();strikes_and_families();fallback_and_geometry();refusals_and_budgets();
     prepared_packet_paint();offset_prepared_packets();installed_shared_paragraph_path();html_layout_to_core_paint();
     route_relayout_keeps_prepared_text_while_dom_is_dirty();aligned_prepared_text_stays_inside_its_layout_box();
+    core_prepared_text_applies_bounded_letter_spacing();
     unrelated_input_mutation_preserves_static_prepared_text();
     core_layout_refusals_do_not_fall_back_to_host_text();
     std::cout<<"text system selection/geometry/transaction/budget tests passed\n";
