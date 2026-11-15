@@ -138,8 +138,20 @@ visible row before publishing the overlay; missing glyphs or service/packet
 budget refusal reports `layer-core-select-popup-text-refused` and omits the
 whole overlay instead of retrying a host callback. Text is clipped to each row
 rectangle; popup scrolling and ellipsis remain unsupported. Leaving TextSystem
-unset preserves the legacy popup and control-label paths. Button descendant
-text and other generated/native text paths remain separate migration work.
+unset preserves the legacy popup and control-label paths.
+
+When a shared generated paragraph is not admitted, single generated pseudo
+labels and list markers use the registered Core TextSystem font and emit
+`PreparedText`; they do not fall back to legacy `Text` commands. The bounded
+label path preserves the existing owner rectangle, color, weight, letter
+spacing and alignment. Each generated label is limited to 128 glyphs in
+addition to TextSystem's per-run limits. Plain text and the supported
+`counter(list-num)` source are admitted. Other named counters, missing glyphs,
+unknown families and packet/service budget refusals emit a diagnostic and omit
+that generated label. Leaving TextSystem unset preserves the legacy generated
+text and list-marker paths. This is a paint fallback, not shared paragraph
+layout: wrapping, independent pseudo positioning and wider generated source
+semantics remain outside this slice.
 
 ### Bounded paint-time ellipsis
 
