@@ -2,6 +2,7 @@
 #include "render_core/html_parser.h"
 #include "render_core/layout.h"
 #include "render_core/hit_test.h"
+#include "render_core/form_control.h"
 #include "render_core/layer_tree.h"
 #include "render_core/software_renderer.h"
 #include "render_core/prepared_text.h"
@@ -1099,6 +1100,91 @@ void generated_text_shared_sources() {
         if (command.type() == DisplayCommandType::Text && command.text == "M") ++marker_count;
     check(marker_count == 1, "li before content remains a single legacy marker command");
 }
+
+void select_popup_text_uses_core_packets_without_legacy_fallback() {
+#if !JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED
+    return;
+#else
+    Fixture fixture;
+    auto popup_font = asset(400, 16, 4, 1,
+                            {{32, 250}, {65, 500}, {66, 600}, {118, 500}});
+    TextFontFace popup_face{1, 0, popup_font.font};
+    TextSystem popup_system;
+    check(popup_system.bind(&popup_face, 1) == TextSystemStatus::Ok,
+          "bind popup fixture font");
+    fixture.options.text_system = &popup_system;
+    fixture.layers.text_system = &popup_system;
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}body{height:120px}select{display:block;width:100px;height:24px;"
+        "font-size:16px;line-height:20px;color:red}"));
+    auto dom = HtmlParser{}.parse(
+        "<body><select id='choice'><option>A</option><option>B</option></select></body>");
+    auto layout = LayoutEngine(styles, {}, fixture.options).layout(*dom, 120, 160);
+    Node& select = find_node(*dom, "choice");
+    check(set_select_popup_open(select, true), "Core text popup opens");
+    auto layers = LayerTreeBuilder(fixture.layers).build(*layout);
+    const auto commands = LayerTreeBuilder(fixture.layers).flatten(*layers);
+    std::size_t option_a_packets = 0;
+    std::size_t option_b_packets = 0;
+    bool legacy_option_text = false;
+    for (const auto& command : commands) {
+        if (command.type() == DisplayCommandType::Text &&
+            (command.text == "A" || command.text == "B")) {
+            legacy_option_text = true;
+        }
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        PreparedTextView packet;
+        check(decode_prepared_text(command.text, packet), "popup Core text packet decodes");
+        for (std::size_t index = 0; index < packet.size(); ++index) {
+            PreparedTextGlyph glyph;
+            check(packet.read(index, glyph), "popup Core glyph is readable");
+            option_a_packets += glyph.source_codepoint == 'A' ? 1U : 0U;
+            option_b_packets += glyph.source_codepoint == 'B' ? 1U : 0U;
+        }
+    }
+    check(option_a_packets >= 2 && option_b_packets == 1,
+          "selected label and every visible popup option use Core prepared glyphs");
+    check(!legacy_option_text, "Core popup emits no legacy option Text commands");
+
+    const auto legacy_commands = LayerTreeBuilder{}.flatten(*LayerTreeBuilder{}.build(*layout));
+    bool legacy_popup_option = false;
+    for (const auto& command : legacy_commands) {
+        legacy_popup_option = legacy_popup_option ||
+            (command.type() == DisplayCommandType::Text && command.text == "B");
+    }
+    check(legacy_popup_option, "unbound Core service preserves the ABI3 popup Text path");
+
+    auto missing_b = asset(400, 16, 4, 1, {{32, 250}, {65, 500}, {118, 500}});
+    TextFontFace limited_face{1, 0, missing_b.font};
+    TextSystem limited_system;
+    check(limited_system.bind(&limited_face, 1) == TextSystemStatus::Ok,
+          "bind deliberately incomplete popup font");
+    VectorDiagnosticSink diagnostics;
+    LayerTreeBuilderOptions limited_options;
+    limited_options.text_system = &limited_system;
+    limited_options.diagnostics = &diagnostics;
+    auto refused = LayerTreeBuilder(limited_options).build(*layout);
+    const auto refused_commands = LayerTreeBuilder(limited_options).flatten(*refused);
+    bool refused_popup_overlay = false;
+    const auto inspect_overlay = [&](const auto& self, const LayerNode& layer) -> void {
+        refused_popup_overlay = refused_popup_overlay ||
+            (layer.reasons & LayerReasonTransientOverlay) != 0U;
+        for (const auto& child : layer.children) self(self, *child);
+    };
+    inspect_overlay(inspect_overlay, *refused);
+    check(!refused_popup_overlay, "popup text refusal publishes no partial overlay");
+    for (const auto& command : refused_commands) {
+        check(command.type() != DisplayCommandType::Text || command.text != "B",
+              "Core popup font refusal never retries legacy option text");
+    }
+    bool refusal_reported = false;
+    for (const auto& diagnostic : diagnostics.diagnostics()) {
+        refusal_reported = refusal_reported ||
+            diagnostic.code == "layer-core-select-popup-text-refused";
+    }
+    check(refusal_reported, "Core popup refusal is diagnosed");
+#endif
+}
 void generated_text_fallback_and_invalidation() {
     std::vector<std::pair<unsigned, unsigned>> supported;
     for (unsigned cp = 32; cp <= 90; ++cp) supported.emplace_back(cp, cp == 32 ? 250U : 500U);
@@ -1665,6 +1751,7 @@ int main() {
         mutation_damage_and_tiling();
         decoration_removal_damage_clears_old_ink();
         generated_text_shared_sources();
+        select_popup_text_uses_core_packets_without_legacy_fallback();
         generated_text_fallback_and_invalidation();
         generated_list_num_counter_sources();
         native_list_markers_share_paragraphs();
