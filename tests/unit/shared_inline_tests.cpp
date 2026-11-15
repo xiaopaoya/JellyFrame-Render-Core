@@ -1078,13 +1078,23 @@ void generated_text_shared_sources() {
         "generated source budget refusal keeps ordinary layout fallback");
     const auto fallback_commands = LayerTreeBuilder(layer_options).flatten(
         *LayerTreeBuilder(layer_options).build(*refused));
-    bool legacy_before = false, legacy_after = false;
+    bool prepared_before = false, prepared_after = false, legacy_text = false;
     for (const auto& command : fallback_commands) {
-        if (command.type() != DisplayCommandType::Text) continue;
-        legacy_before = legacy_before || command.text == "M";
-        legacy_after = legacy_after || command.text == "C";
+        legacy_text = legacy_text || command.type() == DisplayCommandType::Text;
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        PreparedTextView packet;
+        check(decode_prepared_text(command.text, packet), "budget fallback Core packet decodes");
+        std::string text;
+        for (std::size_t i = 0; i < packet.size(); ++i) {
+            PreparedTextGlyph glyph;
+            check(packet.read(i, glyph), "budget fallback Core glyph reads");
+            text.push_back(static_cast<char>(glyph.source_codepoint));
+        }
+        prepared_before = prepared_before || text == "M";
+        prepared_after = prepared_after || text == "C";
     }
-    check(legacy_before && legacy_after, "refusal preserves established generated paint fallback");
+    check(prepared_before && prepared_after && !legacy_text,
+        "shared-inline budget refusal keeps generated text on the Core resource path");
 
     StyleResolver list_styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}li{display:block;width:40px;font-size:16px}span{display:inline}li::before{content:'M'}"));
@@ -1096,9 +1106,16 @@ void generated_text_shared_sources() {
     const auto list_commands = LayerTreeBuilder(layer_options).flatten(
         *LayerTreeBuilder(layer_options).build(*list_layout));
     std::size_t marker_count = 0;
-    for (const auto& command : list_commands)
-        if (command.type() == DisplayCommandType::Text && command.text == "M") ++marker_count;
-    check(marker_count == 1, "li before content remains a single legacy marker command");
+    for (const auto& command : list_commands) {
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        PreparedTextView packet;
+        check(decode_prepared_text(command.text, packet), "list before Core packet decodes");
+        if (packet.size() != 1) continue;
+        PreparedTextGlyph glyph;
+        check(packet.read(0, glyph), "list before Core glyph reads");
+        marker_count += glyph.source_codepoint == 'M';
+    }
+    check(marker_count == 1, "li before content remains a single Core marker command");
 }
 
 void select_popup_text_uses_core_packets_without_legacy_fallback() {
@@ -1199,7 +1216,7 @@ void generated_text_fallback_and_invalidation() {
 
     StyleResolver fallback_styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}div{display:block;width:80px;font-size:16px;line-height:18px}"
-        "span{display:inline}#positioned::before{content:'P';left:4px}"
+        "span{display:inline}#positioned::before{content:'P';left:4px;font-weight:700}"
         "#counter::after{content:counter(chapter)'.'}"));
     auto fallback_dom = HtmlParser{}.parse(
         "<div id='positioned'><span>A</span></div><div id='counter'><span>B</span></div>");
@@ -1212,15 +1229,72 @@ void generated_text_fallback_and_invalidation() {
     const auto fallback_commands = LayerTreeBuilder(layer_options).flatten(*fallback_layers);
     std::size_t positioned_count = 0;
     std::size_t counter_count = 0;
+    bool legacy_generated_text = false;
+    bool positioned_weight_resource = false;
     for (const auto& command : fallback_commands) {
-        if (command.type() != DisplayCommandType::Text) continue;
-        positioned_count += command.text == "P";
-        counter_count += command.text == "1.";
+        if (command.type() == DisplayCommandType::Text) {
+            legacy_generated_text = legacy_generated_text || command.text == "P" || command.text == "1.";
+            continue;
+        }
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        PreparedTextView packet;
+        check(decode_prepared_text(command.text, packet), "fallback generated packet decodes");
+        std::string source;
+        for (std::size_t i = 0; i < packet.size(); ++i) {
+            PreparedTextGlyph glyph;
+            check(packet.read(i, glyph), "fallback generated glyph reads");
+            source.push_back(static_cast<char>(glyph.source_codepoint));
+            if (glyph.source_codepoint == 'P' && glyph.resource_id == 2)
+                positioned_weight_resource = true;
+        }
+        positioned_count += source == "P";
+        counter_count += source == "1.";
     }
     check(positioned_count == 1,
-        "positioned generated source paints once through the established fallback");
-    check(counter_count == 1,
-        "counter generated source paints once through the established fallback");
+        "positioned generated source paints once through Core TextSystem fallback");
+    check(counter_count == 0,
+        "unsupported named counter is not guessed as the list ordinal");
+    check(!legacy_generated_text, "TextSystem fallback emits no legacy generated Text commands");
+    check(positioned_weight_resource, "generated pseudo font-weight selects its registered face on fallback");
+
+    auto incomplete = asset(400, 16, 4, 1, {{32,250},{65,500}});
+    TextFontFace incomplete_face{1, 0, incomplete.font};
+    TextSystem incomplete_system;
+    check(incomplete_system.bind(&incomplete_face, 1) == TextSystemStatus::Ok,
+        "bind incomplete generated-text font");
+    LayoutEngineOptions incomplete_layout_options;
+    incomplete_layout_options.text_system = &incomplete_system;
+    StyleResolver incomplete_styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}div,li{display:block;width:80px;font-size:16px;line-height:18px}"
+        "span{display:inline}#missing::before{content:'Z'}#counter::after{content:counter(chapter)'.'}"
+        "li{list-style-type:decimal}"));
+    auto incomplete_dom = HtmlParser{}.parse(
+        "<div id='missing'><span>A</span></div><div id='counter'><span>A</span></div>"
+        "<ul><li><span>A</span></li></ul>");
+    auto incomplete_layout = LayoutEngine(incomplete_styles, {}, incomplete_layout_options)
+        .layout(*incomplete_dom, 100, 100);
+    VectorDiagnosticSink refusal_diagnostics;
+    LayerTreeBuilderOptions incomplete_layer_options;
+    incomplete_layer_options.text_system = &incomplete_system;
+    incomplete_layer_options.diagnostics = &refusal_diagnostics;
+    auto incomplete_layers = LayerTreeBuilder(incomplete_layer_options).build(*incomplete_layout);
+    const auto incomplete_commands = LayerTreeBuilder(incomplete_layer_options).flatten(*incomplete_layers);
+    bool refused_legacy_generated_text = false;
+    for (const auto& command : incomplete_commands) {
+        refused_legacy_generated_text = refused_legacy_generated_text ||
+            (command.type() == DisplayCommandType::Text &&
+             (command.text == "Z" || command.text == "1."));
+    }
+    check(!refused_legacy_generated_text,
+        "missing generated glyphs do not fall back to legacy Text commands");
+    const auto has_refusal = [&](const char* code) {
+        for (const auto& diagnostic : refusal_diagnostics.diagnostics())
+            if (diagnostic.code == code) return true;
+        return false;
+    };
+    check(has_refusal("layer-core-generated-inline-text-refused") &&
+          has_refusal("layer-core-list-marker-text-refused"),
+        "generated pseudo, unsupported counter and list-marker refusal are diagnosed");
 
     const auto make_styles = [](const char* color, int weight) {
         return StyleResolver(CssParser{}.parse(
@@ -1319,10 +1393,24 @@ void generated_list_num_counter_sources() {
     const auto fallback_commands = LayerTreeBuilder(layer_options).flatten(
         *LayerTreeBuilder(layer_options).build(*unsupported_layout));
     std::size_t fallback_count = 0;
-    for (const auto& command : fallback_commands)
-        if (command.type() == DisplayCommandType::Text && command.text == "1.") ++fallback_count;
-    check(fallback_count == 1,
-        "unsupported named counter still paints once through established fallback");
+    bool legacy_counter_command = false;
+    for (const auto& command : fallback_commands) {
+        if (command.type() == DisplayCommandType::Text && command.text == "1.")
+            legacy_counter_command = true;
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        PreparedTextView packet;
+        check(decode_prepared_text(command.text, packet), "fallback counter packet decodes");
+        std::string source;
+        for (std::size_t i = 0; i < packet.size(); ++i) {
+            PreparedTextGlyph glyph;
+            check(packet.read(i, glyph), "fallback counter glyph reads");
+            source.push_back(static_cast<char>(glyph.source_codepoint));
+        }
+        fallback_count += source == "1.";
+    }
+    check(fallback_count == 0,
+        "unsupported named counter does not publish a guessed Core command");
+    check(!legacy_counter_command, "unsupported counter fallback emits no legacy Text command");
 }
 void native_list_markers_share_paragraphs() {
     std::vector<std::pair<unsigned, unsigned>> supported;
@@ -1477,13 +1565,27 @@ void native_list_markers_share_paragraphs() {
     const auto override_commands = LayerTreeBuilder(layer_options).flatten(
         *LayerTreeBuilder(layer_options).build(*override_layout));
     std::size_t override_count = 0, native_decimal_count = 0;
+    bool legacy_override = false;
     for (const auto& command : override_commands) {
-        if (command.type() != DisplayCommandType::Text) continue;
-        override_count += command.text == "X";
-        native_decimal_count += command.text == "1.";
+        if (command.type() == DisplayCommandType::Text) {
+            legacy_override = legacy_override || command.text == "X" || command.text == "1.";
+            continue;
+        }
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        PreparedTextView packet;
+        check(decode_prepared_text(command.text, packet), "override marker packet decodes");
+        std::string source;
+        for (std::size_t i = 0; i < packet.size(); ++i) {
+            PreparedTextGlyph glyph;
+            check(packet.read(i, glyph), "override marker glyph reads");
+            source.push_back(static_cast<char>(glyph.source_codepoint));
+        }
+        override_count += source == "X";
+        native_decimal_count += source == "1.";
     }
     check(override_count == 1 && native_decimal_count == 0,
         "li ::before replaces rather than duplicates its native decimal marker");
+    check(!legacy_override, "list marker override uses Core TextSystem, without legacy Text");
 
     auto refused_options = options;
     refused_options.shared_inline.max_total_capacity_bytes = 1;
@@ -1493,10 +1595,24 @@ void native_list_markers_share_paragraphs() {
     const auto refused_commands = LayerTreeBuilder(layer_options).flatten(
         *LayerTreeBuilder(layer_options).build(*refused_layout));
     std::size_t refused_marker_count = 0;
-    for (const auto& command : refused_commands)
-        if (command.type() == DisplayCommandType::Text && command.text == "2.") ++refused_marker_count;
+    bool legacy_refused_marker = false;
+    for (const auto& command : refused_commands) {
+        if (command.type() == DisplayCommandType::Text && command.text == "2.")
+            legacy_refused_marker = true;
+        if (command.type() != DisplayCommandType::PreparedText) continue;
+        PreparedTextView packet;
+        check(decode_prepared_text(command.text, packet), "budget fallback marker packet decodes");
+        std::string source;
+        for (std::size_t i = 0; i < packet.size(); ++i) {
+            PreparedTextGlyph glyph;
+            check(packet.read(i, glyph), "budget fallback marker glyph reads");
+            source.push_back(static_cast<char>(glyph.source_codepoint));
+        }
+        refused_marker_count += source == "2.";
+    }
     check(refused_marker_count == 1,
-        "budget refusal paints the legacy marker exactly once");
+        "shared planner budget refusal paints the Core-prepared marker exactly once");
+    check(!legacy_refused_marker, "marker budget fallback emits no legacy Text command");
 }
 void partition_matrix_and_events() {
     Fixture f;
@@ -1741,7 +1857,9 @@ int main() {
         definite_inline_image_refusal_and_style_proof();
         definite_inline_image_percent_width();
         natural_inline_image_metadata_path();
+#if JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
         sharp_text_shadow_parity_and_bounds();
+#endif
         inline_scope_backgrounds();
         propagated_inline_text_decorations();
         shared_mixed_font_and_line_height_owners();

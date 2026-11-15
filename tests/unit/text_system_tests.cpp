@@ -909,11 +909,14 @@ void core_prepared_text_applies_bounded_letter_spacing() {
     assert(system.bind(faces.data(), faces.size()) == S::Ok);
     LayoutEngineOptions layout_options;
     layout_options.text_system = &system;
+    std::vector<std::unique_ptr<Node>> documents;
 
     const auto layout_text = [&](const char* css_text) {
         auto document = HtmlParser().parse("<body><div>AB</div></body>");
         StyleResolver resolver(CssParser().parse(css_text));
-        return LayoutEngine(resolver, {}, layout_options).layout(*document, 80, 40);
+        auto layout = LayoutEngine(resolver, {}, layout_options).layout(*document, 80, 40);
+        documents.push_back(std::move(document));
+        return layout;
     };
     const auto assert_positions = [&](const LayoutBox& box, std::int32_t expected_spacing) {
         assert(box.text_layout_cache.prepared_text);
