@@ -7,7 +7,6 @@
 #include "render_core/software_renderer.h"
 #include "render_core/prepared_text.h"
 #include "render_core/dirty_region.h"
-#include "render_core/text_repaint.h"
 #include "../../src/shared_inline.h"
 #include "../../src/core_text_paragraph.h"
 #include "../../src/layout_mutation_journal.h"
@@ -180,7 +179,7 @@ void definite_inline_image_atomic_path() {
     auto dom = HtmlParser{}.parse("<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
     NaturalImageSizingStatistics natural_stats;
     f.options.natural_image_sizing.statistics = &natural_stats;
-    auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+    auto layout = LayoutEngine(styles, f.options).layout(*dom, 80, 50);
     const auto& host = find(*layout, "p");
     const auto& image = find(*layout, "i");
     const auto binding = host.text_layout_cache.shared_inline;
@@ -270,7 +269,7 @@ void definite_inline_image_atomic_path() {
     std::size_t painted = 0;
     SoftwareCompositor::Options paint_options;
     paint_options.text_system = &f.system;
-    SoftwareCompositor compositor({}, ImagePainter{paint_inline_image, &painted, true}, paint_options);
+    SoftwareCompositor compositor(ImagePainter{paint_inline_image, &painted, true}, paint_options);
     const auto pixels = compositor.render(layer, 80, 50, {255,255,255,255});
     check(painted == 1 && pixels.pixel(image.rect.x+image.rect.width/2, image.rect.y+image.rect.height/2).r == 220,
         "mixed shared paragraph rasterizes the callback-backed image pixels");
@@ -304,7 +303,7 @@ void definite_inline_image_atomic_path() {
         "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
         "span{display:inline}img{display:inline;width:7.5px;height:18px;object-fit:contain}"));
     auto changed_dom = HtmlParser{}.parse("<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
-    auto changed_layout = LayoutEngine(changed_styles, {}, f.options).layout(*changed_dom, 80, 50);
+    auto changed_layout = LayoutEngine(changed_styles, f.options).layout(*changed_dom, 80, 50);
     check(!find(*changed_layout, "p").text_layout_cache.shared_inline,
         "non-Fill object-fit stays on ordinary fallback");
 }
@@ -326,7 +325,7 @@ void definite_inline_image_refusal_and_style_proof() {
         StyleResolver styles(CssParser{}.parse(
             "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
             "span{display:inline}img{display:inline;width:8px;height:18px}"));
-        auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+        auto layout = LayoutEngine(styles, f.options).layout(*dom, 80, 50);
         check(!find(*layout, "p").text_layout_cache.shared_inline,
             "unsupported image source or size contract declines the whole context");
     }
@@ -335,7 +334,7 @@ void definite_inline_image_refusal_and_style_proof() {
         StyleResolver styles(CssParser{}.parse(
             "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
             "span{display:inline}img{display:inline}"));
-        auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+        auto layout = LayoutEngine(styles, f.options).layout(*dom, 80, 50);
         check(!find(*layout, "p").text_layout_cache.shared_inline,
             "intrinsic or unknown image dimensions remain on the ordinary fallback");
     }
@@ -354,7 +353,7 @@ void definite_inline_image_refusal_and_style_proof() {
         StyleResolver styles(CssParser{}.parse(
             "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
             "span{display:inline}img{display:inline;width:8px;height:18px}"));
-        auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+        auto layout = LayoutEngine(styles, f.options).layout(*dom, 80, 50);
         check(!find(*layout, "p").text_layout_cache.shared_inline,
             "image children remain outside the atomic subset");
     }
@@ -362,7 +361,7 @@ void definite_inline_image_refusal_and_style_proof() {
     StyleResolver styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
         "span{display:inline}img{display:inline;width:8px;height:18px}"));
-    auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+    auto layout = LayoutEngine(styles, f.options).layout(*dom, 80, 50);
     const auto& host = find(*layout, "p");
     const auto binding = host.text_layout_cache.shared_inline;
     check(binding != nullptr, "eligible image publishes a proof for mutation checks");
@@ -379,7 +378,7 @@ void definite_inline_image_percent_width() {
             "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
             "span{display:inline}img{display:inline;width:")+value.first+";height:18px}"));
         auto dom = HtmlParser{}.parse("<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
-        auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+        auto layout = LayoutEngine(styles, f.options).layout(*dom, 80, 50);
         const auto& host = find(*layout, "p");
         const auto& image = find(*layout, "i");
         check(host.text_layout_cache.shared_inline && image.content_geometry.width == value.second,
@@ -389,7 +388,7 @@ void definite_inline_image_percent_width() {
     StyleResolver styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
         "span{display:inline}img{display:inline;width:50%;height:18px}"));
-    auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+    auto layout = LayoutEngine(styles, f.options).layout(*dom, 80, 50);
     auto& host = const_cast<LayoutBox&>(find(*layout, "p"));
     const auto precise_max = std::numeric_limits<std::int64_t>::max();
     int height = 0;
@@ -409,7 +408,7 @@ void natural_inline_image_metadata_path() {
             "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
             "span{display:inline}img{display:inline;") + image_style + "}"));
         auto dom = HtmlParser{}.parse("<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
-        auto layout = LayoutEngine(styles, {}, f.options).layout(*dom, 80, 50);
+        auto layout = LayoutEngine(styles, f.options).layout(*dom, 80, 50);
         const auto& host = find(*layout, "p");
         const auto& image = find(*layout, "i");
         check(static_cast<bool>(host.text_layout_cache.shared_inline) == expect_shared,
@@ -445,7 +444,7 @@ void sharp_text_shadow_parity_and_bounds() {
             "}span{display:inline}";
         StyleResolver styles(CssParser{}.parse(css));
         auto shared_dom = HtmlParser{}.parse("<div id='p'><span id='a'>A</span><span>B</span></div>");
-        auto shared_layout = LayoutEngine(styles, {}, fixture.options).layout(*shared_dom, 140, 60);
+        auto shared_layout = LayoutEngine(styles, fixture.options).layout(*shared_dom, 140, 60);
         const auto& host = find(*shared_layout, "p");
         check(host.text_layout_cache.shared_inline != nullptr,
               "zero-blur shadow remains eligible for complete shared paragraph");
@@ -482,13 +481,13 @@ void sharp_text_shadow_parity_and_bounds() {
         auto ordinary_options = fixture.options;
         ordinary_options.shared_inline.max_attempts = 0;
         auto ordinary_dom = HtmlParser{}.parse("<div id='p'><span id='a'>A</span><span>B</span></div>");
-        auto ordinary_layout = LayoutEngine(styles, {}, ordinary_options).layout(*ordinary_dom, 140, 60);
+        auto ordinary_layout = LayoutEngine(styles, ordinary_options).layout(*ordinary_dom, 140, 60);
         check(find(*ordinary_layout, "p").text_layout_cache.shared_inline == nullptr,
               "ordinary shadow path is a control with shared optimization disabled");
         auto ordinary_layers = LayerTreeBuilder(fixture.layers).build(*ordinary_layout);
         SoftwareCompositor::Options paint;
         paint.text_system = &fixture.system;
-        SoftwareCompositor compositor({}, paint);
+        SoftwareCompositor compositor(ImagePainter{}, paint);
         const auto shared_pixels = compositor.render(*shared_layers, 140, 60, {255,255,255,255});
         LayerNode foreground_only;
         LayerNode shadows_only;
@@ -544,7 +543,7 @@ void sharp_text_shadow_parity_and_bounds() {
     StyleResolver blurred(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}#p{width:100px;font-size:16px;text-shadow:1px 1px 2px red}span{display:inline}"));
     auto blurred_dom = HtmlParser{}.parse("<div id='p'><span>A</span><span>B</span></div>");
-    auto blurred_layout = LayoutEngine(blurred, {}, fixture.options).layout(*blurred_dom, 140, 60);
+    auto blurred_layout = LayoutEngine(blurred, fixture.options).layout(*blurred_dom, 140, 60);
     check(find(*blurred_layout, "p").text_layout_cache.shared_inline == nullptr,
           "blurred shadows remain on the established whole-paragraph fallback");
 }
@@ -556,7 +555,7 @@ void inline_scope_backgrounds() {
     StyleResolver styles(CssParser{}.parse(css));
     auto dom = HtmlParser{}.parse(
         "<div id='p'><span id='outer'>AB AB <span id='inner'>AB AB AB AB</span> AB</span></div>");
-    auto layout = LayoutEngine(styles, {}, fixture.options).layout(*dom, 80, 100);
+    auto layout = LayoutEngine(styles, fixture.options).layout(*dom, 80, 100);
     const auto& host = find(*layout, "p");
     check(host.text_layout_cache.shared_inline != nullptr,
           "solid inline scope backgrounds stay eligible for shared paragraph layout");
@@ -604,7 +603,7 @@ void inline_scope_backgrounds() {
         backgrounds_only.display_list.push_back(commands[i]);
     SoftwareCompositor::Options paint;
     paint.text_system = &fixture.system;
-    SoftwareCompositor compositor({}, paint);
+    SoftwareCompositor compositor(ImagePainter{}, paint);
     const auto background_pixels = compositor.render(backgrounds_only, 80, 100, {255,255,255,255});
     const auto red_pixel = background_pixels.pixel(39, 10);
     check(red_pixel.r == 255 && red_pixel.g >= 127 && red_pixel.g <= 128 &&
@@ -646,7 +645,7 @@ void propagated_inline_text_decorations() {
     StyleResolver styles(CssParser{}.parse(css));
     auto dom = HtmlParser{}.parse(
         "<div id='p'><span>A A A A A A</span><span> B B</span></div>");
-    auto layout = LayoutEngine(styles, {}, fixture.options).layout(*dom, 64, 100);
+    auto layout = LayoutEngine(styles, fixture.options).layout(*dom, 64, 100);
     const auto& host = find(*layout, "p");
     check(host.text_layout_cache.shared_inline != nullptr,
           "existing inherited underline and strike styles remain eligible for shared paragraphs");
@@ -692,7 +691,7 @@ void propagated_inline_text_decorations() {
 
     SoftwareCompositor::Options paint;
     paint.text_system = &fixture.system;
-    SoftwareCompositor compositor({}, paint);
+    SoftwareCompositor compositor(ImagePainter{}, paint);
     const auto pixels = compositor.render(*layers, 64, 100, {255,255,255,255});
     FrameBuffer tiled(64, 100, {255,255,255,255});
     for (int y = 0; y < 100; y += 9) {
@@ -716,7 +715,7 @@ void shared_mixed_font_and_line_height_owners() {
         "#small{font-size:12px;line-height:16px;color:green}"));
     auto dom = HtmlParser{}.parse(
         "<div id='p'><span id='large'>A</span><span> B</span><span id='small'>A</span><span> B</span></div>");
-    auto layout = LayoutEngine(styles, {}, fixture.options).layout(*dom, 140, 80);
+    auto layout = LayoutEngine(styles, fixture.options).layout(*dom, 140, 80);
     const auto& host = find(*layout, "p");
     check(host.text_layout_cache.shared_inline != nullptr,
           "same-family mixed-size and mixed-line-height owners share a complete paragraph");
@@ -752,7 +751,7 @@ void shared_mixed_font_and_line_height_owners() {
     ordinary_options.shared_inline.max_attempts = 0;
     auto ordinary_dom = HtmlParser{}.parse(
         "<div id='p'><span id='large'>A</span><span> B</span><span id='small'>A</span><span> B</span></div>");
-    auto ordinary = LayoutEngine(styles, {}, ordinary_options).layout(*ordinary_dom, 140, 80);
+    auto ordinary = LayoutEngine(styles, ordinary_options).layout(*ordinary_dom, 140, 80);
     check(find(*ordinary, "p").text_layout_cache.shared_inline == nullptr,
           "optimization-disabled tree remains an independent ordinary-layout control");
 }
@@ -777,7 +776,7 @@ void preserved_whitespace_shared_paragraph() {
     pre.children[0]->set_text("A\tB\r");
     pre.children[1]->children[0]->set_text("\nA\n");
     pre.children[2]->set_text("\nB  ");
-    auto layout = LayoutEngine(styles, {}, options).layout(*dom, 140, 120);
+    auto layout = LayoutEngine(styles, options).layout(*dom, 140, 120);
     const auto& host = find(*layout, "p");
     check(host.text_layout_cache.shared_inline != nullptr,
           "uniformly preserved ASCII whitespace uses the shared paragraph path");
@@ -795,7 +794,7 @@ void preserved_whitespace_shared_paragraph() {
     auto painted = LayerTreeBuilder(layers).build(*layout);
     SoftwareCompositor::Options paint;
     paint.text_system = &system;
-    SoftwareCompositor compositor({}, paint);
+    SoftwareCompositor compositor(ImagePainter{}, paint);
     const auto pixels = compositor.render(*painted, 140, 120, {255,255,255,255});
     FrameBuffer tiled(140, 120, {255,255,255,255});
     for (int y = 0; y < 120; y += 11) {
@@ -806,12 +805,12 @@ void preserved_whitespace_shared_paragraph() {
           "preserved whitespace packets replay identically across tiled clips");
 
     auto unsupported_dom = HtmlParser{}.parse("<pre id='p'>A\fB</pre>");
-    auto unsupported = LayoutEngine(styles, {}, options).layout(*unsupported_dom, 140, 120);
+    auto unsupported = LayoutEngine(styles, options).layout(*unsupported_dom, 140, 120);
     check(find(*unsupported, "p").text_layout_cache.shared_inline == nullptr,
           "unsupported preserved form-feed text falls back as a complete paragraph");
 
     auto markers_dom = HtmlParser{}.parse("<pre id='p'>A<wbr>B</pre>");
-    auto markers = LayoutEngine(styles, {}, options).layout(*markers_dom, 140, 120);
+    auto markers = LayoutEngine(styles, options).layout(*markers_dom, 140, 120);
     const auto& marker_host = find(*markers, "p");
     check(marker_host.text_layout_cache.shared_inline != nullptr,
           "wbr does not conflict with preserved text mode");
@@ -823,8 +822,8 @@ void partition_and_live_proof() {
         StyleResolver styles(CssParser{}.parse(css));
         auto continuous=HtmlParser{}.parse("<div id='p'><span>AB AB AB</span></div>");
         auto nested=HtmlParser{}.parse("<div id='p'><span id='s'>A<span id='n'>B A</span>B </span><span>AB</span></div>");
-        auto a=LayoutEngine(styles,{},fixture.options).layout(*continuous,100,100);
-        auto b=LayoutEngine(styles,{},fixture.options).layout(*nested,100,100);
+        auto a=LayoutEngine(styles, fixture.options).layout(*continuous,100,100);
+        auto b=LayoutEngine(styles, fixture.options).layout(*nested,100,100);
         const auto& host=find(*b,"p");
         check(host.text_layout_cache.shared_inline != nullptr, "normal entrypoint publishes shared owner");
         auto la=LayerTreeBuilder(fixture.layers).build(*a);
@@ -832,7 +831,7 @@ void partition_and_live_proof() {
         check(glyphs(*la)==glyphs(*lb), "owner boundaries preserve decoded glyph geometry");
         check(glyphs(*lb).size()==6, "all six text glyphs emitted");
         SoftwareCompositor::Options paint;paint.text_system=&fixture.system;
-        SoftwareCompositor compositor({},paint);
+        SoftwareCompositor compositor(ImagePainter{}, paint);
         const auto before=compositor.render(*lb,100,100,{255,255,255,255});
         check(equal_pixels(compositor.render(*la,100,100,{255,255,255,255}),before), "partition invariant pixels");
         const auto& inner=find(*b,"n");
@@ -859,7 +858,7 @@ void refusal_and_rollback() {
     Fixture fixture;
     StyleResolver styles(CssParser{}.parse("*{margin:0;padding:0;border:0}div{font-size:16px;width:25px}"));
     auto dom=HtmlParser{}.parse("<div id='p'><span>A</span><span>B</span></div>");
-    auto layout=LayoutEngine(styles,{},fixture.options).layout(*dom,100,100);
+    auto layout=LayoutEngine(styles, fixture.options).layout(*dom,100,100);
     auto& host=const_cast<LayoutBox&>(find(*layout,"p"));
     const auto binding=host.text_layout_cache.shared_inline;
     check(binding!=nullptr,"shared before transaction");
@@ -886,17 +885,16 @@ void mutation_damage_and_tiling() {
     Fixture f;
     auto dom=HtmlParser{}.parse("<div id='p'><span id='a'>AB </span><span>AB AB AB AB</span></div>");
     StyleResolver styles(CssParser{}.parse("*{margin:0;padding:0;border:0}div{font-size:16px;line-height:20px;width:25px;margin-left:7px;margin-top:4px}"));
-    auto old=LayoutEngine(styles,{},f.options).layout(*dom,80,100);
+    auto old=LayoutEngine(styles, f.options).layout(*dom,80,100);
     auto old_layers=LayerTreeBuilder(f.layers).build(*old);
     SoftwareCompositor::Options po;po.text_system=&f.system;
-    SoftwareCompositor compositor({},po);
+    SoftwareCompositor compositor(ImagePainter{}, po);
     auto old_pixels=compositor.render(*old_layers,80,100,{255,255,255,255});
     const auto& host=find(*old,"p");
     check(detail::shared_inline_current(*host.text_layout_cache.shared_inline,&f.system),"nonzero containing origin keeps proof current");
     auto* text=const_cast<Node*>(find(*old,"a").children[0]->node);
     text->set_text("A ");
-    check(!text_dirty_can_reuse_layout(*dom,*old,{}),"shared text mutation requires paragraph layout");
-    auto fresh=LayoutEngine(styles,{},f.options).layout(*dom,80,100);
+    auto fresh=LayoutEngine(styles, f.options).layout(*dom,80,100);
     auto fresh_layers=LayerTreeBuilder(f.layers).build(*fresh);
     check(!glyphs(*fresh_layers).empty(),"fresh layout captures current DOM generation despite dirty flags");
     const auto full=compositor.render(*fresh_layers,80,100,{255,255,255,255});
@@ -921,10 +919,10 @@ void decoration_removal_damage_clears_old_ink() {
     StyleResolver styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}#p{font-size:16px;line-height:20px;width:40px;"
         "color:red;text-decoration:underline line-through;text-decoration-color:blue}span{display:inline}"));
-    auto old=LayoutEngine(styles,{},fixture.options).layout(*dom,80,60);
+    auto old=LayoutEngine(styles, fixture.options).layout(*dom,80,60);
     auto old_layers=LayerTreeBuilder(fixture.layers).build(*old);
     SoftwareCompositor::Options paint;paint.text_system=&fixture.system;
-    SoftwareCompositor compositor({},paint);
+    SoftwareCompositor compositor(ImagePainter{}, paint);
     const Color background{255,255,255,255};
     auto retained=compositor.render(*old_layers,80,60,background);
 
@@ -942,7 +940,7 @@ void decoration_removal_damage_clears_old_ink() {
 
     find_node(*dom,"p").set_attribute("style",
         "font-size:16px;line-height:20px;width:40px;color:red;text-decoration:none");
-    auto fresh=LayoutEngine(styles,{},fixture.options).layout(*dom,80,60);
+    auto fresh=LayoutEngine(styles, fixture.options).layout(*dom,80,60);
     auto fresh_layers=LayerTreeBuilder(fixture.layers).build(*fresh);
     DirtyRegionOptions dirty_options;dirty_options.viewport={0,0,80,60};dirty_options.expansion_px=0;
     dirty_options.previous_layer_tree=old_layers.get();dirty_options.current_layer_tree=fresh_layers.get();
@@ -977,7 +975,7 @@ void generated_text_shared_sources() {
         "span{display:inline}#p::before{content:'M'}#p::after{content:'C'}"
         "#a::after{content:'X';color:blue}#b::after{content:'Y';font-weight:700}"));
     auto dom = HtmlParser{}.parse("<div id='p'><span id='a'>B</span><span id='b'>A</span></div>");
-    auto layout = LayoutEngine(styles, {}, options).layout(*dom, 100, 100);
+    auto layout = LayoutEngine(styles, options).layout(*dom, 100, 100);
     const auto& host = find(*layout, "p");
     check(host.text_layout_cache.shared_inline != nullptr,
         "plain before/after sources publish with their containing paragraph");
@@ -1005,14 +1003,9 @@ void generated_text_shared_sources() {
     check(host_hit && host_hit.node == host.node,
         "host generated before source hit maps to its originating host element");
     const auto no_system_commands = LayerTreeBuilder{}.flatten(*LayerTreeBuilder{}.build(*layout));
-    bool fallback_before = false, fallback_after = false;
-    for (const auto& command : no_system_commands) {
-        if (command.type() != DisplayCommandType::Text) continue;
-        fallback_before = fallback_before || command.text == "M";
-        fallback_after = fallback_after || command.text == "C";
-    }
-    check(fallback_before && fallback_after,
-        "layer build without the bound text system keeps legacy generated paint fallback");
+    check(std::none_of(no_system_commands.begin(), no_system_commands.end(), [](const DisplayCommand& command) {
+        return command.type() == DisplayCommandType::Text || command.type() == DisplayCommandType::PreparedText;
+    }), "layer build without the bound text system explicitly omits generated text");
     const auto& first = find(*layout, "a");
     check(first.text_layout_cache.shared_inline != nullptr, "generated inline scope retains shared binding");
     const auto& first_member = first.text_layout_cache.shared_inline->snapshot->members[
@@ -1024,7 +1017,7 @@ void generated_text_shared_sources() {
     check(hit && hit.node == first.node, "generated inline source hit maps to its originating element");
     const auto before_rect = detail::shared_inline_damage_bounds(host);
     SoftwareCompositor::Options paint_options; paint_options.text_system = &system;
-    SoftwareCompositor compositor({}, paint_options);
+    SoftwareCompositor compositor(ImagePainter{}, paint_options);
     const auto old_pixels = compositor.render(*layers, 100, 100, {255,255,255,255});
     const auto binding = host.text_layout_cache.shared_inline;
     const auto old_child_rect = host.children.front()->rect;
@@ -1056,7 +1049,7 @@ void generated_text_shared_sources() {
 
     mutable_host.style.before_content_text = "M";
     find_node(*dom, "p").set_attribute("style", "color:green");
-    auto fresh = LayoutEngine(styles, {}, options).layout(*dom, 100, 100);
+    auto fresh = LayoutEngine(styles, options).layout(*dom, 100, 100);
     auto fresh_layers = LayerTreeBuilder(layer_options).build(*fresh);
     const auto full = compositor.render(*fresh_layers, 100, 100, {255,255,255,255});
     DirtyRegionOptions dirty_options; dirty_options.viewport = {0,0,100,100};
@@ -1072,7 +1065,7 @@ void generated_text_shared_sources() {
 
     auto refused_options = options;
     refused_options.shared_inline.max_total_capacity_bytes = 1;
-    auto refused = LayoutEngine(styles, {}, refused_options).layout(*dom, 100, 100);
+    auto refused = LayoutEngine(styles, refused_options).layout(*dom, 100, 100);
     const auto& fallback_host = find(*refused, "p");
     check(!fallback_host.text_layout_cache.shared_inline,
         "generated source budget refusal keeps ordinary layout fallback");
@@ -1099,7 +1092,7 @@ void generated_text_shared_sources() {
     StyleResolver list_styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}li{display:block;width:40px;font-size:16px}span{display:inline}li::before{content:'M'}"));
     auto list_dom = HtmlParser{}.parse("<li id='p'><span>A</span></li>");
-    auto list_layout = LayoutEngine(list_styles, {}, options).layout(*list_dom, 100, 100);
+    auto list_layout = LayoutEngine(list_styles, options).layout(*list_dom, 100, 100);
     const auto& list_host = find(*list_layout, "p");
     check(!list_host.text_layout_cache.shared_inline,
         "list item hosts stay out of shared generated source admission");
@@ -1136,7 +1129,7 @@ void select_popup_text_uses_core_packets_without_legacy_fallback() {
         "font-size:16px;line-height:20px;color:red}"));
     auto dom = HtmlParser{}.parse(
         "<body><select id='choice'><option>A</option><option>B</option></select></body>");
-    auto layout = LayoutEngine(styles, {}, fixture.options).layout(*dom, 120, 160);
+    auto layout = LayoutEngine(styles, fixture.options).layout(*dom, 120, 160);
     Node& select = find_node(*dom, "choice");
     check(set_select_popup_open(select, true), "Core text popup opens");
     auto layers = LayerTreeBuilder(fixture.layers).build(*layout);
@@ -1163,13 +1156,10 @@ void select_popup_text_uses_core_packets_without_legacy_fallback() {
           "selected label and every visible popup option use Core prepared glyphs");
     check(!legacy_option_text, "Core popup emits no legacy option Text commands");
 
-    const auto legacy_commands = LayerTreeBuilder{}.flatten(*LayerTreeBuilder{}.build(*layout));
-    bool legacy_popup_option = false;
-    for (const auto& command : legacy_commands) {
-        legacy_popup_option = legacy_popup_option ||
-            (command.type() == DisplayCommandType::Text && command.text == "B");
-    }
-    check(legacy_popup_option, "unbound Core service preserves the ABI3 popup Text path");
+    const auto unbound_commands = LayerTreeBuilder{}.flatten(*LayerTreeBuilder{}.build(*layout));
+    check(std::none_of(unbound_commands.begin(), unbound_commands.end(), [](const DisplayCommand& command) {
+        return command.type() == DisplayCommandType::Text || command.type() == DisplayCommandType::PreparedText;
+    }), "unbound Core service omits popup text rather than emitting a legacy command");
 
     auto missing_b = asset(400, 16, 4, 1, {{32, 250}, {65, 500}, {118, 500}});
     TextFontFace limited_face{1, 0, missing_b.font};
@@ -1220,7 +1210,7 @@ void generated_text_fallback_and_invalidation() {
         "#counter::after{content:counter(chapter)'.'}"));
     auto fallback_dom = HtmlParser{}.parse(
         "<div id='positioned'><span>A</span></div><div id='counter'><span>B</span></div>");
-    auto fallback_layout = LayoutEngine(fallback_styles, {}, options).layout(*fallback_dom, 100, 100);
+    auto fallback_layout = LayoutEngine(fallback_styles, options).layout(*fallback_dom, 100, 100);
     check(!find(*fallback_layout, "positioned").text_layout_cache.shared_inline,
         "positioned generated source refuses shared paragraph admission");
     check(!find(*fallback_layout, "counter").text_layout_cache.shared_inline,
@@ -1271,7 +1261,7 @@ void generated_text_fallback_and_invalidation() {
     auto incomplete_dom = HtmlParser{}.parse(
         "<div id='missing'><span>A</span></div><div id='counter'><span>A</span></div>"
         "<ul><li><span>A</span></li></ul>");
-    auto incomplete_layout = LayoutEngine(incomplete_styles, {}, incomplete_layout_options)
+    auto incomplete_layout = LayoutEngine(incomplete_styles, incomplete_layout_options)
         .layout(*incomplete_dom, 100, 100);
     VectorDiagnosticSink refusal_diagnostics;
     LayerTreeBuilderOptions incomplete_layer_options;
@@ -1304,7 +1294,7 @@ void generated_text_fallback_and_invalidation() {
     };
     auto initial_styles = make_styles("#ff0000", 400);
     auto dom = HtmlParser{}.parse("<div id='p'><span>A</span></div>");
-    auto initial_layout = LayoutEngine(initial_styles, {}, options).layout(*dom, 100, 100);
+    auto initial_layout = LayoutEngine(initial_styles, options).layout(*dom, 100, 100);
     const auto& initial_host = find(*initial_layout, "p");
     check(initial_host.text_layout_cache.shared_inline != nullptr,
         "plain generated text has a shared binding before pseudo-style mutation");
@@ -1319,7 +1309,7 @@ void generated_text_fallback_and_invalidation() {
         "generated font-weight change invalidates the retained source proof");
 
     auto updated_styles = make_styles("#0000ff", 700);
-    auto updated_layout = LayoutEngine(updated_styles, {}, options).layout(*dom, 100, 100);
+    auto updated_layout = LayoutEngine(updated_styles, options).layout(*dom, 100, 100);
     const auto& updated_host = find(*updated_layout, "p");
     check(updated_host.text_layout_cache.shared_inline != nullptr,
         "updated generated styles publish a fresh shared binding");
@@ -1359,7 +1349,7 @@ void generated_list_num_counter_sources() {
         "#member::after{content:counter(list-num)':';color:blue}"));
     auto dom = HtmlParser{}.parse(
         "<div id='group'><li>one</li><li>two</li><p id='p'><span id='member'>A</span></p></div>");
-    auto layout = LayoutEngine(styles, {}, options).layout(*dom, 140, 100);
+    auto layout = LayoutEngine(styles, options).layout(*dom, 140, 100);
     const auto& host = find(*layout, "p");
     check(host.text_layout_cache.shared_inline != nullptr,
         "ordinary host with list-num before source enters the shared paragraph path");
@@ -1386,7 +1376,7 @@ void generated_list_num_counter_sources() {
         "*{margin:0;padding:0;border:0}p{display:block;width:120px;font-size:16px;line-height:18px}"
         "span{display:inline}#p::before{content:counter(chapter)'.'}"));
     auto unsupported_dom = HtmlParser{}.parse("<p id='p'><span>A</span></p>");
-    auto unsupported_layout = LayoutEngine(unsupported_styles, {}, options).layout(*unsupported_dom, 140, 100);
+    auto unsupported_layout = LayoutEngine(unsupported_styles, options).layout(*unsupported_dom, 140, 100);
     const auto& unsupported_host = find(*unsupported_layout, "p");
     check(!unsupported_host.text_layout_cache.shared_inline,
         "unsupported named counters retain ordinary layout fallback");
@@ -1444,7 +1434,7 @@ void native_list_markers_share_paragraphs() {
     auto dom = HtmlParser{}.parse(
         "<ul id='group'><li id='decimal'><span>ABCDEFGHIJKL</span></li>"
         "<li id='disc'><span>MNOPQRSTUVWX</span></li></ul>");
-    auto layout = LayoutEngine(styles, {}, options).layout(*dom, 100, 120);
+    auto layout = LayoutEngine(styles, options).layout(*dom, 100, 120);
     const auto& decimal = find(*layout, "decimal");
     const auto& disc = find(*layout, "disc");
     check(decimal.text_layout_cache.shared_inline != nullptr &&
@@ -1536,7 +1526,7 @@ void native_list_markers_share_paragraphs() {
     group.insert_child(std::move(preceding), 0);
     check(!detail::shared_inline_current(*old_binding, &system),
         "sibling insertion invalidates the retained marker ordinal source proof");
-    auto renumbered = LayoutEngine(styles, {}, options).layout(*dom, 100, 120);
+    auto renumbered = LayoutEngine(styles, options).layout(*dom, 100, 120);
     const auto& second_decimal = find(*renumbered, "decimal");
     check(second_decimal.text_layout_cache.shared_inline != nullptr,
         "renumbered list item republishes through shared paragraph path");
@@ -1558,7 +1548,7 @@ void native_list_markers_share_paragraphs() {
         "*{margin:0;padding:0;border:0}li{display:block;width:80px;list-style-type:decimal}"
         "span{display:inline}#item::before{content:'X'}"));
     auto override_dom = HtmlParser{}.parse("<ul><li id='item'><span>A</span></li></ul>");
-    auto override_layout = LayoutEngine(override_styles, {}, options).layout(*override_dom, 100, 60);
+    auto override_layout = LayoutEngine(override_styles, options).layout(*override_dom, 100, 60);
     const auto& override_item = find(*override_layout, "item");
     check(!override_item.text_layout_cache.shared_inline,
         "li ::before marker override stays on its established fallback path");
@@ -1589,7 +1579,7 @@ void native_list_markers_share_paragraphs() {
 
     auto refused_options = options;
     refused_options.shared_inline.max_total_capacity_bytes = 1;
-    auto refused_layout = LayoutEngine(styles, {}, refused_options).layout(*dom, 100, 120);
+    auto refused_layout = LayoutEngine(styles, refused_options).layout(*dom, 100, 120);
     check(!find(*refused_layout, "decimal").text_layout_cache.shared_inline,
         "shared list marker budget refusal leaves the ordinary list layout active");
     const auto refused_commands = LayerTreeBuilder(layer_options).flatten(
@@ -1623,7 +1613,7 @@ void partition_matrix_and_events() {
             StyleResolver styles(CssParser{}.parse(std::string("*{margin:0;padding:0;border:0}div{font-size:16px;line-height:9px;width:")+
                 std::to_string(width)+"px;text-indent:2px;text-align:"+align+"}"));
             auto continuous=HtmlParser{}.parse("<div><span>"+source+"</span></div>");
-            auto continuous_layout=LayoutEngine(styles,{},f.options).layout(*continuous,100,100);
+            auto continuous_layout=LayoutEngine(styles, f.options).layout(*continuous,100,100);
             auto continuous_layers=LayerTreeBuilder(f.layers).build(*continuous_layout);
             const auto expected=glyphs(*continuous_layers);
             check(expected.size()>=3 && expected.size()<=5,"whitespace collapses before line emission");
@@ -1635,7 +1625,7 @@ void partition_matrix_and_events() {
                 }
                 html+="</span></div>";
                 auto dom=HtmlParser{}.parse(html);
-                auto layout=LayoutEngine(styles,{},f.options).layout(*dom,100,100);
+                auto layout=LayoutEngine(styles, f.options).layout(*dom,100,100);
                 auto layers=LayerTreeBuilder(f.layers).build(*layout);
                 check(glyphs(*layers)==expected,"partition matrix whitespace/indent/width/negative-leading invariance");
                 ++cases;
@@ -1644,7 +1634,7 @@ void partition_matrix_and_events() {
     }
     StyleResolver styles(CssParser{}.parse("*{margin:0;padding:0;border:0}div{font-size:16px;width:100px}"));
     auto dom=HtmlParser{}.parse("<div><span>B</span><span>A</span><wbr><br><span>A</span></div>");
-    auto layout=LayoutEngine(styles,{},f.options).layout(*dom,100,100);
+    auto layout=LayoutEngine(styles, f.options).layout(*dom,100,100);
     auto layers=LayerTreeBuilder(f.layers).build(*layout);
     const auto values=glyphs(*layers);
     check(values.size()==3 && std::get<1>(values[1])==9600 && std::get<2>(values[2])>std::get<2>(values[1]),
@@ -1655,7 +1645,7 @@ void scrolling_topology_and_packet_refusal() {
     Fixture f;
     auto dom=HtmlParser{}.parse("<div id='p'><span id='a'>AB AB </span><span>AB AB</span></div>");
     StyleResolver styles(CssParser{}.parse("*{margin:0;padding:0;border:0}div{width:25px;height:20px;overflow:auto;font-size:16px;line-height:20px}"));
-    auto layout=LayoutEngine(styles,{},f.options).layout(*dom,80,100);
+    auto layout=LayoutEngine(styles, f.options).layout(*dom,80,100);
     const auto& host=find(*layout,"p");
     check(host.text_layout_cache.shared_inline!=nullptr,"scrollable paragraph uses shared owner");
     f.layers.scroll_resolver={[](const Node&,int maximum,void*) {return std::min(20,maximum);},nullptr};
@@ -1708,7 +1698,7 @@ void layout_topology_replacement() {
     Fixture f;
     auto dom=HtmlParser{}.parse("<div id='p'><span>A</span><span>B</span></div>");
     StyleResolver styles(CssParser{}.parse("*{margin:0;padding:0;border:0}div{font-size:16px;width:25px}"));
-    auto layout=LayoutEngine(styles,{},f.options).layout(*dom,100,100);
+    auto layout=LayoutEngine(styles, f.options).layout(*dom,100,100);
     auto& host=const_cast<LayoutBox&>(find(*layout,"p"));
     const auto binding=host.text_layout_cache.shared_inline;
     LayoutBoxPtr replacement(new LayoutBox);
@@ -1730,7 +1720,7 @@ void flex_override_and_budget_fallback() {
         StyleResolver styles(CssParser{}.parse(
             "*{margin:0;padding:0;border:0}#flex{display:flex;flex-direction:column;width:40px;height:60px}"
             "#p{font-size:16px;line-height:20px;}"));
-        auto layout=LayoutEngine(styles,{},f.options).layout(*dom,100,100);
+        auto layout=LayoutEngine(styles, f.options).layout(*dom,100,100);
         const auto& host=find(*layout,"p");
         check(stats.accepted>=1,"unmodified flex probe accepts shared paragraph");
         check(!host.text_layout_cache.shared_inline,"temporary flex sizing retires shared probe");
@@ -1749,7 +1739,7 @@ void flex_override_and_budget_fallback() {
     StyleResolver styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}#flex{display:flex;flex-direction:column;width:40px;height:60px}"
         "#item{flex-grow:1}#p{font-size:16px;line-height:20px}"));
-    auto layout=LayoutEngine(styles,{},f.options).layout(*dom,100,100);
+    auto layout=LayoutEngine(styles, f.options).layout(*dom,100,100);
     check(stats.accepted==1 && stats.refusals>0,"nested final layout exhausts shared attempts after successful probe");
     const auto& host=find(*layout,"p");
     check(!host.text_layout_cache.shared_inline,"budget refusal retires probe snapshot before ordinary layout");
@@ -1767,7 +1757,7 @@ void fractional_alignment() {
         auto dom=HtmlParser{}.parse("<div id='p'><span>B</span></div>");
         StyleResolver styles(CssParser{}.parse(std::string(
             "*{margin:0;padding:0;border:0}#p{font-size:16px;width:25.5px;text-align:")+alignment+"}"));
-        auto layout=LayoutEngine(styles,{},f.options).layout(*dom,100,100);
+        auto layout=LayoutEngine(styles, f.options).layout(*dom,100,100);
         auto layers=LayerTreeBuilder(f.layers).build(*layout);
         const auto values=glyphs(*layers);
         const int expected=std::string(alignment)=="center" ? 7950 : 15900;
@@ -1813,7 +1803,7 @@ void limits_and_allocation_failures() {
     StyleResolver styles(CssParser{}.parse("*{margin:0;padding:0;border:0}div{font-size:16px;width:25px}"));
     SharedInlineLayoutStatistics stats;
     f.options.shared_inline.statistics=&stats;
-    auto layout=LayoutEngine(styles,{},f.options).layout(*dom,100,100);
+    auto layout=LayoutEngine(styles, f.options).layout(*dom,100,100);
     auto& host=const_cast<LayoutBox&>(find(*layout,"p"));
     check(stats.accepted==1 && stats.acquired_bytes<=f.options.shared_inline.max_total_capacity_bytes,"operation acquisition accounting bounded");
     const auto binding=host.text_layout_cache.shared_inline;
@@ -1843,7 +1833,7 @@ void limits_and_allocation_failures() {
 #endif
     auto tiny=f.options;
     tiny.shared_inline.max_total_capacity_bytes=1;
-    auto refused=LayoutEngine(styles,{},tiny).layout(*dom,100,100);
+    auto refused=LayoutEngine(styles, tiny).layout(*dom,100,100);
     check(!find(*refused,"p").text_layout_cache.shared_inline && stats.refusals>0 && stats.accepted==0,
         "normal entrypoint preserves whole ordinary fallback on operation budget refusal");
     std::cout << "allocation_refusals=" << failures << " sizeof_snapshot=" << sizeof(detail::SharedInlineSnapshot)

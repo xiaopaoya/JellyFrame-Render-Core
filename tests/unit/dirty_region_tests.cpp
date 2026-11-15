@@ -8,6 +8,7 @@
 #include "render_core/layout.h"
 #include "render_core/render_tree.h"
 #include "render_core/style_repaint.h"
+#include "core_text_test_fixture.h"
 
 #include <iostream>
 #include <limits>
@@ -44,13 +45,16 @@ struct LayoutFixture {
           layout_tree(std::move(layout_tree_in)) {}
 };
 
-LayoutFixture build_layout(std::unique_ptr<Node> document, const char* css, int viewport_width) {
+LayoutFixture build_layout(std::unique_ptr<Node> document, const char* css, int viewport_width,
+                           TextSystem* text_system = nullptr) {
     CssParser css_parser;
     Stylesheet stylesheet = css_parser.parse(css);
     StyleResolver resolver(stylesheet);
     RenderTreeBuilder render_tree_builder(resolver);
     auto render_tree = render_tree_builder.build(*document);
-    LayoutEngine layout_engine(resolver);
+    LayoutEngineOptions options;
+    options.text_system = text_system;
+    LayoutEngine layout_engine(resolver, options);
     auto layout_tree = layout_engine.layout(*render_tree, viewport_width);
     return LayoutFixture(std::move(document), std::move(stylesheet), std::move(resolver),
                          std::move(render_tree), std::move(layout_tree));
@@ -92,11 +96,13 @@ void collect_elements(Node& node, const char* tag, std::vector<Node*>& output) {
 }
 
 void text_dirty_generates_local_rect() {
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
     HtmlParser html_parser;
     auto initial = build_layout(
         html_parser.parse("<body><p id='a'>Alpha</p><p id='b'>Beta</p></body>"),
         "p { width: 120px; margin: 0; font-size: 16px; }",
-        240);
+        240, &fonts.system());
     clear_dirty_flags(*initial.document);
     Node* text = first_text(*initial.document);
     check(text != nullptr, "text node exists");
@@ -105,7 +111,7 @@ void text_dirty_generates_local_rect() {
     auto previous_layout = std::move(initial.layout_tree);
     auto next = build_layout(std::move(initial.document),
                              "p { width: 120px; margin: 0; font-size: 16px; }",
-                             240);
+                             240, &fonts.system());
     const std::vector<Rect> rects =
         compute_dirty_rects(*next.document,
                             previous_layout.get(),

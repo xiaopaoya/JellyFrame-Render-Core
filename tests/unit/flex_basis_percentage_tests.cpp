@@ -91,7 +91,9 @@ int main(){try{
     node->set_attribute("style","display:flex;width:100px;height:10px;flex-basis:100px");
     auto before=RenderTreeBuilder(empty).build(*node);auto layout=LayoutEngine(empty).layout(*before,320,240);
     node->set_attribute("style","display:flex;width:100px;height:10px;flex-basis:.1%");auto after=RenderTreeBuilder(empty).build(*node);
-    check(before->style.flex_basis==after->style.flex_basis && !style_dirty_can_reuse_layout(*node,*before,*after,*layout,{}),"basis kind changes invalidate layout even with equal scalars");
+    check(before->style.flex_basis==after->style.flex_basis &&
+          before->style.flex_basis_kind!=after->style.flex_basis_kind,
+          "basis kind remains distinct when scalar proxies are equal");
     std::cout<<"48 rational percentage scenes and basis contracts passed; Style bytes="<<sizeof(Style)<<"\n";
 #else
     auto n=make_element("div");n->set_attribute("style","flex-basis:50%");

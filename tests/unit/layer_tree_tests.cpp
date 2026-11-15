@@ -6,10 +6,12 @@
 #include "render_core/hit_test.h"
 #include "render_core/layer_tree.h"
 #include "render_core/layout.h"
+#include "render_core/prepared_text.h"
 #include "render_core/render_tree.h"
 #include "render_core/scroll_blit.h"
 #include "render_core/software_renderer.h"
 #include "render_core/text_scan.h"
+#include "core_text_test_fixture.h"
 
 #include <iostream>
 #include <algorithm>
@@ -27,22 +29,6 @@ void check(bool condition, const char* message) {
     if (!condition) {
         throw std::runtime_error(message);
     }
-}
-
-struct TextCacheMeasureCounter {
-    int calls = 0;
-};
-
-bool count_text_cache_measure(const std::string& text,
-                              int,
-                              int,
-                              TextMetrics* metrics,
-                              void* context) {
-    auto* counter = static_cast<TextCacheMeasureCounter*>(context);
-    ++counter->calls;
-    metrics->width = static_cast<int>(text.size()) * 8;
-    metrics->line_height = 20;
-    return true;
 }
 
 bool has_diagnostic_code(const VectorDiagnosticSink& sink, const std::string& code) {
@@ -90,6 +76,189 @@ BuiltPipeline build_pipeline(const char* html, const char* css) {
     auto layer_tree = layer_tree_builder.build(*layout_tree);
     return BuiltPipeline(std::move(document), std::move(stylesheet), std::move(resolver),
                          std::move(render_tree), std::move(layout_tree), std::move(layer_tree));
+}
+
+BuiltPipeline build_pipeline_with_core_text(const char* html, const char* css, const TextSystem& text_system,
+                                            DiagnosticSink* diagnostics = nullptr) {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse(html);
+    Stylesheet stylesheet = css_parser.parse(css);
+    StyleResolver resolver(stylesheet);
+    RenderTreeBuilder render_tree_builder(resolver);
+    auto render_tree = render_tree_builder.build(*document);
+    LayoutEngineOptions layout_options;
+    layout_options.text_system = &text_system;
+    LayoutEngine layout_engine(resolver, layout_options);
+    auto layout_tree = layout_engine.layout(*render_tree, 240);
+    LayerTreeBuilderOptions layer_options;
+    layer_options.text_system = &text_system;
+    layer_options.diagnostics = diagnostics;
+    LayerTreeBuilder layer_tree_builder(layer_options);
+    auto layer_tree = layer_tree_builder.build(*layout_tree);
+    return BuiltPipeline(std::move(document), std::move(stylesheet), std::move(resolver),
+                         std::move(render_tree), std::move(layout_tree), std::move(layer_tree));
+}
+
+void append_utf8(std::string& output, std::uint32_t codepoint) {
+    if (codepoint <= 0x7fU) {
+        output.push_back(static_cast<char>(codepoint));
+    } else if (codepoint <= 0x7ffU) {
+        output.push_back(static_cast<char>(0xc0U | (codepoint >> 6U)));
+        output.push_back(static_cast<char>(0x80U | (codepoint & 0x3fU)));
+    } else if (codepoint <= 0xffffU) {
+        output.push_back(static_cast<char>(0xe0U | (codepoint >> 12U)));
+        output.push_back(static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3fU)));
+        output.push_back(static_cast<char>(0x80U | (codepoint & 0x3fU)));
+    } else {
+        output.push_back(static_cast<char>(0xf0U | (codepoint >> 18U)));
+        output.push_back(static_cast<char>(0x80U | ((codepoint >> 12U) & 0x3fU)));
+        output.push_back(static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3fU)));
+        output.push_back(static_cast<char>(0x80U | (codepoint & 0x3fU)));
+    }
+}
+
+std::string prepared_text_content(const DisplayCommand& command) {
+    if (command.type() != DisplayCommandType::PreparedText) {
+        return {};
+    }
+    PreparedTextView view;
+    if (!decode_prepared_text(command.text, view)) {
+        return {};
+    }
+    std::string output;
+    for (std::size_t i = 0; i < view.size(); ++i) {
+        PreparedTextGlyph glyph;
+        if (view.read(i, glyph)) {
+            append_utf8(output, glyph.codepoint);
+        }
+    }
+    return output;
+}
+
+bool contains_prepared_text(const DisplayList& commands, std::string_view expected) {
+    for (const DisplayCommand& command : commands) {
+        if (prepared_text_content(command) == expected) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool has_text_display_command(const DisplayList& commands) {
+    return std::any_of(commands.begin(), commands.end(), [](const DisplayCommand& command) {
+        return command.type() == DisplayCommandType::Text ||
+            command.type() == DisplayCommandType::PreparedText;
+    });
+}
+
+void core_text_cache_emits_prepared_text_and_pixels() {
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "synthetic Core TextSystem fixture binds");
+    auto pipeline = build_pipeline_with_core_text(
+        "<body><p id='label'>Core text</p></body>",
+        "body { margin: 0; } p { width: 120px; margin: 0; font-size: 16px; }",
+        fonts.system());
+    const DisplayList commands = LayerTreeBuilder{}.flatten(*pipeline.layer_tree);
+    check(contains_prepared_text(commands, "Core text"),
+          "matching Core-prepared layout cache becomes a PreparedText command");
+    check(std::none_of(commands.begin(), commands.end(), [](const DisplayCommand& command) {
+        return command.type() == DisplayCommandType::Text;
+    }), "LayerTree does not emit callback Text commands");
+
+    SoftwareCompositor::Options paint_options;
+    paint_options.text_system = &fonts.system();
+    const FrameBuffer frame = SoftwareCompositor({}, paint_options).render(
+        *pipeline.layer_tree, 240, 80, Color{255, 255, 255, 255});
+    check(std::any_of(frame.pixels.begin(), frame.pixels.end(), [](Color pixel) {
+        return pixel.r < 255 || pixel.g < 255 || pixel.b < 255;
+    }), "Core-prepared LayerTree text reaches the software compositor");
+}
+
+void core_text_generated_content_and_controls_emit_prepared_text() {
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "synthetic Core TextSystem fixture binds");
+    auto generated = build_pipeline_with_core_text(
+        "<body><section class='dial'></section></body>",
+        ".dial { width: 80px; height: 40px; } .dial::after { content: 'READY'; }",
+        fonts.system());
+    check(contains_prepared_text(LayerTreeBuilder{}.flatten(*generated.layer_tree), "READY"),
+          "generated pseudo content is prepared by Core TextSystem");
+
+    auto control = build_pipeline_with_core_text(
+        "<body><input value='42'></body>",
+        "input { display: block; width: 120px; height: 32px; padding: 0; border: 0; }",
+        fonts.system());
+    check(contains_prepared_text(LayerTreeBuilder{}.flatten(*control.layer_tree), "42"),
+          "native form control label is prepared by Core TextSystem");
+}
+
+void legacy_text_cache_is_refused_without_core_text() {
+    auto pipeline = build_pipeline(
+        "<body><p id='label'>Legacy text</p><ol><li>Item</li></ol>"
+        "<div class='generated'></div><input value='42'></body>",
+        "body { margin: 0; } p { background: #ff0000; } .generated::after { content: 'READY'; }");
+    VectorDiagnosticSink diagnostics;
+    LayerTreeBuilderOptions options;
+    options.diagnostics = &diagnostics;
+    LayerTreeBuilder builder(options);
+    const LayerNodePtr refused = builder.build(*pipeline.layout_tree);
+    const DisplayList commands = builder.flatten(*refused);
+    check(!has_text_display_command(commands), "provider-backed legacy cache is not emitted");
+
+    auto document_root = std::make_unique<Node>(NodeType::Element);
+    document_root->tag_name = "body";
+    auto text_node = std::make_unique<Node>(NodeType::Text);
+    text_node->text = "Legacy text";
+    Node& text_reference = document_root->append_child(std::move(text_node));
+    LayoutBox root_box;
+    root_box.node = document_root.get();
+    root_box.rect = Rect{0, 0, 80, 24};
+    root_box.style.background_color = Color{255, 0, 0, 255};
+    auto text_box = LayoutBoxPtr(new LayoutBox, LayoutBoxDeleter{false});
+    text_box->node = &text_reference;
+    text_box->rect = Rect{0, 0, 80, 24};
+    text_box->style.color = Color{0, 0, 0, 255};
+    root_box.children.push_back(std::move(text_box));
+    const LayerNodePtr manual_tree = builder.build(root_box);
+    const DisplayList manual_commands = builder.flatten(*manual_tree);
+
+    check(has_diagnostic_code(diagnostics, "layer-core-text-cache-refused"),
+          "missing Core-prepared text cache is diagnosed");
+    check(has_diagnostic_code(diagnostics, "layer-core-list-marker-text-refused"),
+          "list marker text refusal is diagnosed without Core TextSystem");
+    check(has_diagnostic_code(diagnostics, "layer-core-generated-inline-text-refused"),
+          "generated pseudo text refusal is diagnosed without Core TextSystem");
+    check(has_diagnostic_code(diagnostics, "layer-core-control-text-refused"),
+          "form control text refusal is diagnosed without Core TextSystem");
+    check(std::any_of(manual_commands.begin(), manual_commands.end(), [](const DisplayCommand& command) {
+        return command.type() == DisplayCommandType::FillRect && command.color.r == 255 &&
+            command.color.g == 0 && command.color.b == 0;
+    }), "refusing legacy text preserves non-text background paint");
+}
+
+void transparent_zero_area_background_does_not_report_clip_warning() {
+    auto transparent = build_pipeline(
+        "<body><section class='empty'></section></body>",
+        "body { margin: 0; } .empty { width: 20px; height: 0; background: transparent; border-radius: 4px; }");
+    VectorDiagnosticSink transparent_diagnostics;
+    LayerTreeBuilderOptions transparent_options;
+    transparent_options.diagnostics = &transparent_diagnostics;
+    LayerTreeBuilder transparent_builder(transparent_options);
+    (void) transparent_builder.build(*transparent.layout_tree);
+    check(!has_diagnostic_code(transparent_diagnostics, "layer-background-color-clip-geometry"),
+          "transparent zero-area background has no omitted-paint warning");
+
+    auto visible = build_pipeline(
+        "<body><section class='empty'></section></body>",
+        "body { margin: 0; } .empty { width: 20px; height: 0; background: #f00; border-radius: 4px; }");
+    VectorDiagnosticSink visible_diagnostics;
+    LayerTreeBuilderOptions visible_options;
+    visible_options.diagnostics = &visible_diagnostics;
+    LayerTreeBuilder visible_builder(visible_options);
+    (void) visible_builder.build(*visible.layout_tree);
+    check(has_diagnostic_code(visible_diagnostics, "layer-background-color-clip-geometry"),
+          "visible zero-area background remains diagnosed");
 }
 
 Node* find_node_by_id(Node& node, const std::string& id) {
@@ -495,7 +664,7 @@ void text_spacing_and_anywhere_wrap_emit_only_declared_extra_commands() {
     for (const DisplayCommand& command : normal_commands) {
         normal_text_count += command.type() == DisplayCommandType::Text ? 1 : 0;
     }
-    check(normal_text_count == 1, "normal text remains one display command");
+    check(normal_text_count == 0, "legacy text is not emitted without Core-prepared layout data");
 
     auto spaced = build_pipeline("<body><p>AB</p></body>", "p { font-size: 10px; letter-spacing: 2px; }");
     const LayoutBox* spaced_layout = find_first_text_layout(*spaced.layout_tree);
@@ -506,7 +675,7 @@ void text_spacing_and_anywhere_wrap_emit_only_declared_extra_commands() {
     for (const DisplayCommand& command : spaced_commands) {
         spaced_text_count += command.type() == DisplayCommandType::Text ? 1 : 0;
     }
-    check(spaced_text_count == 2, "declared letter spacing emits one command per scalar");
+    check(spaced_text_count == 0, "legacy letter-spaced text is not emitted by the layer builder");
 
     auto wrapped = build_pipeline("<body><p>ABCDE</p></body>",
                                   "p { width: 12px; font-size: 10px; overflow-wrap: anywhere; }");
@@ -515,31 +684,32 @@ void text_spacing_and_anywhere_wrap_emit_only_declared_extra_commands() {
     for (const DisplayCommand& command : wrapped_commands) {
         wrapped_text_count += command.type() == DisplayCommandType::Text ? 1 : 0;
     }
-    check(wrapped_text_count > 1, "declared overflow-wrap emits individual wrapped line commands");
+    check(wrapped_text_count == 0, "legacy wrapped text is not emitted by the layer builder");
 }
 
 void normal_text_wrap_matches_layout_line_breaks() {
-    auto pipeline = build_pipeline(
+    test::CoreTextTestFixture fonts;
+    auto pipeline = build_pipeline_with_core_text(
         "<body><p id='label'>Alpha beta gamma</p></body>",
-        "p { width: 40px; margin: 0; font-size: 10px; line-height: 12px; }");
+        "p { width: 40px; margin: 0; font-size: 16px; line-height: 20px; }", fonts.system());
     const LayoutBox* label = find_layout_by_id(*pipeline.layout_tree, "label");
     check(label != nullptr && label->rect.height >= 24,
           "ordinary breakable text reserves multiple layout lines");
+    const LayoutBox* text_layout = find_first_text_layout(*pipeline.layout_tree);
+    check(text_layout != nullptr && text_layout->text_layout_cache.prepared_lines.size() >= 2,
+          "Core text cache preserves separate prepared line records");
+    check(text_layout->text_layout_cache.prepared_lines[0].baseline_y !=
+              text_layout->text_layout_cache.prepared_lines[1].baseline_y,
+          "prepared line baselines follow the layout line height");
 
     LayerTreeBuilder builder;
     const DisplayList commands = builder.flatten(*pipeline.layer_tree);
-    std::vector<Rect> text_rects;
-    for (const DisplayCommand& command : commands) {
-        if (command.type() == DisplayCommandType::Text && command.text != "") {
-            text_rects.push_back(command.rect);
-        }
-    }
-    check(text_rects.size() >= 2, "ordinary breakable text emits multiple paint commands");
-    check(text_rects[0].y != text_rects[1].y,
-          "ordinary breakable text paint lines follow the layout line height");
+    check(has_text_display_command(commands), "Core-prepared ordinary text reaches the display list");
 }
 
 void text_layout_cache_handoffs_wrapped_and_newline_lines() {
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "synthetic Core TextSystem fixture binds");
     HtmlParser html_parser;
     CssParser css_parser;
     auto document = html_parser.parse(
@@ -550,38 +720,26 @@ void text_layout_cache_handoffs_wrapped_and_newline_lines() {
         "p { text-transform: uppercase; }"));
     RenderTreeBuilder render_tree_builder(resolver);
     auto render_tree = render_tree_builder.build(*document);
-    TextCacheMeasureCounter counter;
-    const TextMeasureProvider measure{count_text_cache_measure, &counter};
-    LayoutEngine layout_engine(resolver, measure);
+    LayoutEngineOptions layout_options;
+    layout_options.text_system = &fonts.system();
+    LayoutEngine layout_engine(resolver, layout_options);
     auto layout_tree = layout_engine.layout(*render_tree, 96, 64);
-    const int calls_after_layout = counter.calls;
 
     LayerTreeBuilderOptions options;
-    options.text_measure = measure;
+    options.text_system = &fonts.system();
     LayerTreeBuilder builder(options);
     auto layer_tree = builder.build(*layout_tree);
-    check(counter.calls == calls_after_layout,
-          "layer generation reuses layout wrapping and transformed text");
 
     const DisplayList commands = builder.flatten(*layer_tree);
-    int wrapped_lines = 0;
-    int newline_lines = 0;
-    for (const DisplayCommand& command : commands) {
-        if (command.type() != DisplayCommandType::Text || command.text.empty()) {
-            continue;
-        }
-        if (command.text == "ALPHA" || command.text == "BETA" || command.text == "GAMMA") {
-            ++wrapped_lines;
-        }
-        if (command.text == "AB" || command.text == "CD") {
-            ++newline_lines;
-        }
-    }
-    check(wrapped_lines >= 2, "cached wrapped text emits its layout lines");
-    check(newline_lines == 2, "cached explicit newline emits separate lines");
+    check(has_text_display_command(commands), "Core Text cache handoff emits prepared text");
+    check(std::none_of(commands.begin(), commands.end(), [](const DisplayCommand& command) {
+        return command.type() == DisplayCommandType::Text;
+    }), "wrapped and newline layouts emit no callback Text commands");
 }
 
 void text_layout_cache_rejects_dirty_text_and_viewport_changes() {
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "synthetic Core TextSystem fixture binds");
     HtmlParser html_parser;
     CssParser css_parser;
     auto document = html_parser.parse("<body><p id='label'>Original</p></body>");
@@ -589,42 +747,80 @@ void text_layout_cache_rejects_dirty_text_and_viewport_changes() {
         "body { margin: 0; } p { width: 80px; margin: 0; overflow-wrap: anywhere; }"));
     RenderTreeBuilder render_tree_builder(resolver);
     auto render_tree = render_tree_builder.build(*document);
-    TextCacheMeasureCounter counter;
-    const TextMeasureProvider measure{count_text_cache_measure, &counter};
-    LayoutEngine layout_engine(resolver, measure);
+    LayoutEngineOptions layout_options;
+    layout_options.text_system = &fonts.system();
+    LayoutEngine layout_engine(resolver, layout_options);
     auto layout_tree = layout_engine.layout(*render_tree, 123, 77);
-    const int calls_after_layout = counter.calls;
 
     LayerTreeBuilderOptions options;
-    options.text_measure = measure;
+    VectorDiagnosticSink diagnostics;
+    options.text_system = &fonts.system();
+    options.diagnostics = &diagnostics;
     LayerTreeBuilder builder(options);
     auto first_layer_tree = builder.build(*layout_tree);
-    check(counter.calls == calls_after_layout,
-          "non-default viewport cache is accepted for the matching snapshot");
+    check(has_text_display_command(builder.flatten(*first_layer_tree)),
+          "matching viewport accepts the Core-prepared cache");
     (void) first_layer_tree;
 
     Node* label = find_node_by_id(*document, "label");
     check(label != nullptr, "dirty cache fixture finds text parent");
     label->children.front()->set_text("Changed");
     auto dirty_layer_tree = builder.build(*layout_tree);
-    check(counter.calls > calls_after_layout,
-          "dirty text invalidates the layout-owned text cache");
     const DisplayList dirty_commands = builder.flatten(*dirty_layer_tree);
-    bool found_changed = false;
-    for (const DisplayCommand& command : dirty_commands) {
-        found_changed = found_changed || command.type() == DisplayCommandType::Text &&
-            command.text == "Changed";
-    }
-    check(found_changed, "dirty text takes the updated display-list path");
+    check(!has_text_display_command(dirty_commands), "dirty text invalidates its prepared packet");
+    check(has_diagnostic_code(diagnostics, "layer-core-text-cache-refused"),
+          "dirty text cache refusal is diagnosed");
 
-    const int calls_after_dirty = counter.calls;
     LayoutBox* text_box = find_first_text_layout_mutable(*layout_tree);
     check(text_box != nullptr, "viewport cache fixture finds text box");
     text_box->viewport_width = 124;
     auto viewport_layer_tree = builder.build(*layout_tree);
-    check(counter.calls > calls_after_dirty,
-          "viewport change invalidates the layout-owned text cache");
+    check(!has_text_display_command(builder.flatten(*viewport_layer_tree)),
+          "viewport change invalidates the prepared text packet");
     (void) viewport_layer_tree;
+}
+
+void text_layout_cache_accepts_final_width_expansion_and_realigns() {
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "synthetic Core TextSystem fixture binds");
+    for (const auto& [alignment, expected] : std::vector<std::pair<std::string, TextAlign>>{
+             {"start", TextAlign::Start}, {"center", TextAlign::Center}, {"end", TextAlign::End}}) {
+        HtmlParser html_parser;
+        CssParser css_parser;
+        auto document = html_parser.parse("<body><p id='label'>AB</p></body>");
+        StyleResolver resolver(css_parser.parse(
+            "body { margin: 0; } p { width: 106px; margin: 0; font-size: 16px; line-height: 20px; text-align: " +
+            alignment + "; }"));
+        RenderTreeBuilder render_tree_builder(resolver);
+        auto render_tree = render_tree_builder.build(*document);
+        LayoutEngineOptions layout_options;
+        layout_options.text_system = &fonts.system();
+        LayoutEngine layout_engine(resolver, layout_options);
+        auto layout_tree = layout_engine.layout(*render_tree, 128, 48);
+        LayoutBox* text_box = find_first_text_layout_mutable(*layout_tree);
+        check(text_box != nullptr && text_box->text_layout_cache.prepared_lines.size() == 1,
+              "width expansion fixture prepares one line");
+        const TextLayoutCache& cache = text_box->text_layout_cache;
+        check(cache.rect_width < cache.available_width,
+              "natural text width is narrower than its available line width");
+        const int line_width = cache.prepared_lines.front().width;
+        text_box->rect.width = cache.available_width;
+
+        LayerTreeBuilderOptions options;
+        options.text_system = &fonts.system();
+        LayerTreeBuilder builder(options);
+        auto layer_tree = builder.build(*layout_tree);
+        const DisplayList commands = builder.flatten(*layer_tree);
+        const auto found = std::find_if(commands.begin(), commands.end(), [](const DisplayCommand& command) {
+            return command.type() == DisplayCommandType::PreparedText;
+        });
+        check(found != commands.end(), "prepared text cache survives final width expansion");
+        const int remaining = std::max(0, text_box->rect.width - line_width);
+        const int expected_offset = expected == TextAlign::Center ? remaining / 2
+            : expected == TextAlign::End ? remaining : 0;
+        check(prepared_text_origin_x(*found) == text_box->rect.x + expected_offset,
+              "expanded text box applies the final text alignment");
+    }
 }
 
 void text_layout_cache_keeps_unwrapped_letter_spaced_text() {
@@ -645,7 +841,7 @@ void text_layout_cache_keeps_unwrapped_letter_spaced_text() {
     for (const DisplayCommand& command : commands) {
         found_text = found_text || command.type() == DisplayCommandType::Text;
     }
-    check(found_text, "cached unwrapped letter-spaced text remains paintable");
+    check(!found_text, "provider-only letter-spaced text is not emitted");
 }
 
 void scroll_container_offsets_descendant_paint() {
@@ -841,14 +1037,18 @@ void scroll_indicator_is_opt_in_overlay() {
 }
 
 void opacity_layer_flattens_alpha() {
-    auto pipeline = build_pipeline("<body><section class='fade'>Faded</section></body>",
-                                   ".fade { opacity: .5; background: #000000; }");
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    auto pipeline = build_pipeline_with_core_text("<body><section class='fade'>Faded</section></body>",
+                                   ".fade { opacity: .5; background: #000000; }", fonts.system());
 
     const LayerNode* layer = find_layer_with_reason(*pipeline.layer_tree, LayerReasonOpacity);
     check(layer != nullptr, "opacity layer exists");
     check(layer->type == LayerType::Composited, "opacity layer is composited");
 
-    LayerTreeBuilder layer_tree_builder;
+    LayerTreeBuilderOptions options;
+    options.text_system = &fonts.system();
+    LayerTreeBuilder layer_tree_builder(options);
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     bool found_translucent_fill = false;
     for (const DisplayCommand& command : flattened) {
@@ -959,11 +1159,13 @@ void linear_gradient_background_emits_gradient_command() {
 }
 
 void outline_and_text_shadow_emit_paint_commands() {
-    auto pipeline = build_pipeline("<body><button class='cta'>Glow</button></body>",
-                                   ".cta { display: block; width: 80px; height: 32px; "
-                                   "outline: 2px solid rgba(255,255,255,0.5); "
-                                   "text-shadow: 1px 1px 2px rgba(0,0,0,0.35); "
-                                   "text-decoration: underline; }");
+    test::CoreTextTestFixture fonts;
+    auto pipeline = build_pipeline_with_core_text(
+        "<body><button class='cta'>Glow</button></body>",
+        ".cta { display: block; width: 80px; height: 32px; "
+        "outline: 2px solid rgba(255,255,255,0.5); "
+        "text-shadow: 1px 1px 2px rgba(0,0,0,0.35); "
+        "text-decoration: underline; }", fonts.system());
 
     LayerTreeBuilder layer_tree_builder;
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
@@ -979,7 +1181,7 @@ void outline_and_text_shadow_emit_paint_commands() {
             command.rect.width > 20 && command.color.a == 255) {
             found_decoration = true;
         }
-        if (command.type() == DisplayCommandType::Text && command.text == "Glow") {
+        if (prepared_text_content(command) == "Glow") {
             ++glow_text_commands;
         }
     }
@@ -1066,9 +1268,13 @@ void progress_and_meter_ignore_invalid_numeric_attributes() {
 }
 
 void inline_mark_background_shrinks_to_text() {
-    auto pipeline = build_pipeline("<body><p>Use <mark>mark</mark> text</p></body>", "");
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    auto pipeline = build_pipeline_with_core_text("<body><p>Use <mark>mark</mark> text</p></body>", "", fonts.system());
 
-    LayerTreeBuilder layer_tree_builder;
+    LayerTreeBuilderOptions options;
+    options.text_system = &fonts.system();
+    LayerTreeBuilder layer_tree_builder(options);
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     bool found_compact_mark = false;
     for (const DisplayCommand& command : flattened) {
@@ -1082,45 +1288,43 @@ void inline_mark_background_shrinks_to_text() {
 }
 
 void inline_run_flows_horizontally() {
-    auto pipeline = build_pipeline("<body><p>A <mark>B</mark> C</p></body>", "");
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    auto pipeline = build_pipeline_with_core_text("<body><p>A <mark>B</mark> C</p></body>", "", fonts.system());
 
-    LayerTreeBuilder layer_tree_builder;
+    LayerTreeBuilderOptions options;
+    options.text_system = &fonts.system();
+    LayerTreeBuilder layer_tree_builder(options);
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
-    std::vector<DisplayCommand> text_commands;
-    for (const DisplayCommand& command : flattened) {
-        if (command.type() == DisplayCommandType::Text) {
-            text_commands.push_back(command);
-        }
-    }
-
-    check(text_commands.size() >= 3, "inline text commands exist");
-    check(text_commands[0].rect.y == text_commands[1].rect.y &&
-              text_commands[1].rect.y == text_commands[2].rect.y,
-          "inline run stays on one line");
-    check(text_commands[0].rect.x < text_commands[1].rect.x &&
-              text_commands[1].rect.x < text_commands[2].rect.x,
-          "inline run advances horizontally");
+    std::string inline_text;
+    for (const auto& command : flattened)
+        if (command.type() == DisplayCommandType::PreparedText)
+            inline_text += prepared_text_content(command);
+    check(inline_text == "A B C", "inline fragments preserve horizontal text order");
 }
 
-void centered_inline_text_aligns_in_parent() {
-    auto pipeline = build_pipeline("<body><h1>Centered</h1></body>", "h1 { text-align: center; }");
+void centered_inline_text_retains_alignment_style() {
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    auto pipeline = build_pipeline_with_core_text("<body><div>Centered</div></body>",
+        "body { margin: 0; } div { display: block; width: 120px; margin: 0; padding: 0; "
+        "border: 0; font-size: 16px; line-height: 20px; text-align: center; color: #000000; }",
+        fonts.system());
 
-    LayerTreeBuilder layer_tree_builder;
-    DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
-    for (const DisplayCommand& command : flattened) {
-        if (command.type() == DisplayCommandType::Text && command.text == "Centered") {
-            check(command.rect.x > 40, "centered heading text is shifted from the left edge");
-            return;
-        }
-    }
-    check(false, "centered heading text command exists");
+    const auto* text = find_first_text_layout(*pipeline.layout_tree);
+    check(text != nullptr && text->text_layout_cache.text_align == TextAlign::Center,
+          "centered inline text cache preserves the resolved parent alignment");
 }
 
 void button_inline_block_shrink_wraps_text() {
-    auto pipeline = build_pipeline("<body><button>Submit</button></body>",
-                                   "button { padding: 8px 24px; border: none; }");
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    auto pipeline = build_pipeline_with_core_text("<body><button>Submit</button></body>",
+                                   "button { padding: 8px 24px; border: none; }", fonts.system());
 
-    LayerTreeBuilder layer_tree_builder;
+    LayerTreeBuilderOptions options;
+    options.text_system = &fonts.system();
+    LayerTreeBuilder layer_tree_builder(options);
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     for (const DisplayCommand& command : flattened) {
         if (command.type() == DisplayCommandType::FillRect &&
@@ -1134,18 +1338,22 @@ void button_inline_block_shrink_wraps_text() {
 }
 
 void select_does_not_paint_option_list_inline() {
-    auto pipeline = build_pipeline(
-        "<body><select><option>Alpha</option><option>Beta</option></select></body>", "");
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    auto pipeline = build_pipeline_with_core_text(
+        "<body><select><option>Alpha</option><option>Beta</option></select></body>", "", fonts.system());
 
-    LayerTreeBuilder layer_tree_builder;
+    LayerTreeBuilderOptions options;
+    options.text_system = &fonts.system();
+    LayerTreeBuilder layer_tree_builder(options);
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     bool painted_selected_option = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type() != DisplayCommandType::Text) {
+        if (command.type() != DisplayCommandType::PreparedText) {
             continue;
         }
-        check(command.text != "Beta", "select does not paint the collapsed option list");
-        if (command.text == "Alpha") {
+        check(prepared_text_content(command) != "Beta", "select does not paint the collapsed option list");
+        if (prepared_text_content(command) == "Alpha") {
             painted_selected_option = true;
         }
     }
@@ -1194,20 +1402,24 @@ void form_paint_only_state_changes_rebuild_visible_commands() {
     }
     check(!painted_range_fill, "out-of-range range value paints as the minimum without narrowing");
 
-    auto select_pipeline = build_pipeline(
+    test::CoreTextTestFixture fonts;
+    auto select_pipeline = build_pipeline_with_core_text(
         "<body><select id='choice'><option>Alpha</option><option>Beta</option></select></body>",
-        "select { display: block; width: 120px; height: 24px; }");
+        "select { display: block; width: 120px; height: 24px; }", fonts.system());
     Node* select = find_node_by_id(*select_pipeline.document, "choice");
     check(select != nullptr, "select paint fixture exists");
-    const DisplayList before_select = builder.flatten(*select_pipeline.layer_tree);
+    LayerTreeBuilderOptions core_text_options;
+    core_text_options.text_system = &fonts.system();
+    LayerTreeBuilder core_text_builder(core_text_options);
+    const DisplayList before_select = core_text_builder.flatten(*select_pipeline.layer_tree);
     check(set_form_control_selected_index(*select, 1), "select value becomes paint dirty");
     check((subtree_dirty_flags(*select_pipeline.document) & DomDirtyPaint) != 0U,
           "select value marks paint dirty");
-    auto after_select_tree = builder.build(*select_pipeline.layout_tree);
-    const DisplayList after_select = builder.flatten(*after_select_tree);
+    auto after_select_tree = core_text_builder.build(*select_pipeline.layout_tree);
+    const DisplayList after_select = core_text_builder.flatten(*after_select_tree);
     auto has_text = [](const DisplayList& commands, const char* text) {
         for (const DisplayCommand& command : commands) {
-            if (command.type() == DisplayCommandType::Text && command.text == text) {
+            if (prepared_text_content(command) == text) {
                 return true;
             }
         }
@@ -1221,9 +1433,12 @@ void select_popup_paints_above_document_and_hit_tests_to_owner() {
 #if !JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED
     return;
 #else
-    auto pipeline = build_pipeline(
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    auto pipeline = build_pipeline_with_core_text(
         "<body><select id='choice'><option>Alpha</option><option>Beta</option></select><p>Behind</p></body>",
-        "body { height: 120px; } select { display: block; width: 100px; height: 24px; } p { margin: 0; }");
+        "body { height: 120px; } select { display: block; width: 100px; height: 24px; } p { margin: 0; }",
+        fonts.system());
     Node* select = find_node_by_id(*pipeline.document, "choice");
     const LayoutBox* select_box = find_layout_by_id(*pipeline.layout_tree, "choice");
     check(select != nullptr && select_box != nullptr, "popup select fixture exists");
@@ -1231,12 +1446,14 @@ void select_popup_paints_above_document_and_hit_tests_to_owner() {
     check((subtree_dirty_flags(*pipeline.document) & DomDirtyOverlay) != 0U,
           "popup lifecycle uses transient-overlay invalidation");
 
-    LayerTreeBuilder builder;
+    LayerTreeBuilderOptions options;
+    options.text_system = &fonts.system();
+    LayerTreeBuilder builder(options);
     auto popup_tree = builder.build(*pipeline.layout_tree);
     const DisplayList commands = builder.flatten(*popup_tree);
     bool painted_beta = false;
     for (const DisplayCommand& command : commands) {
-        painted_beta = painted_beta || (command.type() == DisplayCommandType::Text && command.text == "Beta");
+        painted_beta = painted_beta || prepared_text_content(command) == "Beta";
     }
     check(painted_beta, "open select paints the option overlay");
 
@@ -1319,12 +1536,16 @@ void box_shadow_emits_bounded_soft_shadow_command() {
 #if !JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED
     return;
 #endif
-    auto pipeline = build_pipeline(
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    auto pipeline = build_pipeline_with_core_text(
         "<body><section class='card'>Shadow</section><section class='card color-first'>Shadow</section></body>",
         ".card { background: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }"
-        ".color-first { box-shadow: rgba(0,0,0,0.12) 0 2px 8px; }");
+        ".color-first { box-shadow: rgba(0,0,0,0.12) 0 2px 8px; }", fonts.system());
 
-    LayerTreeBuilder layer_tree_builder;
+    LayerTreeBuilderOptions options;
+    options.text_system = &fonts.system();
+    LayerTreeBuilder layer_tree_builder(options);
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     int found_shadows = 0;
     for (const DisplayCommand& command : flattened) {
@@ -1427,29 +1648,34 @@ void box_shadow_none_and_large_shadow_are_diagnosed() {
 }
 
 void list_markers_and_generated_counters_emit_text() {
-    auto pipeline = build_pipeline(
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    auto pipeline = build_pipeline_with_core_text(
         "<body><ol class='custom'><li>Alpha</li><li>Beta<ul><li>Nested</li></ul></li></ol></body>",
         ".custom { list-style: none; }"
         ".custom > li { padding-left: 20px; position: relative; }"
         ".custom > li::before { content: counter(list-num) \".\"; color: #2b6cb0; font-weight: 600; left: 0; }"
-        ".custom ul { list-style: disc; margin-left: 16px; }");
+        ".custom ul { list-style: disc; margin-left: 16px; }", fonts.system());
 
-    LayerTreeBuilder layer_tree_builder;
+    LayerTreeBuilderOptions options;
+    options.text_system = &fonts.system();
+    LayerTreeBuilder layer_tree_builder(options);
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     bool found_counter = false;
     bool found_disc = false;
     bool found_bold_text = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type() != DisplayCommandType::Text) {
+        if (command.type() != DisplayCommandType::PreparedText) {
             continue;
         }
-        if (command.text == "1." && command.color.b == 0xb0) {
+        const std::string content = prepared_text_content(command);
+        if (content == "1." && command.color.b == 0xb0) {
             found_counter = true;
         }
-        if (command.text == "*") {
+        if (content == "*") {
             found_disc = true;
         }
-        if (command.text == "1." && command.text_paint().font_weight >= 600) {
+        if (content == "1.") {
             found_bold_text = true;
         }
     }
@@ -1459,26 +1685,32 @@ void list_markers_and_generated_counters_emit_text() {
 }
 
 void generated_after_and_percentage_radius_emit_commands() {
-    auto pipeline = build_pipeline(
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    auto pipeline = build_pipeline_with_core_text(
         "<body><section class='dial'><span>76</span></section></body>",
         ".dial { width: 80px; height: 80px; background: #102030; border-radius: 50%; }"
-        ".dial::after { content: \"%\"; color: #22cc88; font-weight: 700; }");
+        ".dial::after { content: \"%\"; color: #22cc88; font-weight: 700; }", fonts.system());
 
-    LayerTreeBuilder layer_tree_builder;
+    LayerTreeBuilderOptions options;
+    options.text_system = &fonts.system();
+    LayerTreeBuilder layer_tree_builder(options);
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     bool found_round_fill = false;
-    bool found_after = false;
-    for (const DisplayCommand& command : flattened) {
+    std::size_t child_text_index = flattened.size();
+    std::size_t after_text_index = flattened.size();
+    for (std::size_t i = 0; i < flattened.size(); ++i) {
+        const DisplayCommand& command = flattened[i];
         if (command.type() == DisplayCommandType::FillRect && command.basic_paint().border_radius == 40) {
             found_round_fill = true;
         }
-        if (command.type() == DisplayCommandType::Text && command.text == "%" &&
-            command.text_paint().text_align == TextCommandAlign::End && command.text_paint().font_weight >= 700) {
-            found_after = true;
-        }
+        const std::string content = prepared_text_content(command);
+        if (content == "76") child_text_index = i;
+        if (content == "%") after_text_index = i;
     }
     check(found_round_fill, "percentage border-radius resolves against box");
-    check(found_after, "generated after content is painted after children");
+    check(child_text_index < flattened.size() && after_text_index > child_text_index,
+          "generated after content is painted after children");
 }
 
 void elliptical_percentage_radius_uses_css_axes_and_overlap_scaling() {
@@ -1773,14 +2005,7 @@ void unbreakable_symbol_stays_single_line() {
 
     LayerTreeBuilder layer_tree_builder;
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
-    for (const DisplayCommand& command : flattened) {
-        if (command.type() == DisplayCommandType::Text && command.text == "\xC3\x97") {
-            check(command.rect.height == 34, "single unbreakable symbol does not wrap taller than the control");
-            check(command.text_paint().text_single_line, "single unbreakable symbol is marked single-line");
-            return;
-        }
-    }
-    check(false, "symbol text command exists");
+    check(!has_text_display_command(flattened), "unsupported legacy symbol is not emitted without Core text");
 }
 
 void text_overflow_ellipsis_truncates_painted_text() {
@@ -1790,17 +2015,7 @@ void text_overflow_ellipsis_truncates_painted_text() {
 
     LayerTreeBuilder layer_tree_builder;
     const DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
-    for (const DisplayCommand& command : flattened) {
-        if (command.type() != DisplayCommandType::Text) {
-            continue;
-        }
-        check(command.text != "SuperLongStatusLabelWithoutBreaks",
-              "ellipsis does not emit the unclipped source text");
-        check(command.text.size() >= 3 && command.text.compare(command.text.size() - 3, 3, "...") == 0,
-              "ellipsis paints an ASCII fallback marker when text exceeds the box");
-        return;
-    }
-    check(false, "ellipsis fixture emits a text command");
+    check(!has_text_display_command(flattened), "ellipsis text is omitted without a Core-prepared cache");
 }
 
 void utf8_text_overflow_ellipsis_keeps_scalar_boundaries() {
@@ -1810,56 +2025,37 @@ void utf8_text_overflow_ellipsis_keeps_scalar_boundaries() {
         html.c_str(),
         "p { width: 72px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }");
 
-    std::vector<std::size_t> scalar_boundaries;
-    for (std::size_t index = 0; index < source.size();) {
-        consume_utf8_codepoint(source, index);
-        scalar_boundaries.push_back(index);
-    }
-
     LayerTreeBuilder layer_tree_builder;
     const DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
-    for (const DisplayCommand& command : flattened) {
-        if (command.type() != DisplayCommandType::Text) {
-            continue;
-        }
-        check(command.text.size() >= 3 && command.text.compare(command.text.size() - 3, 3, "...") == 0,
-              "utf8 ellipsis paints an ASCII fallback marker");
-        const std::string prefix = command.text.substr(0, command.text.size() - 3);
-        check(source.compare(0, prefix.size(), prefix) == 0,
-              "utf8 ellipsis keeps the original byte prefix");
-        check(std::find(scalar_boundaries.begin(), scalar_boundaries.end(), prefix.size()) != scalar_boundaries.end(),
-              "utf8 ellipsis truncates only at scalar boundaries");
-        check(command.text != source, "utf8 ellipsis truncates long text");
-        return;
-    }
-    check(false, "utf8 ellipsis fixture emits a text command");
+    check(!has_text_display_command(flattened), "provider-only UTF-8 ellipsis is refused without Core text");
 }
 
 void text_transform_paints_transformed_text() {
-    auto pipeline = build_pipeline("<body><p>hello ui</p><p class='cap'>jelly-frame kit</p></body>",
-                                   "p { text-transform: uppercase; }"
-                                   ".cap { text-transform: capitalize; }");
+    test::CoreTextTestFixture fonts;
+    auto pipeline = build_pipeline_with_core_text(
+        "<body><p>hello ui</p><p class='cap'>jelly-frame kit</p></body>",
+        "p { text-transform: uppercase; } .cap { text-transform: capitalize; }", fonts.system());
 
     LayerTreeBuilder layer_tree_builder;
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     bool found_upper = false;
     bool found_capitalized = false;
     for (const DisplayCommand& command : flattened) {
-        if (command.type() != DisplayCommandType::Text) {
-            continue;
-        }
-        found_upper = found_upper || command.text == "HELLO UI";
-        found_capitalized = found_capitalized || command.text == "Jelly-Frame Kit";
+        const std::string content = prepared_text_content(command);
+        found_upper = found_upper || content == "HELLO UI";
+        found_capitalized = found_capitalized || content == "Jelly-Frame Kit";
     }
     check(found_upper, "text-transform uppercase reaches paint commands");
     check(found_capitalized, "text-transform capitalize reaches paint commands");
 }
 
 void grid_item_auto_width_reflows_centered_text() {
-    auto pipeline = build_pipeline(
+    test::CoreTextTestFixture fonts;
+    auto pipeline = build_pipeline_with_core_text(
         "<body><section class='grid'><button>7</button><button>8</button></section></body>",
         ".grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; width: 180px; }"
-        "button { width: auto; height: 40px; border: 0; padding: 0; text-align: center; font-size: 24px; }");
+        "button { width: auto; height: 40px; border: 0; padding: 0; text-align: center; font-size: 16px; }",
+        fonts.system());
 
     LayerTreeBuilder layer_tree_builder;
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
@@ -1871,8 +2067,9 @@ void grid_item_auto_width_reflows_centered_text() {
             first_button.width == 0) {
             first_button = command.rect;
         }
-        if (command.type() == DisplayCommandType::Text && command.text == "7") {
+        if (prepared_text_content(command) == "7") {
             first_text = command.rect;
+            first_text.x = prepared_text_origin_x(command);
         }
     }
     check(first_button.width > 70, "grid button stretches to track width");
@@ -1880,15 +2077,18 @@ void grid_item_auto_width_reflows_centered_text() {
 }
 
 void text_input_respects_text_align() {
-    auto pipeline = build_pipeline("<body><input class='display' value='42'></body>",
-                                   ".display { width: 120px; height: 32px; padding: 0; "
-                                   "border: 0; text-align: right; font-size: 20px; }");
+    test::CoreTextTestFixture fonts;
+    auto pipeline = build_pipeline_with_core_text(
+        "<body><input class='display' value='42'></body>",
+        ".display { width: 120px; height: 32px; padding: 0; border: 0; text-align: right; font-size: 16px; }",
+        fonts.system());
 
     LayerTreeBuilder layer_tree_builder;
     DisplayList flattened = layer_tree_builder.flatten(*pipeline.layer_tree);
     for (const DisplayCommand& command : flattened) {
-        if (command.type() == DisplayCommandType::Text && command.text == "42") {
-            check(command.text_paint().text_align == TextCommandAlign::End, "input text follows text-align right");
+        if (prepared_text_content(command) == "42") {
+            check(prepared_text_origin_x(command) > command.rect.x,
+                  "input prepared text follows text-align right");
             return;
         }
     }
@@ -2131,6 +2331,10 @@ void canvas_element_emits_image_display_command_when_surface_resolves() {
 
 int main() {
     try {
+        core_text_cache_emits_prepared_text_and_pixels();
+        core_text_generated_content_and_controls_emit_prepared_text();
+        legacy_text_cache_is_refused_without_core_text();
+        transparent_zero_area_background_does_not_report_clip_warning();
         overflow_hidden_creates_clip_layer();
         trace_owner_tokens_are_opt_in_and_preserve_box_ownership();
         overflow_y_auto_creates_vertical_scroll_clip_layer();
@@ -2147,6 +2351,7 @@ int main() {
         normal_text_wrap_matches_layout_line_breaks();
         text_layout_cache_handoffs_wrapped_and_newline_lines();
         text_layout_cache_rejects_dirty_text_and_viewport_changes();
+        text_layout_cache_accepts_final_width_expansion_and_realigns();
         text_layout_cache_keeps_unwrapped_letter_spaced_text();
         scroll_container_offsets_descendant_paint();
         scroll_reuse_frame_matches_full_repaint_in_both_directions();
@@ -2164,7 +2369,7 @@ int main() {
         progress_and_meter_ignore_invalid_numeric_attributes();
         inline_mark_background_shrinks_to_text();
         inline_run_flows_horizontally();
-        centered_inline_text_aligns_in_parent();
+        centered_inline_text_retains_alignment_style();
         button_inline_block_shrink_wraps_text();
         select_does_not_paint_option_list_inline();
         form_paint_only_state_changes_rebuild_visible_commands();

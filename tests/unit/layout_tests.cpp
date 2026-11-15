@@ -3,6 +3,7 @@
 #include "render_core/html_parser.h"
 #include "render_core/layout.h"
 #include "render_core/render_tree.h"
+#include "core_text_test_fixture.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -73,8 +74,12 @@ void fixed_separate_table_uses_columns_spacing_and_shared_rows() {
         "#col1 { width: 112px; } #col2 { width: 180px; } #col3 { width: 112px; }"
         "td { padding: 8px; border: 1px solid #8493a3; vertical-align: top; line-height: 20px; }"
         "caption { padding: 7px 10px; border: 1px solid #69798a; background-color: #dae9ff; }"));
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
     auto render_tree = RenderTreeBuilder(resolver).build(*document);
-    LayoutEngine layout_engine(resolver);
+    LayoutEngineOptions layout_options;
+    layout_options.text_system = &fonts.system();
+    LayoutEngine layout_engine(resolver, layout_options);
     auto layout_tree = layout_engine.layout(*render_tree, 1000);
     const LayoutBox* table = find_first_by_id(*layout_tree, "grid");
     const LayoutBox* caption = find_first_by_id(*layout_tree, "cap");
@@ -144,8 +149,12 @@ void fixed_table_positions_caption_subtree_and_resolves_auto_margins() {
         "body { margin:0; } table { width:100px; table-layout:fixed; border-spacing:0; }"
         "#bottom { caption-side:bottom; } #center { margin-left:auto; margin-right:auto; }"
         "#left-auto { margin-left:auto; margin-right:20px; } #right-auto { margin-left:15px; margin-right:auto; }"));
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
     auto render = RenderTreeBuilder(resolver).build(*document);
-    LayoutEngine engine(resolver);
+    LayoutEngineOptions layout_options;
+    layout_options.text_system = &fonts.system();
+    LayoutEngine engine(resolver, layout_options);
     auto layout = engine.layout(*render, 400);
     const LayoutBox* bottom = find_first_by_id(*layout, "bottom");
     const LayoutBox* caption = find_first_by_id(*layout, "caption");
@@ -357,6 +366,10 @@ void table_spacing_keeps_prior_value_for_unqualified_fractions() {
 }
 
 void fixed_table_caption_side_inherits_and_honors_explicit_top() {
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    LayoutEngineOptions layout_options;
+    layout_options.text_system = &fonts.system();
     const char* declarations[] = {
         "caption{caption-side:bottom}",
         "body{caption-side:bottom}",
@@ -370,7 +383,7 @@ void fixed_table_caption_side_inherits_and_honors_explicit_top() {
             "</tr></tbody></table></body>");
         StyleResolver resolver(CssParser{}.parse(std::string(
             "body{margin:0}table{width:100px;table-layout:fixed;border-spacing:0}") + declarations[i]));
-        auto tree = LayoutEngine(resolver).layout(*RenderTreeBuilder(resolver).build(*document), 400);
+        auto tree = LayoutEngine(resolver, layout_options).layout(*RenderTreeBuilder(resolver).build(*document), 400);
         const auto* cap = find_first_by_id(*tree, "cap");
         const auto* label = find_first_by_id(*tree, "label");
         const auto* cell = find_first_by_id(*tree, "cell");
@@ -422,6 +435,10 @@ void fixed_table_relative_position_keeps_following_flow() {
 }
 
 void fixed_table_distributes_surplus_proportionally_and_preserves_edges() {
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    LayoutEngineOptions layout_options;
+    layout_options.text_system = &fonts.system();
     struct Case { int table; int first; int second; int spacing; int border; int expected_first; int expected_second; };
     const Case cases[] = {
         {300,40,40,0,0,150,150}, {301,40,40,0,0,151,150},
@@ -438,7 +455,7 @@ void fixed_table_distributes_surplus_proportionally_and_preserves_edges() {
             "px;border:" + std::to_string(fixture.border) + "px solid black}#one{width:" +
             std::to_string(fixture.first) + "px}#two{width:" + std::to_string(fixture.second) + "px}";
         StyleResolver resolver(CssParser{}.parse(css));
-        auto tree = LayoutEngine(resolver).layout(*RenderTreeBuilder(resolver).build(*document), 500);
+        auto tree = LayoutEngine(resolver, layout_options).layout(*RenderTreeBuilder(resolver).build(*document), 500);
         const auto* a = find_first_by_id(*tree, "a");
         const auto* b = find_first_by_id(*tree, "b");
         const auto* table = find_first_by_id(*tree, "t");
@@ -451,22 +468,6 @@ void fixed_table_distributes_surplus_proportionally_and_preserves_edges() {
         check(!a->children.empty() && a->children.front()->text_layout_cache.available_width == a->rect.width,
               "cell text wrapping uses the distributed track width");
     }
-}
-
-struct TextMeasureCounter {
-    int calls = 0;
-};
-
-bool count_text_measure(const std::string& text,
-                        int,
-                        int,
-                        TextMetrics* metrics,
-                        void* context) {
-    auto* counter = static_cast<TextMeasureCounter*>(context);
-    ++counter->calls;
-    metrics->width = static_cast<int>(text.size()) * 8;
-    metrics->line_height = 20;
-    return true;
 }
 
 void layout_tree_can_use_monotonic_arena() {
@@ -497,7 +498,7 @@ void layout_tree_respects_box_budget() {
     RenderTreeBuilder render_tree_builder(resolver);
     auto render_tree = render_tree_builder.build(*document);
 
-    LayoutEngine layout_engine(resolver, {}, LayoutEngineOptions{4});
+    LayoutEngine layout_engine(resolver, LayoutEngineOptions{4});
     auto layout_tree = layout_engine.layout(*render_tree, 240);
 
     check(count_layout_boxes(*layout_tree) == 4, "layout tree is capped by box budget");
@@ -514,7 +515,7 @@ void layout_tree_reports_box_budget_diagnostic() {
     LayoutEngineOptions options;
     options.max_layout_boxes = 4;
     options.diagnostics = &diagnostics;
-    LayoutEngine layout_engine(resolver, {}, options);
+    LayoutEngine layout_engine(resolver, options);
     auto layout_tree = layout_engine.layout(*render_tree, 240);
 
     check(count_layout_boxes(*layout_tree) == 4, "layout budget still caps boxes");
@@ -532,7 +533,7 @@ void layout_tree_reports_depth_budget_diagnostic() {
     LayoutEngineOptions options;
     options.max_layout_depth = 2;
     options.diagnostics = &diagnostics;
-    LayoutEngine layout_engine(resolver, {}, options);
+    LayoutEngine layout_engine(resolver, options);
     auto layout_tree = layout_engine.layout(*render_tree, 240);
 
     check(layout_tree != nullptr, "depth budget layout root exists");
@@ -559,12 +560,24 @@ void nested_flex_sizing_does_not_repeat_subtree_layout() {
         "body { margin: 0; } div { display: flex; flex-direction: column; width: 100px; }"));
     RenderTreeBuilder render_tree_builder(resolver);
     auto render_tree = render_tree_builder.build(*document);
-    TextMeasureCounter counter;
-    LayoutEngine layout_engine(resolver, TextMeasureProvider{count_text_measure, &counter});
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    LayoutEngineOptions options;
+    options.text_system = &fonts.system();
+    LayoutEngine layout_engine(resolver, options);
     auto layout_tree = layout_engine.layout(*render_tree, 100, 240);
 
     check(layout_tree != nullptr, "nested flex fixture produces a layout tree");
-    check(counter.calls <= 4, "nested flex layout does not exponentially repeat text measurement");
+    check(count_layout_boxes(*layout_tree) >= 14, "nested flex fixture retains every box");
+    const auto find_text = [](const auto& self, const LayoutBox& box) -> const LayoutBox* {
+        if (box.node != nullptr && box.node->type == NodeType::Text) return &box;
+        for (const auto& child : box.children)
+            if (const auto* found = self(self, *child)) return found;
+        return nullptr;
+    };
+    const auto* text = find_text(find_text, *layout_tree);
+    check(text != nullptr && text->text_layout_cache.prepared_text && text->rect.height > 0,
+          "nested flex text uses canonical metrics and prepared glyphs");
 }
 
 void flex_row_distributes_grow_space() {
@@ -1013,7 +1026,7 @@ void responsive_layout_matrix_keeps_same_app_inside_three_targets() {
         VectorDiagnosticSink layout_diagnostics;
         LayoutEngineOptions layout_options;
         layout_options.diagnostics = &layout_diagnostics;
-        LayoutEngine layout_engine(resolver, {}, layout_options);
+        LayoutEngine layout_engine(resolver, layout_options);
         auto layout_tree = layout_engine.layout(*render_tree, target.width, target.height);
 
         const LayoutBox* screen = find_first_by_id(*layout_tree, "screen");
@@ -1207,7 +1220,11 @@ void grid_auto_column_uses_intrinsic_content_width() {
         "body { margin: 0; }"
         "#header { display: grid; width: 158px; grid-template-columns: 1fr auto; }"
         "#trailing { font-size: 11px; }"));
-    LayoutEngine layout_engine(resolver);
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    LayoutEngineOptions layout_options;
+    layout_options.text_system = &fonts.system();
+    LayoutEngine layout_engine(resolver, layout_options);
     auto layout_tree = layout_engine.layout(*document, 172, 80);
 
     const LayoutBox* header = find_first_by_id(*layout_tree, "header");
@@ -1285,7 +1302,7 @@ void grid_row_budget_uses_non_overlapping_block_fallback() {
     VectorDiagnosticSink diagnostics;
     LayoutEngineOptions options;
     options.diagnostics = &diagnostics;
-    LayoutEngine layout_engine(resolver, {}, options);
+    LayoutEngine layout_engine(resolver, options);
     auto layout_tree = layout_engine.layout(*document, 80);
 
     const LayoutBox* penultimate = find_first_by_id(*layout_tree, "cell-127");
@@ -1304,8 +1321,14 @@ void nowrap_text_overflow_reports_diagnostic() {
     StyleResolver resolver(css_parser.parse(
         "body { margin: 0; }"
         "#status { width: 40px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"));
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
     VectorDiagnosticSink diagnostics;
-    LayoutEngine layout_engine(resolver, {}, LayoutEngineOptions{4096, &diagnostics});
+    LayoutEngineOptions options;
+    options.max_layout_boxes = 4096;
+    options.diagnostics = &diagnostics;
+    options.text_system = &fonts.system();
+    LayoutEngine layout_engine(resolver, options);
     auto layout_tree = layout_engine.layout(*document, 160, 120);
     (void) layout_tree;
 

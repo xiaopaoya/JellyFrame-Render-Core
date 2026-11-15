@@ -86,8 +86,8 @@ struct BackgroundBoxAreas {
 };
 
 // Derives independent CSS background origin/clip rectangles for the initial
-// uniform-edge slice. Nonuniform or negative insets are
-// rejected. Radius is reduced by the inset to the selected clip box and
+// uniform-edge slice. Nonuniform or negative insets are rejected when the
+// selected origin or clip box uses them. Radius is reduced by the inset to the selected clip box and
 // clamped at zero. Output is atomic; failures leave `result` unchanged.
 // Insets decoded corner axes by their corresponding physical side. Refuses
 // results outside the compact packed-corner contract; outputs remain atomic.

@@ -64,8 +64,6 @@ set(JELLYFRAME_RENDER_CORE_CORE_PAINT_SOURCES
     src/style.cpp
     src/style_repaint.cpp
     src/text_backend.cpp
-    src/text_layout_reuse.cpp
-    src/text_repaint.cpp
 )
 
 # These two families are mandatory, but keeping their source ownership explicit

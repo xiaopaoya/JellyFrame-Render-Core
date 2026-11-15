@@ -13,6 +13,7 @@
 #include "flex_auto_min.h"
 #endif
 #include "render_core/prepared_text.h"
+#include "render_core/text_backend.h"
 #include "render_core/text_normalization.h"
 #include "render_core/text_scan.h"
 
@@ -927,8 +928,8 @@ struct GridPlacement {
     bool fallback_block = false;
 };
 
-int grid_intrinsic_outer_width(const LayoutBox& box, const TextMeasureProvider& text_measure,
-                               const TextSystem* text_system) {
+int grid_intrinsic_outer_width(const LayoutBox& box, const TextSystem* text_system,
+                               DiagnosticSink* diagnostics) {
     if (box.style.width >= 0) {
         return box.style.box_sizing_border_box
             ? std::max(0, box.style.width)
@@ -938,17 +939,16 @@ int grid_intrinsic_outer_width(const LayoutBox& box, const TextMeasureProvider& 
     }
     if (box.node != nullptr && box.node->type == NodeType::Text) {
         const std::string text = transformed_render_text(*box.node, box.style.text_transform);
+        if (text.empty()) return 0;
         if (text_system != nullptr) {
             TextRunMetrics metrics;
             return measure_core_text(*text_system, text, box.style, metrics) == TextSystemStatus::Ok
                 ? q1000_ceil_pixels(metrics.advance) : 0;
         }
-        return measure_text_with_letter_spacing(text_measure,
-                                                text,
-                                                box.style.font_size,
-                                                box.style.font_weight,
-                                                box.style.font_family_hash,
-                                                box.style.letter_spacing).width;
+        report_diagnostic(diagnostics, DiagnosticStage::Layout, DiagnosticSeverity::Warning,
+                          "layout-core-text-unavailable",
+                          "Text intrinsic sizing requires a bound Core TextSystem");
+        return 0;
     }
 
     int child_width = 0;
@@ -958,7 +958,7 @@ int grid_intrinsic_outer_width(const LayoutBox& box, const TextMeasureProvider& 
             continue;
         }
         const int outer_width = bounded_non_negative_add(
-            bounded_non_negative_add(grid_intrinsic_outer_width(*child, text_measure, text_system), child->style.margin.left),
+            bounded_non_negative_add(grid_intrinsic_outer_width(*child, text_system, diagnostics), child->style.margin.left),
             child->style.margin.right);
         const bool inline_child = (child->node != nullptr && child->node->type == NodeType::Text) ||
             child->style.display == Display::Inline || child->style.display == Display::InlineBlock;
@@ -993,8 +993,8 @@ bool grid_source_query_has_unconstrained_root(const LayoutBox& box) {
 
 void finalize_grid_columns(GridColumns& columns,
                            const std::vector<GridPlacement>& placements,
-                           const TextMeasureProvider& text_measure,
                            const TextSystem* text_system,
+                           DiagnosticSink* diagnostics,
                             int content_width,
                             detail::IntrinsicSourceQueryLedger& intrinsic_queries) {
     const auto scratch_bytes = placements.size() <= std::numeric_limits<std::size_t>::max() / sizeof(int)
@@ -1033,7 +1033,7 @@ void finalize_grid_columns(GridColumns& columns,
             !columns.auto_sized[static_cast<std::size_t>(placement.column)]) continue;
         const int intrinsic_width = source_queries_complete && source_widths[index] >= 0
             ? source_widths[index]
-            : grid_intrinsic_outer_width(*placement.child, text_measure, text_system);
+            : grid_intrinsic_outer_width(*placement.child, text_system, diagnostics);
         columns.widths[static_cast<std::size_t>(placement.column)] = std::max(
             columns.widths[static_cast<std::size_t>(placement.column)], intrinsic_width);
     }
@@ -1279,9 +1279,8 @@ struct LayoutEngine::PositionedContext {
 };
 
 LayoutEngine::LayoutEngine(const StyleResolver& style_resolver,
-                           TextMeasureProvider text_measure,
                            LayoutEngineOptions options)
-    : style_resolver_(style_resolver), text_measure_(text_measure), options_(options) {}
+    : style_resolver_(style_resolver), options_(options) {}
 
 LayoutBoxPtr LayoutEngine::layout(const Node& root, int viewport_width) const {
     return layout(root, viewport_width, 240);
@@ -2469,7 +2468,7 @@ int LayoutEngine::layout_box(LayoutBox& box, int x, int y, int width, int height
     const int intrinsic_control_height = box.node != nullptr && is_form_control(*box.node)
         ? (box.style.line_height > 0
               ? box.style.line_height
-              : fallback_text_metrics({}, box.style.font_size, box.style.font_weight).line_height)
+              : std::max(1, box.style.font_size))
         : 0;
     const int aspect_ratio_height = has_aspect_ratio(box.style) && content_width > 0
         ? std::max(1, static_cast<int>(std::min<std::int64_t>(
@@ -2512,7 +2511,18 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
     const std::uint64_t document_mutation_generation = document_root != nullptr
         ? document_root->mutation_generation : 0;
     const std::string text = transformed_render_text(*box.node, box.style.text_transform);
-    if (options_.text_system != nullptr) {
+    if (text.empty()) {
+        box.rect = Rect{border_box_x, border_box_y, 0, 0};
+        return 0;
+    }
+    if (options_.text_system == nullptr) {
+        report_diagnostic(options_.diagnostics, DiagnosticStage::Layout,
+                          DiagnosticSeverity::Warning, "layout-core-text-unavailable",
+                          "Text layout requires a bound Core TextSystem", text);
+        box.rect = Rect{border_box_x, border_box_y, 0, 0};
+        return 0;
+    }
+    {
         TextLayoutCache& cache = box.text_layout_cache;
         cache.text_system = options_.text_system;
         cache.text_system_generation = options_.text_system->generation();
@@ -2573,6 +2583,18 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
         const int usable_text_width = bounded_non_negative_subtract(content_width, text_indent);
         const bool wraps = !box.style.white_space_nowrap &&
             (box.style.overflow_wrap_anywhere || has_text_wrap_opportunity(text));
+        if (usable_text_width > 0 && raw_text_width > usable_text_width &&
+            (box.style.white_space_nowrap || box.style.text_overflow_ellipsis || !wraps)) {
+            report_diagnostic(options_.diagnostics,
+                              DiagnosticStage::Layout,
+                              DiagnosticSeverity::Warning,
+                              box.style.text_overflow_ellipsis ? "layout-text-overflow-ellipsis" : "layout-text-overflow",
+                              box.style.text_overflow_ellipsis
+                                  ? "Text measured wider than its layout box and will be truncated with an ellipsis"
+                                  : "Text measured wider than its layout box and will be clipped or visually degraded",
+                              text_overflow_detail(box, text, raw_text_width, usable_text_width,
+                                                   content_width, text_indent));
+        }
         const bool needs_wrap = usable_text_width > 0 && raw_text_width > usable_text_width && wraps;
         std::vector<PreparedTextGlyph> glyphs(run.glyph_count);
         TextRunMetrics prepared;
@@ -2723,105 +2745,7 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
         cache.valid = true;
         return text_height;
     }
-    const TextMetrics metrics = measure_text_with_letter_spacing(text_measure_,
-                                                                 text,
-                                                                 box.style.font_size,
-                                                                 box.style.font_weight,
-                                                                 box.style.font_family_hash,
-                                                                 box.style.letter_spacing);
-    const int raw_text_width = metrics.width;
-    const int text_indent = std::max(0, std::min(box.style.text_indent, content_width));
-    const int usable_text_width = bounded_non_negative_subtract(content_width, text_indent);
-    const int text_width = std::max(min_width, std::min(usable_text_width, raw_text_width));
-    const int line_height = box.style.line_height > 0 ? box.style.line_height : metrics.line_height;
-    const bool can_wrap = !box.style.white_space_nowrap &&
-        (box.style.overflow_wrap_anywhere || has_text_wrap_opportunity(text));
-    if (usable_text_width > 0 && raw_text_width > usable_text_width &&
-        (box.style.white_space_nowrap || box.style.text_overflow_ellipsis || !can_wrap)) {
-        report_diagnostic(options_.diagnostics,
-                          DiagnosticStage::Layout,
-                          DiagnosticSeverity::Warning,
-                          box.style.text_overflow_ellipsis ? "layout-text-overflow-ellipsis" : "layout-text-overflow",
-                          box.style.text_overflow_ellipsis
-                              ? "Text measured wider than its layout box and will be truncated with an ellipsis"
-                              : "Text measured wider than its layout box and will be clipped or visually degraded",
-                          text_overflow_detail(box,
-                                               text,
-                                               raw_text_width,
-                                               usable_text_width,
-                                               content_width,
-                                               text_indent));
-    }
-    std::vector<std::string> lines;
-    int line_count = 1;
-    if (can_wrap && usable_text_width > 0) {
-        lines = box.style.overflow_wrap_anywhere
-            ? wrap_text_anywhere(text_measure_,
-                                 text,
-                                 box.style.font_size,
-                                 box.style.font_weight,
-                                 box.style.font_family_hash,
-                                 box.style.letter_spacing,
-                                 usable_text_width)
-            : wrap_text_at_opportunities(text_measure_,
-                                         text,
-                                         box.style.font_size,
-                                         box.style.font_weight,
-                                         box.style.font_family_hash,
-                                         box.style.letter_spacing,
-                                         usable_text_width);
-        line_count = clamp_layout_value(static_cast<std::int64_t>(std::min<std::size_t>(
-            lines.size(), static_cast<std::size_t>(std::numeric_limits<int>::max()))));
-        line_count = std::max(1, line_count);
-    }
-    if (lines.empty() && !text.empty()) {
-        lines.push_back(text);
-    }
-    const int fixed_text_height = specified_content_height(box.style, height);
-    int text_height = std::max(specified_content_min_height(box.style, height),
-        fixed_text_height >= 0
-            ? fixed_text_height
-            : bounded_non_negative_multiply(std::max(0, line_height), line_count));
-    const int max_text_height = resolved_max_content_height(box.style, height);
-    if (max_text_height >= 0) {
-        text_height = std::min(text_height, max_text_height);
-    }
-    int text_x = bounded_add(border_box_x, text_indent);
-    if (box.style.text_align == TextAlign::Center) {
-        text_x = bounded_add(text_x,
-                             std::max(0, bounded_subtract(usable_text_width, text_width) / 2));
-    } else if (box.style.text_align == TextAlign::End) {
-        text_x = bounded_add(text_x,
-                             std::max(0, bounded_subtract(usable_text_width, text_width)));
-    }
-    box.rect = Rect{text_x, border_box_y, text_width, text_height};
-    TextLayoutCache& cache = box.text_layout_cache;
-    cache.valid = true;
-    cache.document_mutation_generation = document_mutation_generation;
-    cache.source_text = box.node->text;
-    cache.rendered_text = text;
-    cache.lines = std::move(lines);
-    cache.text_measure = text_measure_;
-    cache.available_width = usable_text_width;
-    cache.content_width = content_width;
-    cache.rect_x = box.rect.x;
-    cache.rect_y = box.rect.y;
-    cache.rect_width = box.rect.width;
-    cache.rect_height = box.rect.height;
-    cache.viewport_width = box.viewport_width;
-    cache.viewport_height = box.viewport_height;
-    cache.font_size = box.style.font_size;
-    cache.font_weight = box.style.font_weight;
-    cache.font_family_hash = box.style.font_family_hash;
-    cache.line_height = line_height;
-    cache.text_indent = box.style.text_indent;
-    cache.letter_spacing = box.style.letter_spacing;
-    cache.text_transform = box.style.text_transform;
-    cache.overflow_wrap_anywhere = box.style.overflow_wrap_anywhere;
-    cache.white_space_nowrap = box.style.white_space_nowrap;
-    cache.text_overflow_ellipsis = box.style.text_overflow_ellipsis;
-    cache.text_align = box.style.text_align;
-    return text_height;
+    return 0;
 }
 
 int LayoutEngine::layout_inline_children(LayoutBox& box,
@@ -3500,7 +3424,7 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
         placements.push_back(placement);
     }
 
-    finalize_grid_columns(columns, placements, text_measure_, options_.text_system, content_width,
+    finalize_grid_columns(columns, placements, options_.text_system, options_.diagnostics, content_width,
         *intrinsic_queries_);
 
     for (const GridPlacement& placement : placements) {

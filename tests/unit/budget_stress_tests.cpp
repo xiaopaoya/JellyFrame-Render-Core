@@ -117,7 +117,7 @@ void full_pipeline_stays_bounded_with_tiny_budgets() {
     check(count_render_objects(*render_tree) <= budgets.max_render_objects,
           "render tree stays within object budget");
 
-    LayoutEngine layout_engine(resolver, {}, layout_engine_options_from_budgets(budgets));
+    LayoutEngine layout_engine(resolver, layout_engine_options_from_budgets(budgets));
     auto layout_tree = layout_engine.layout(*render_tree, 120);
     check(layout_tree != nullptr, "layout tree root exists under tiny budgets");
     check(count_layout_boxes(*layout_tree) <= budgets.max_layout_boxes,

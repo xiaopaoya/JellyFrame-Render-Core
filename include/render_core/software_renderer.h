@@ -112,37 +112,6 @@ struct RasterClip {
     int border_radius_y = -1;
 };
 
-using TextPaintCallback = bool (*)(FrameBuffer& target,
-                                   Rect rect,
-                                   Color color,
-                                   const std::string& text,
-                                   int font_size,
-                                   int font_weight,
-                                   TextCommandAlign align,
-                                   bool single_line,
-                                   void* context);
-
-using TextPaintFamilyCallback = bool (*)(FrameBuffer& target,
-                                         Rect rect,
-                                         Color color,
-                                         const std::string& text,
-                                         int font_size,
-                                         int font_weight,
-                                         std::uint32_t font_family_hash,
-                                         TextCommandAlign align,
-                                         bool single_line,
-                                         void* context);
-
-struct TextPainter {
-    TextPaintCallback paint = nullptr;
-    void* context = nullptr;
-    TextPaintFamilyCallback paint_family = nullptr;
-    // True only when every successful callback invocation writes within the
-    // supplied rect. Normal paint does not require this; retained/diff
-    // consumers use it as an explicit visual-bounds contract.
-    bool writes_only_within_rect = false;
-};
-
 // All rectangles use target coordinates, including temporary target surfaces.
 // destination retains the complete sampling geometry. A zero painting rect
 // means no independent background clip; Core applies admitted clips itself.
@@ -166,7 +135,7 @@ using ImagePaintCallback = bool (*)(FrameBuffer& target,
 struct ImagePainter {
     ImagePaintCallback paint = nullptr;
     void* context = nullptr;
-    // Same opt-in contract as TextPainter. Samplers that can bleed beyond the
+    // Samplers that can bleed beyond the
     // supplied rect must leave this false.
     bool writes_only_within_rect = false;
 };
@@ -218,11 +187,9 @@ struct SoftwareRasterizerOptions {
 
 class SoftwareRasterizer {
 public:
-    explicit SoftwareRasterizer(TextPainter text_painter = {},
-                                DiagnosticSink* diagnostics = nullptr,
+    explicit SoftwareRasterizer(DiagnosticSink* diagnostics = nullptr,
                                 SoftwareRasterizerOptions options = {});
-    SoftwareRasterizer(TextPainter text_painter,
-                       ImagePainter image_painter,
+    SoftwareRasterizer(ImagePainter image_painter,
                        DiagnosticSink* diagnostics = nullptr,
                        SoftwareRasterizerOptions options = {});
 
@@ -261,7 +228,6 @@ public:
                            SoftwareRasterizerScratch* scratch = nullptr) const;
 
 private:
-    TextPainter text_painter_;
     ImagePainter image_painter_;
     DiagnosticSink* diagnostics_ = nullptr;
     SoftwareRasterizerOptions options_;
@@ -303,10 +269,8 @@ public:
     };
 
     SoftwareCompositor();
-    explicit SoftwareCompositor(TextPainter text_painter);
-    SoftwareCompositor(TextPainter text_painter, Options options);
-    SoftwareCompositor(TextPainter text_painter, ImagePainter image_painter);
-    SoftwareCompositor(TextPainter text_painter, ImagePainter image_painter, Options options);
+    explicit SoftwareCompositor(ImagePainter image_painter);
+    SoftwareCompositor(ImagePainter image_painter, Options options);
 
     FrameBuffer render(const LayerNode& root, int viewport_width, int viewport_height, Color background) const;
     void render_into(const LayerNode& root, FrameBuffer& target, Color background) const;

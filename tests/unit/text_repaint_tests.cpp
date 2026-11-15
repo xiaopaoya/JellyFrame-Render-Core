@@ -1,129 +1,71 @@
 #include "render_core/css_parser.h"
 #include "render_core/html_parser.h"
 #include "render_core/layout.h"
-#include "render_core/render_tree.h"
-#include "render_core/text_repaint.h"
+#include "core_text_test_fixture.h"
 
 #include <iostream>
 #include <stdexcept>
-#include <string>
 
 using namespace jellyframe;
 
 namespace {
 
 void check(bool condition, const char* message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
+    if (!condition) throw std::runtime_error(message);
 }
 
-bool fixed_measure(const std::string& text,
-                   int,
-                   int,
-                   TextMetrics* metrics,
-                   void*) {
-    if (metrics == nullptr) {
-        return false;
-    }
-    metrics->width = static_cast<int>(text.size()) * 8;
-    metrics->line_height = 12;
-    return true;
-}
-
-TextMeasureProvider fixed_text_measure() {
-    return TextMeasureProvider{fixed_measure, nullptr};
-}
-
-Node* find_element_by_id(Node& node, const std::string& id) {
-    if (node.type == NodeType::Element && node.attribute("id") == id) {
-        return &node;
-    }
-    for (auto& child : node.children) {
-        if (Node* found = find_element_by_id(*child, id)) {
-            return found;
-        }
-    }
+LayoutBox* find_text(LayoutBox& box) {
+    if (box.node != nullptr && box.node->type == NodeType::Text) return &box;
+    for (const auto& child : box.children)
+        if (auto* found = find_text(*child)) return found;
     return nullptr;
 }
 
-struct Fixture {
-    std::unique_ptr<Node> document;
-    RenderObjectPtr render_tree;
-    LayoutBoxPtr layout_tree;
-};
+void text_mutation_uses_fresh_core_layout() {
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    auto document = HtmlParser{}.parse("<body><p id='label'>AB</p></body>");
+    StyleResolver resolver(CssParser{}.parse(
+        "body{margin:0} p{display:block;width:80px;margin:0;font-size:16px;line-height:20px}"));
+    LayoutEngineOptions options;
+    options.text_system = &fonts.system();
+    LayoutEngine engine(resolver, options);
 
-Fixture build_fixture(const std::string& html, const std::string& css) {
-    HtmlParser html_parser;
-    CssParser css_parser;
-    auto document = html_parser.parse(html);
-    StyleResolver resolver(css_parser.parse(css));
-    RenderTreeBuilder render_builder(resolver);
-    auto render_tree = render_builder.build(*document);
-    LayoutEngine layout_engine(resolver, fixed_text_measure());
-    auto layout_tree = layout_engine.layout(*render_tree, 240);
-    clear_dirty_flags(*document);
-    return Fixture{std::move(document), std::move(render_tree), std::move(layout_tree)};
-}
+    auto before = engine.layout(*document, 100, 40);
+    auto* old_text = find_text(*before);
+    check(old_text != nullptr && old_text->text_layout_cache.prepared_text &&
+          old_text->text_layout_cache.lines == std::vector<std::string>{"AB"},
+          "initial Core layout caches prepared text");
+    const int old_width = old_text->rect.width;
 
-void same_width_single_line_text_can_reuse_layout() {
-    auto fixture = build_fixture("<body><p id='frame'>01</p></body>",
-                                 "p { margin: 0; font-size: 10px; line-height: 12px; }");
-    Node* frame = find_element_by_id(*fixture.document, "frame");
-    check(frame != nullptr, "frame element exists");
-    frame->set_text_content("02");
+    Node* label = nullptr;
+    const auto find_label = [&](const auto& self, Node& node) -> void {
+        if (node.attribute("id") == "label") label = &node;
+        for (auto& child : node.children) self(self, *child);
+    };
+    find_label(find_label, *document);
+    check(label != nullptr, "text owner exists");
+    label->set_text_content("ABAB");
 
-    check(text_dirty_can_reuse_layout(*fixture.document, *fixture.layout_tree, fixed_text_measure()),
-          "same width single-line text can reuse layout");
-}
-
-void changed_width_text_keeps_layout_conservative() {
-    auto fixture = build_fixture("<body><p id='frame'>99</p></body>",
-                                 "p { margin: 0; font-size: 10px; line-height: 12px; }");
-    Node* frame = find_element_by_id(*fixture.document, "frame");
-    check(frame != nullptr, "frame element exists");
-    frame->set_text_content("100");
-
-    check(!text_dirty_can_reuse_layout(*fixture.document, *fixture.layout_tree, fixed_text_measure()),
-          "changed text width does not reuse layout");
-}
-
-void wrapping_text_keeps_layout_conservative() {
-    auto fixture = build_fixture("<body><p id='label'>AA</p></body>",
-                                 "p { margin: 0; font-size: 10px; line-height: 12px; }");
-    Node* label = find_element_by_id(*fixture.document, "label");
-    check(label != nullptr, "label element exists");
-    label->set_text_content("A B");
-
-    check(!text_dirty_can_reuse_layout(*fixture.document, *fixture.layout_tree, fixed_text_measure()),
-          "wrapping text does not reuse layout");
-}
-
-void style_dirty_keeps_layout_conservative() {
-    auto fixture = build_fixture("<body><p id='frame'>01</p></body>",
-                                 "p { margin: 0; font-size: 10px; line-height: 12px; }");
-    Node* frame = find_element_by_id(*fixture.document, "frame");
-    check(frame != nullptr, "frame element exists");
-    frame->set_text_content("02");
-    frame->set_attribute("class", "active");
-
-    check(!text_dirty_can_reuse_layout(*fixture.document, *fixture.layout_tree, fixed_text_measure()),
-          "style-affecting dirty flags do not reuse layout");
+    auto after = engine.layout(*document, 100, 40);
+    auto* new_text = find_text(*after);
+    check(new_text != nullptr && new_text->text_layout_cache.prepared_text &&
+          new_text->text_layout_cache.source_text == "ABAB" && new_text->rect.width != old_width,
+          "text mutation is resolved by a fresh Core layout");
+    check(new_text->text_layout_cache.text_system == &fonts.system() &&
+          new_text->text_layout_cache.text_system_generation == fonts.system().generation(),
+          "fresh text layout is bound to the current Core font generation");
 }
 
 } // namespace
 
 int main() {
     try {
-        same_width_single_line_text_can_reuse_layout();
-        changed_width_text_keeps_layout_conservative();
-        wrapping_text_keeps_layout_conservative();
-        style_dirty_keeps_layout_conservative();
+        text_mutation_uses_fresh_core_layout();
     } catch (const std::exception& error) {
-        std::cerr << "text repaint test failed: " << error.what() << '\n';
+        std::cerr << "text layout mutation test failed: " << error.what() << '\n';
         return 1;
     }
-
-    std::cout << "text repaint tests passed\n";
+    std::cout << "Core text mutation layout tests passed\n";
     return 0;
 }

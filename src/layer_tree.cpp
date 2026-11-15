@@ -411,10 +411,36 @@ bool paint_background_gradient(const BackgroundPaint& paint, const LayoutBox& bo
     const auto status = detail::resolve_background_gradient_geometry(request, geometry);
     if (status == detail::BackgroundGradientGeometryStatus::Empty) return true;
     if (status != detail::BackgroundGradientGeometryStatus::Ready) {
+        const char* reason = "invalid geometry";
+        switch (status) {
+        case detail::BackgroundGradientGeometryStatus::Empty: reason = "empty geometry"; break;
+        case detail::BackgroundGradientGeometryStatus::InvalidGeometry: reason = "invalid geometry"; break;
+        case detail::BackgroundGradientGeometryStatus::DimensionLimit: reason = "dimension limit"; break;
+        case detail::BackgroundGradientGeometryStatus::FractionalGeometry: reason = "fractional geometry"; break;
+        case detail::BackgroundGradientGeometryStatus::UnsupportedCombination: reason = "unsupported repeat combination"; break;
+        case detail::BackgroundGradientGeometryStatus::TileLimit: reason = "tile limit"; break;
+        case detail::BackgroundGradientGeometryStatus::CoordinateOverflow: reason = "coordinate overflow"; break;
+        case detail::BackgroundGradientGeometryStatus::Ready: break;
+        }
         report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
                           status == detail::BackgroundGradientGeometryStatus::TileLimit
                               ? "layer-background-gradient-limit" : "layer-background-gradient-geometry",
-                          "Background gradient pattern was refused; the complete gradient layer was omitted.");
+                          "Background gradient pattern was refused; the complete gradient layer was omitted.",
+                          std::string(reason) + " box=" + std::to_string(bounds.x) + "," +
+                              std::to_string(bounds.y) + " " + std::to_string(bounds.width) + "x" +
+                              std::to_string(bounds.height) + " origin=" +
+                              std::to_string(static_cast<unsigned>(request.boxes.origin)) + " clip=" +
+                              std::to_string(static_cast<unsigned>(request.boxes.clip)) + " border=" +
+                              std::to_string(request.boxes.border.top) + "," +
+                              std::to_string(request.boxes.border.right) + "," +
+                              std::to_string(request.boxes.border.bottom) + "," +
+                              std::to_string(request.boxes.border.left) + " padding=" +
+                              std::to_string(request.boxes.padding.top) + "," +
+                              std::to_string(request.boxes.padding.right) + "," +
+                              std::to_string(request.boxes.padding.bottom) + "," +
+                              std::to_string(request.boxes.padding.left) + " radius=" +
+                              std::to_string(request.boxes.border_radius) + "," +
+                              std::to_string(request.boxes.border_radius_y));
         return true;
     }
     for (std::size_t i = 0; i < geometry.sampling_tiles.count; ++i) {
@@ -488,83 +514,6 @@ void push_border_rects(DisplayList& display_list, Rect rect, const EdgeSizes& bo
     push_fill_rect(display_list, Rect{safe_edge(rect.x, safe_edge(rect.width, -border.right)), rect.y, border.right, rect.height}, color);
 }
 
-void push_text(DisplayList& display_list,
-               Rect rect,
-               Color color,
-               const std::string& text,
-               int font_size,
-               int font_weight,
-               std::uint32_t font_family_hash,
-               TextCommandAlign align,
-               bool single_line) {
-    if (rect.width <= 0 || rect.height <= 0 || text.empty() || color.a == 0) {
-        return;
-    }
-    DisplayCommand command;
-    command.set_type(DisplayCommandType::Text);
-    command.rect = rect;
-    command.color = color;
-    command.color2 = color;
-    command.text = text;
-    command.text_paint().font_size = font_size;
-    command.text_paint().font_weight = font_weight;
-    command.text_paint().font_family_hash = font_family_hash;
-    command.text_paint().text_align = align;
-    command.text_paint().text_single_line = single_line;
-    display_list.push_back(std::move(command));
-}
-
-std::string ellipsize_single_line_text(const std::string& text,
-                                       const Style& style,
-                                       int available_width,
-                                       const TextMeasureProvider& text_measure) {
-    if (!style.text_overflow_ellipsis || !style.white_space_nowrap || available_width <= 0 || text.empty()) {
-        return text;
-    }
-    const auto measure_width = [&](std::string_view value) {
-        return measure_text_with_letter_spacing(text_measure,
-                                                value,
-                                                style.font_size,
-                                                style.font_weight,
-                                                style.font_family_hash,
-                                                style.letter_spacing).width;
-    };
-    if (measure_width(text) <= available_width) {
-        return text;
-    }
-
-    static constexpr std::string_view marker = "...";
-    if (measure_width(marker) >= available_width) {
-        return std::string(marker);
-    }
-
-    std::string prefix;
-    prefix.reserve(text.size());
-    for (std::size_t index = 0; index < text.size();) {
-        const std::size_t begin = index;
-        consume_utf8_codepoint(text, index);
-        std::string candidate = prefix;
-        candidate.append(text, begin, index - begin);
-        candidate.append(marker);
-        if (measure_width(candidate) > available_width) {
-            break;
-        }
-        prefix.assign(candidate, 0, candidate.size() - marker.size());
-    }
-    prefix.append(marker);
-    return prefix;
-}
-
-bool same_text_measure_provider(const TextMeasureProvider& left,
-                                const TextMeasureProvider& right) {
-    return left.measure == right.measure &&
-        left.context == right.context &&
-        left.measure_family == right.measure_family &&
-        left.additive_measurement_supported == right.additive_measurement_supported &&
-        left.measure_range == right.measure_range &&
-        left.measure_range_family == right.measure_range_family;
-}
-
 const TextLayoutCache* valid_text_layout_cache(const LayoutBox& box,
                                                const LayerTreeBuilderOptions& options) {
     const TextLayoutCache& cache = box.text_layout_cache;
@@ -574,15 +523,16 @@ const TextLayoutCache* valid_text_layout_cache(const LayoutBox& box,
     }
     // Dirty flags can remain set while this layout is reused. Validate the
     // cached run against its text, geometry, style, and font-system inputs.
-    if (!cache.valid || box.node == nullptr || box.node->type != NodeType::Text ||
+    if (options.text_system == nullptr || !cache.valid || !cache.prepared_text ||
+        box.node == nullptr || box.node->type != NodeType::Text ||
         document_root == nullptr ||
         cache.source_text != box.node->text ||
         cache.viewport_width != box.viewport_width ||
         cache.viewport_height != box.viewport_height ||
-        cache.rect_width != box.rect.width ||
         cache.rect_height != box.rect.height ||
         cache.rect_x != box.rect.x ||
         cache.rect_y != box.rect.y ||
+        (cache.rect_width != box.rect.width && box.rect.width != cache.available_width) ||
         cache.font_size != box.style.font_size ||
         cache.font_weight != box.style.font_weight ||
         cache.font_family_hash != box.style.font_family_hash ||
@@ -597,9 +547,7 @@ const TextLayoutCache* valid_text_layout_cache(const LayoutBox& box,
         cache.text_overflow_ellipsis != box.style.text_overflow_ellipsis ||
         cache.text_align != box.style.text_align ||
         cache.text_system != options.text_system ||
-        cache.text_system_generation != (options.text_system != nullptr
-            ? options.text_system->generation() : 0) ||
-        (cache.text_system == nullptr && !same_text_measure_provider(cache.text_measure, options.text_measure))) {
+        cache.text_system_generation != options.text_system->generation()) {
         return nullptr;
     }
     return &cache;
@@ -620,116 +568,17 @@ void push_prepared_text(DisplayList& display_list, Rect rect, Color color,
         display_list.push_back(std::move(command));
     };
     if (!cache.prepared_lines.empty()) {
-        for (const auto& line : cache.prepared_lines)
-            push(line.packet, line.origin_x, line.baseline_y);
+        for (const auto& line : cache.prepared_lines) {
+            const auto align_offset = [&](int width) {
+                const int remaining = std::max(0, safe_add(width, -line.width));
+                return cache.text_align == TextAlign::Center ? remaining / 2
+                    : cache.text_align == TextAlign::End ? remaining : 0;
+            };
+            const int alignment_delta = align_offset(rect.width) - align_offset(cache.rect_width);
+            push(line.packet, safe_add(line.origin_x, alignment_delta), line.baseline_y);
+        }
     } else {
         push(cache.prepared_packet, cache.prepared_origin_x, cache.prepared_baseline_y);
-    }
-}
-
-void push_text_with_layout(DisplayList& display_list,
-                           Rect rect,
-                           Color color,
-                           const std::string& text,
-                           const Style& style,
-                           TextCommandAlign align,
-                           const TextMeasureProvider& text_measure,
-                           const TextLayoutCache* cached_layout = nullptr) {
-    if (rect.width <= 0 || rect.height <= 0 || text.empty() || color.a == 0) {
-        return;
-    }
-    const std::string rendered_text = ellipsize_single_line_text(
-        cached_layout != nullptr ? cached_layout->rendered_text : text,
-        style,
-        rect.width,
-        text_measure);
-    const int line_height = style.line_height > 0
-        ? style.line_height
-        : style.font_size + std::max(6, style.font_size / 3);
-    const bool wrap_anywhere = style.overflow_wrap_anywhere && !style.white_space_nowrap;
-    const bool wrap_at_opportunities = !wrap_anywhere && !style.white_space_nowrap &&
-        has_text_wrap_opportunity(rendered_text);
-    const bool split_scalars = style.letter_spacing != 0;
-    if (!wrap_anywhere && !wrap_at_opportunities && !split_scalars) {
-        push_text(display_list, rect, color, rendered_text, style.font_size, style.font_weight,
-                  style.font_family_hash, align, true);
-        return;
-    }
-
-    const std::vector<std::string> lines = cached_layout != nullptr && !cached_layout->lines.empty() &&
-            !(style.text_overflow_ellipsis && style.white_space_nowrap)
-        ? cached_layout->lines
-        : wrap_anywhere
-        ? wrap_text_anywhere(text_measure,
-                             rendered_text,
-                             style.font_size,
-                             style.font_weight,
-                             style.font_family_hash,
-                             style.letter_spacing,
-                             rect.width)
-        : wrap_at_opportunities
-        ? wrap_text_at_opportunities(text_measure,
-                                     rendered_text,
-                                     style.font_size,
-                                     style.font_weight,
-                                     style.font_family_hash,
-                                     style.letter_spacing,
-                                     rect.width)
-        : std::vector<std::string>{rendered_text};
-    const int bounded_spacing = bounded_letter_spacing(style.font_size, style.letter_spacing);
-    for (std::size_t line_index = 0; line_index < lines.size(); ++line_index) {
-        const std::string& line = lines[line_index];
-        const std::size_t bounded_line_index = std::min<std::size_t>(
-            line_index, static_cast<std::size_t>(std::numeric_limits<int>::max()));
-        const int line_offset = clamp_int64_to_int(
-            static_cast<std::int64_t>(bounded_line_index) * line_height);
-        const int y = safe_add(rect.y, line_offset);
-        const int rect_bottom = safe_edge(rect.y, rect.height);
-        if (y >= rect_bottom) {
-            break;
-        }
-        Rect line_rect{rect.x, y, rect.width, std::min(line_height, safe_span(y, rect_bottom))};
-        if (!split_scalars) {
-            push_text(display_list, line_rect, color, line, style.font_size, style.font_weight,
-                      style.font_family_hash, align, true);
-            continue;
-        }
-        const int line_width = measure_text_with_letter_spacing(text_measure,
-                                                                 line,
-                                                                 style.font_size,
-                                                                 style.font_weight,
-                                                                 style.font_family_hash,
-                                                                 style.letter_spacing).width;
-        int cursor_x = line_rect.x;
-        if (align == TextCommandAlign::Center) {
-            cursor_x = safe_add(cursor_x, std::max(0, safe_span(line_width, line_rect.width) / 2));
-        } else if (align == TextCommandAlign::End) {
-            cursor_x = safe_add(cursor_x, std::max(0, safe_span(line_width, line_rect.width)));
-        }
-        std::size_t scalar_index = 0;
-        while (scalar_index < line.size()) {
-            const std::size_t begin = scalar_index;
-            consume_utf8_codepoint(line, scalar_index);
-            const std::string scalar = line.substr(begin, scalar_index - begin);
-            const int scalar_width = std::max(1, measure_text(text_measure,
-                                                              scalar,
-                                                              style.font_size,
-                                                              style.font_weight,
-                                                              style.font_family_hash).width);
-            push_text(display_list,
-                      Rect{cursor_x, line_rect.y, scalar_width, line_rect.height},
-                      color,
-                      scalar,
-                      style.font_size,
-                      style.font_weight,
-                      style.font_family_hash,
-                      TextCommandAlign::Start,
-                      true);
-            cursor_x = safe_add(cursor_x, scalar_width);
-            if (scalar_index < line.size()) {
-                cursor_x = safe_add(cursor_x, bounded_spacing);
-            }
-        }
     }
 }
 
@@ -894,8 +743,10 @@ void paint_list_marker(const LayoutBox& box, DisplayList& display_list, const Te
                                  font_weight, TextCommandAlign::Start, diagnostics,
                                  "layer-core-list-marker-text-refused", "A list marker");
     } else {
-        push_text(display_list, marker_rect, color, marker, box.style.font_size, font_weight,
-                  box.style.font_family_hash, TextCommandAlign::Start, true);
+        report_diagnostic(diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                          "layer-core-list-marker-text-refused",
+                          "A Core TextSystem is required to prepare list marker text",
+                          "The list marker was omitted because this layer tree has no Core text service.");
     }
 }
 
@@ -953,8 +804,10 @@ void paint_generated_inline_content(const LayoutBox& box,
                                      "layer-core-generated-inline-text-refused",
                                      "Generated pseudo-element text");
         } else {
-            push_text(display_list, rect, color, text, box.style.font_size, font_weight,
-                      box.style.font_family_hash, align, true);
+            report_diagnostic(diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                              "layer-core-generated-inline-text-refused",
+                              "A Core TextSystem is required to prepare generated text",
+                              "Generated pseudo-element text was omitted because this layer tree has no Core text service.");
         }
     };
 
@@ -1130,7 +983,8 @@ bool prepare_control_label(const LayoutBox& box, const TextSystem& system,
                            const std::string& text, Rect rect, Color color,
                            TextCommandAlign align, DisplayCommand& command,
                            std::size_t& remaining_glyphs, int font_weight_override = -1) {
-    if (box.style.font_size < 0 || box.style.font_size > std::numeric_limits<std::int32_t>::max()/1000)
+    if (box.style.font_size < 0 || box.style.font_size > std::numeric_limits<std::int32_t>::max()/1000 ||
+        box.style.letter_spacing != 0)
         return false;
     std::uint32_t family = 0;
     if (!system.resolve_family_hash(box.style.font_family_hash, family)) return false;
@@ -1146,15 +1000,7 @@ bool prepare_control_label(const LayoutBox& box, const TextSystem& system,
         metrics.glyph_count > remaining_glyphs) return false;
     std::vector<PreparedTextGlyph> glyphs(metrics.glyph_count);
     if (system.prepare(text,request,glyphs.data(),glyphs.size(),metrics) != TextSystemStatus::Ok) return false;
-    const std::int64_t spacing = static_cast<std::int64_t>(
-        bounded_letter_spacing(box.style.font_size,box.style.letter_spacing)) * 1000;
-    for (std::size_t i=0;i<glyphs.size();++i) {
-        const auto x = static_cast<std::int64_t>(glyphs[i].x) + static_cast<std::int64_t>(i)*spacing;
-        if (x < std::numeric_limits<std::int32_t>::min() || x > std::numeric_limits<std::int32_t>::max()) return false;
-        glyphs[i].x = static_cast<std::int32_t>(x);
-    }
-    const auto advance = std::max<std::int64_t>(0,static_cast<std::int64_t>(metrics.advance) +
-        static_cast<std::int64_t>(glyphs.empty()?0:glyphs.size()-1)*spacing);
+    const auto advance = std::max<std::int64_t>(0, static_cast<std::int64_t>(metrics.advance));
     const auto free_width = std::max<std::int64_t>(0,static_cast<std::int64_t>(rect.width)*1000-advance);
     const auto offset = align == TextCommandAlign::Center ? free_width/2 :
         align == TextCommandAlign::End ? free_width : 0;
@@ -1290,26 +1136,10 @@ void paint_form_control(const LayoutBox& box, DisplayList& display_list,
             if (state.kind == FormControlKind::Select) display_list.push_back(std::move(arrow));
             return;
         }
-        push_text(display_list,
-                  label_rect,
-                  text_color,
-                  text,
-                  box.style.font_size,
-                  box.style.font_weight,
-                  box.style.font_family_hash,
-                  text_command_align(box.style.text_align),
-                  true);
-        if (state.kind == FormControlKind::Select) {
-            push_text(display_list,
-                      arrow_rect,
-                      Color{15, 23, 42, 255},
-                      "v",
-                      box.style.font_size,
-                      box.style.font_weight,
-                      box.style.font_family_hash,
-                      TextCommandAlign::Center,
-                      true);
-        }
+        report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                          "layer-core-control-text-refused",
+                          "A Core TextSystem is required to prepare native control text",
+                          "The control label was omitted because this layer tree has no Core text service.");
     }
 }
 
@@ -1547,13 +1377,6 @@ bool paint_select_popup(const LayoutBox& box,
         if (option_index == state.selected_index) {
             push_fill_rect(display_list, row, Color{219, 234, 254, 255}, 0);
         }
-        const Node* option = option_index >= 0 &&
-                static_cast<std::size_t>(option_index) < options_list.size()
-            ? options_list[static_cast<std::size_t>(option_index)]
-            : nullptr;
-        const Color text_color = option != nullptr && form_control_option_is_disabled_node(*option)
-            ? Color{148, 163, 184, 255}
-            : box.style.color;
         if (options.text_system != nullptr) {
             if (visible_index < static_cast<int>(prepared_option_text.size()) &&
                 prepared_option_text[static_cast<std::size_t>(visible_index)].type() ==
@@ -1561,15 +1384,13 @@ bool paint_select_popup(const LayoutBox& box,
                 display_list.push_back(std::move(
                     prepared_option_text[static_cast<std::size_t>(visible_index)]));
             }
-        } else {
-            push_text_with_layout(display_list,
-                                  Rect{safe_add(row.x, 5), row.y, std::max(0, safe_add(row.width, -10)), row.height},
-                                  text_color,
-                                  option != nullptr ? form_control_option_text_from_node(*option) : std::string{},
-                                  box.style,
-                                  TextCommandAlign::Start,
-                                  options.text_measure);
         }
+    }
+    if (options.text_system == nullptr && geometry.visible_option_count > 0) {
+        report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                          "layer-core-select-popup-text-refused",
+                          "A Core TextSystem is required to prepare select popup text",
+                          "Visible option labels were omitted because this layer tree has no Core text service.");
     }
     return true;
 }
@@ -1677,10 +1498,23 @@ void paint_canonical_background(const LayoutBox& box, DisplayList& display_list,
     }
     if (color_clip_ready) {
         push_fill_rect(display_list, color_area, box.style.background_color, color_radius, color_radius_y);
-    } else {
+    } else if (box.style.background_color.a != 0) {
+        const EdgeSizes& border = box.style.border_width;
+        const EdgeSizes& padding = box.style.padding;
         report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
                           "layer-background-color-clip-geometry",
-                          "Background color was omitted because its clip geometry is empty or unsupported.");
+                          "Background color was omitted because its clip geometry is empty or unsupported.",
+                          "node=" + (box.node != nullptr ? box.node->tag_name : std::string("<none>")) +
+                              " rect=" + std::to_string(box.rect.x) + "," + std::to_string(box.rect.y) + "," +
+                              std::to_string(box.rect.width) + "x" + std::to_string(box.rect.height) +
+                              " clip=" + std::to_string(static_cast<unsigned>(color_style.clip)) +
+                              " border=" + std::to_string(border.top) + "," + std::to_string(border.right) + "," +
+                              std::to_string(border.bottom) + "," + std::to_string(border.left) +
+                              " padding=" + std::to_string(padding.top) + "," + std::to_string(padding.right) + "," +
+                              std::to_string(padding.bottom) + "," + std::to_string(padding.left) +
+                              " radius=" + std::to_string(resolved_border_radius(box)) + "," +
+                              std::to_string(resolved_border_radius_y(box)) +
+                              " alpha=" + std::to_string(box.style.background_color.a));
     }
     for (std::size_t index = count; index > 0; --index) {
         const auto& layer = box.style.background_layers[index - 1];
@@ -1797,10 +1631,7 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
     }
     if (box.node != nullptr && box.node->type == NodeType::Text) {
         const TextLayoutCache* cached_layout = valid_text_layout_cache(box, options);
-        const std::string text = cached_layout != nullptr
-            ? cached_layout->rendered_text
-            : transformed_render_text(*box.node, box.style.text_transform);
-        if (cached_layout != nullptr && cached_layout->prepared_text) {
+        if (cached_layout != nullptr) {
             if (has_text_shadow(box.style)) {
                 const TextShadowStyle& shadow = box.style.text_shadow;
                 Rect shadow_rect = box.rect;
@@ -1811,29 +1642,30 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
                     *cached_layout, shadow.offset_x, shadow.offset_y);
             }
             push_prepared_text(display_list, box.rect, box.style.color, *cached_layout);
-        } else if (options.text_system == nullptr) {
-            if (has_text_shadow(box.style)) {
-                const TextShadowStyle& shadow = box.style.text_shadow;
-                Rect shadow_rect = box.rect;
-                shadow_rect.x = safe_add(shadow_rect.x, shadow.offset_x);
-                shadow_rect.y = safe_add(shadow_rect.y, shadow.offset_y);
-                push_text_with_layout(display_list,
-                                      shadow_rect,
-                                      shadow.uses_current_color ? box.style.color : shadow.color,
-                                      text,
-                                      box.style,
-                                      text_command_align(box.style.text_align),
-                                      options.text_measure,
-                                      cached_layout);
-            }
-            push_text_with_layout(display_list,
-                                  box.rect,
-                                  box.style.color,
-                                  text,
-                                  box.style,
-                                  text_command_align(box.style.text_align),
-                                  options.text_measure,
-                                  cached_layout);
+        } else if (!box.node->text.empty() && box.rect.width > 0 && box.rect.height > 0 &&
+                   box.style.color.a != 0) {
+            const TextLayoutCache& cache = box.text_layout_cache;
+            const std::string cache_detail =
+                "valid=" + std::to_string(cache.valid) + " prepared=" +
+                std::to_string(cache.prepared_text) + " viewport=" +
+                std::to_string(cache.viewport_width) + "x" + std::to_string(cache.viewport_height) +
+                "/" + std::to_string(box.viewport_width) + "x" + std::to_string(box.viewport_height) +
+                " rect=" + std::to_string(cache.rect_x) + "," + std::to_string(cache.rect_y) + "," +
+                std::to_string(cache.rect_width) + "x" + std::to_string(cache.rect_height) + "/" +
+                std::to_string(box.rect.x) + "," + std::to_string(box.rect.y) + "," +
+                std::to_string(box.rect.width) + "x" + std::to_string(box.rect.height) +
+                " available/content-width=" + std::to_string(cache.available_width) + "/" +
+                std::to_string(cache.content_width) +
+                " font-size=" + std::to_string(cache.font_size) + "/" +
+                std::to_string(box.style.font_size) + " family=" +
+                std::to_string(cache.font_family_hash) + "/" +
+                std::to_string(box.style.font_family_hash) + " text-system-generation=" +
+                std::to_string(cache.text_system_generation) + "/" +
+                (options.text_system ? std::to_string(options.text_system->generation()) : "none");
+            report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                              "layer-core-text-cache-refused",
+                              "Text was omitted because no valid Core-prepared text cache is available",
+                              cache_detail);
         }
         push_text_decorations(display_list, box, box.rect);
     }

@@ -1,4 +1,5 @@
 #include "render_core/canvas2d.h"
+#include "render_core/text_backend.h"
 #include "render_core/prepared_text.h"
 
 #include <algorithm>

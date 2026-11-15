@@ -4,6 +4,7 @@
 #include "render_core/layer_tree.h"
 #include "render_core/layout.h"
 #include "render_core/render_tree.h"
+#include "core_text_test_fixture.h"
 #include "../../src/style_resolver_test_hooks.h"
 
 #include <iostream>
@@ -453,6 +454,8 @@ void separator_filter_preserves_context_overrides_and_budget() {
 }
 
 void text_style_fast_path_preserves_inheritance_and_overrides() {
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
     auto document = HtmlParser{}.parse(
         "<body><main style='--ink:#234567;color:var(--ink);font-size:22px'>"
         "Alpha<strong>Beta</strong></main></body>");
@@ -491,12 +494,16 @@ void text_style_fast_path_preserves_inheritance_and_overrides() {
               nested_text->style.font_size == 22 && nested_text->style.font_weight == 700,
           "nested text receives inherited color, font size, and explicit element weight");
 
-    auto layout = LayoutEngine(resolver).layout(*tree, 320, 120);
+    LayoutEngineOptions layout_options;
+    layout_options.text_system = &fonts.system();
+    auto layout = LayoutEngine(resolver, layout_options).layout(*tree, 320, 120);
     check(layout != nullptr && !layout->children.empty(), "text fast path produces layout geometry");
     const LayoutBox* text_box = find_layout_box_for_node(*layout, first_text->node);
     check(text_box && text_box->rect.width > 0 && text_box->rect.height > 0,
           "text geometry remains attached to its source node");
-    const auto layers = LayerTreeBuilder{}.build(*layout);
+    LayerTreeBuilderOptions layer_options;
+    layer_options.text_system = &fonts.system();
+    const auto layers = LayerTreeBuilder(layer_options).build(*layout);
     const int hit_x = text_box->rect.x + text_box->rect.width / 2;
     const int hit_y = text_box->rect.y + text_box->rect.height / 2;
     const auto layout_hit = HitTester{}.hit_test(*layout, hit_x, hit_y);

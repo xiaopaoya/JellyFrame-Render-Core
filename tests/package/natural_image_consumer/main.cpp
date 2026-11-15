@@ -24,7 +24,7 @@ int main() {
     NaturalImageSizingStatistics stats;
     options.natural_image_sizing.provider = {lookup,&queries};
     options.natural_image_sizing.statistics = &stats;
-    auto tree = LayoutEngine(styles,{},options).layout(*dom,320,240);
+    auto tree = LayoutEngine(styles, options).layout(*dom,320,240);
     const auto* box = image(*tree);
     if (!box || box->content_geometry.width != 25500 || box->content_geometry.height() != 12750 ||
         queries != 1 || stats.accepted != 1 || stats.scratch_bytes > 4096)

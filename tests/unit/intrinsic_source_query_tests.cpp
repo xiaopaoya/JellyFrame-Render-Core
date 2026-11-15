@@ -244,7 +244,7 @@ void grid_auto_track_consumes_complete_source_width(const TextSystem& text_syste
         "#item{display:block;font-size:16px;font-weight:400}"));
     LayoutEngineOptions options;
     options.text_system = &text_system;
-    auto layout = LayoutEngine(styles, {}, options).layout(*document, 120, 80);
+    auto layout = LayoutEngine(styles, options).layout(*document, 120, 80);
     auto* item = find_box(*layout, "item");
     auto* fill = find_box(*layout, "fill");
     check(item && fill, "grid source width fixture boxes exist");
@@ -265,8 +265,8 @@ void grid_auto_track_consumes_complete_source_width(const TextSystem& text_syste
         "*{margin:0;padding:0;border:0}#grid{display:grid;width:1000px;grid-template-columns:auto}"
         ".item{display:block;font-family:'Core Test';font-size:16px}"));
     LayoutEngineOptions no_query_options;
-    auto budget_query = LayoutEngine(budget_styles, {}, options).layout(*budget_document, 1100, 80);
-    auto budget_legacy = LayoutEngine(budget_styles, {}, no_query_options).layout(*budget_document, 1100, 80);
+    auto budget_query = LayoutEngine(budget_styles, options).layout(*budget_document, 1100, 80);
+    auto budget_legacy = LayoutEngine(budget_styles, no_query_options).layout(*budget_document, 1100, 80);
     check(budget_query->children.size() == budget_legacy->children.size(),
           "Grid aggregate query budget fixture has stable item count");
     for (std::size_t index = 0; index < budget_query->children.size(); ++index)
@@ -307,7 +307,7 @@ void fractional_percentage_pipeline(const TextSystem& text_system) {
                 "#percent{" + property.name + ":37.5%}"));
             LayoutEngineOptions options;
             options.text_system = &text_system;
-            auto layout = LayoutEngine(styles, {}, options).layout(*dom, 320, 240);
+            auto layout = LayoutEngine(styles, options).layout(*dom, 320, 240);
             auto* root = find_box(*layout, "query");
             auto* descendant = find_box(*layout, "percent");
             check(root && descendant, "fractional percentage pipeline boxes missing");
@@ -1122,7 +1122,7 @@ void layout_pass_intrinsic_budget(const TextSystem& system) {
     options.text_system = &system;
     options.intrinsic_query_statistics = &statistics;
     options.intrinsic_query_limits.max_work = 180;
-    LayoutEngine engine(styles, {}, options);
+    LayoutEngine engine(styles, options);
     auto limited = engine.layout(*document, 120, 80);
     const auto first_pass = statistics;
     check(first_pass.work <= 180 && first_pass.queries > 2 && first_pass.resource_refusals > 0,
@@ -1144,41 +1144,41 @@ void layout_pass_intrinsic_budget(const TextSystem& system) {
           "public RenderObject layout starts a fresh ledger without a Node-overload reset");
     options.intrinsic_query_limits.max_work = 65536;
     options.intrinsic_query_limits.max_boxes = 4096;
-    auto complete = LayoutEngine(styles, {}, options).layout(*document, 120, 80);
+    auto complete = LayoutEngine(styles, options).layout(*document, 120, 80);
     check(statistics.work > first_pass.work && find(*complete, "tail")->rect.width == 18,
           "larger pass allowance restores normal nested automatic-minimum results");
 
     // Refusal on a second item must discard the first item's staged minimum.
     auto pair = HtmlParser{}.parse("<div class='f'><div class='item'>AB CD</div><div class='item'>AB CD</div></div>");
     options.intrinsic_query_limits.max_work = 0;
-    auto legacy = LayoutEngine(styles, {}, options).layout(*pair, 120, 80);
+    auto legacy = LayoutEngine(styles, options).layout(*pair, 120, 80);
     options.intrinsic_query_limits.max_work = 65536;
-    auto normal = LayoutEngine(styles, {}, options).layout(*pair, 120, 80);
+    auto normal = LayoutEngine(styles, options).layout(*pair, 120, 80);
     const auto pair_work = statistics.work;
     options.intrinsic_query_limits.max_work = pair_work - 1;
-    auto one_below = LayoutEngine(styles, {}, options).layout(*pair, 120, 80);
+    auto one_below = LayoutEngine(styles, options).layout(*pair, 120, 80);
     check(!same_rectangles(*normal, *legacy) && same_rectangles(*one_below, *legacy) &&
           statistics.resource_refusals > 0 && statistics.work <= pair_work - 1,
           "late Flex query refusal publishes the whole consumer legacy geometry atomically");
 
     auto grid_pair = HtmlParser{}.parse("<div id='gp' class='g'><div id='ga'>AB AB</div><div id='gb'>AB CD</div></div>");
     options.intrinsic_query_limits.max_work = 65536;
-    auto grid_normal = LayoutEngine(styles, {}, options).layout(*grid_pair, 120, 80);
+    auto grid_normal = LayoutEngine(styles, options).layout(*grid_pair, 120, 80);
     const auto grid_work = statistics.work;
     check(statistics.queries == 2 && grid_work > 0, "Grid boundary fixture issues two source queries");
     options.intrinsic_query_limits.max_work = grid_work - 1;
-    auto grid_refused = LayoutEngine(styles, {}, options).layout(*grid_pair, 120, 80);
+    auto grid_refused = LayoutEngine(styles, options).layout(*grid_pair, 120, 80);
     options.intrinsic_query_limits.max_work = 0;
-    auto grid_legacy = LayoutEngine(styles, {}, options).layout(*grid_pair, 120, 80);
+    auto grid_legacy = LayoutEngine(styles, options).layout(*grid_pair, 120, 80);
     check(same_rectangles(*grid_refused, *grid_legacy),
           "late Grid query refusal discards all staged track contributions");
     options.intrinsic_query_limits.max_work = 65536;
     options.intrinsic_query_limits.max_scratch_bytes = 13; // Two int tracks + five source bytes.
-    auto grid_scratch_exact = LayoutEngine(styles, {}, options).layout(*grid_pair, 120, 80);
+    auto grid_scratch_exact = LayoutEngine(styles, options).layout(*grid_pair, 120, 80);
     check(same_rectangles(*grid_scratch_exact, *grid_normal) && statistics.peak_scratch_bytes == 13,
           "Grid staging and query payload share the exact simultaneous scratch allowance");
     options.intrinsic_query_limits.max_scratch_bytes = 12;
-    auto grid_scratch_short = LayoutEngine(styles, {}, options).layout(*grid_pair, 120, 80);
+    auto grid_scratch_short = LayoutEngine(styles, options).layout(*grid_pair, 120, 80);
     check(same_rectangles(*grid_scratch_short, *grid_legacy) && statistics.resource_refusals > 0 &&
           statistics.peak_scratch_bytes <= 12,
           "one-below Grid scratch allowance refuses before publishing track contributions");
@@ -1199,7 +1199,7 @@ void flex_auto_min_consumer(const TextSystem& system) {
         "#a{display:block;flex:0 1 0px;font-size:16px}"));
     LayoutEngineOptions options;
     options.text_system = &system;
-    auto tree = LayoutEngine(styles, {}, options).layout(*dom, 100, 40);
+    auto tree = LayoutEngine(styles, options).layout(*dom, 100, 40);
     const auto* item = find(*tree, "a");
     check(item != nullptr && item->rect.width == 18,
           "row Flex auto minimum must consume source min-content width instead of shrinking to its basis");
@@ -1209,7 +1209,7 @@ void flex_auto_min_consumer(const TextSystem& system) {
     StyleResolver redistribution_styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}#p{display:flex;width:105px;align-items:flex-start}"
         "#text,#unbreakable{display:block;flex:0 1 100px;font-size:16px}"));
-    auto redistribution = LayoutEngine(redistribution_styles, {}, options).layout(
+    auto redistribution = LayoutEngine(redistribution_styles, options).layout(
         *redistribution_dom, 120, 60);
     const auto* text_item = find(*redistribution, "text");
     const auto* unbreakable_item = find(*redistribution, "unbreakable");
@@ -1232,7 +1232,7 @@ void flex_auto_min_consumer(const TextSystem& system) {
     StyleResolver boundary_styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}#p{display:flex;width:100px;align-items:flex-start}"
         "#a,#b{display:block;flex:0 1 100px;min-width:50px;font-size:16px}"));
-    auto boundary = LayoutEngine(boundary_styles, {}, options).layout(*boundary_dom, 120, 60);
+    auto boundary = LayoutEngine(boundary_styles, options).layout(*boundary_dom, 120, 60);
     const auto* boundary_a = find(*boundary, "a");
     const auto* boundary_b = find(*boundary, "b");
     check(boundary_a != nullptr && boundary_b != nullptr &&
@@ -1243,9 +1243,9 @@ void flex_auto_min_consumer(const TextSystem& system) {
     StyleResolver refused_styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}#p{display:flex;width:5px;align-items:flex-start}"
         "#a{display:block;flex:0 1 0px;font-size:16px}"));
-    auto fallback = LayoutEngine(refused_styles, {}, options).layout(*refused_dom, 100, 40);
+    auto fallback = LayoutEngine(refused_styles, options).layout(*refused_dom, 100, 40);
     LayoutEngineOptions legacy_options;
-    auto legacy = LayoutEngine(refused_styles, {}, legacy_options).layout(*refused_dom, 100, 40);
+    auto legacy = LayoutEngine(refused_styles, legacy_options).layout(*refused_dom, 100, 40);
     const auto* fallback_item = find(*fallback, "a");
     const auto* legacy_item = find(*legacy, "a");
     check(fallback_item != nullptr && legacy_item != nullptr &&
@@ -1258,7 +1258,7 @@ void flex_auto_min_consumer(const TextSystem& system) {
     StyleResolver percentage_styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}#p{display:flex;width:5px;align-items:flex-start}"
         "#a{display:block;flex:0 1 0px;min-width:50%;font-size:16px}"));
-    auto percentage = LayoutEngine(percentage_styles, {}, options).layout(*percentage_dom, 100, 40);
+    auto percentage = LayoutEngine(percentage_styles, options).layout(*percentage_dom, 100, 40);
     const auto* percentage_item = find(*percentage, "a");
     check(percentage_item != nullptr && percentage_item->rect.width == 3,
           "definite min-width percentage resolves against the Flex content width");
@@ -1267,9 +1267,9 @@ void flex_auto_min_consumer(const TextSystem& system) {
     StyleResolver calc_styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}#p{display:flex;width:5px;align-items:flex-start}"
         "#a{display:block;flex:0 1 0px;min-width:calc(20px + 50%);font-size:16px}"));
-    auto calc_query = LayoutEngine(calc_styles, {}, options).layout(*calc_dom, 100, 40);
+    auto calc_query = LayoutEngine(calc_styles, options).layout(*calc_dom, 100, 40);
     LayoutEngineOptions no_query_options;
-    auto calc_legacy = LayoutEngine(calc_styles, {}, no_query_options).layout(*calc_dom, 100, 40);
+    auto calc_legacy = LayoutEngine(calc_styles, no_query_options).layout(*calc_dom, 100, 40);
     check(find(*calc_query, "a") != nullptr && find(*calc_legacy, "a") != nullptr &&
           find(*calc_query, "a")->rect.width == find(*calc_legacy, "a")->rect.width,
           "unsupported computed calc min-width declines intrinsic admission and preserves legacy geometry");
@@ -1284,8 +1284,8 @@ void flex_auto_min_consumer(const TextSystem& system) {
     StyleResolver budget_styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}#p{display:flex;width:100px;align-items:flex-start}"
         ".a{display:block;flex:0 1 0px;font-size:16px}#explicit{min-width:50%}"));
-    auto budget_query = LayoutEngine(budget_styles, {}, options).layout(*budget_dom, 100, 40);
-    auto budget_legacy = LayoutEngine(budget_styles, {}, no_query_options).layout(*budget_dom, 100, 40);
+    auto budget_query = LayoutEngine(budget_styles, options).layout(*budget_dom, 100, 40);
+    auto budget_legacy = LayoutEngine(budget_styles, no_query_options).layout(*budget_dom, 100, 40);
     check(budget_query->children.size() == budget_legacy->children.size(),
           "Flex aggregate query budget fixture has stable child count");
     for (std::size_t index = 0; index < budget_query->children.size(); ++index)

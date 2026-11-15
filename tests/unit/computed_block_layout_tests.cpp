@@ -85,7 +85,7 @@ int main() {
             check(child->rect.x==31 && child->rect.width==38,"auto margins retain exact free space before edge projection");
             VectorDiagnosticSink diagnostics;
             LayoutEngineOptions options;options.max_layout_depth=2;options.diagnostics=&diagnostics;
-            auto limited=LayoutEngine(resolver,{},options).layout(*dom,320,240);
+            auto limited=LayoutEngine(resolver, options).layout(*dom,320,240);
             bool depth_reported=false;
             for (const auto& diagnostic : diagnostics.diagnostics())
                 depth_reported |= diagnostic.code=="layout-depth-limit";

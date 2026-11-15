@@ -112,7 +112,7 @@ Scene layout_mixed_wrapped_row(std::size_t max_work) {
     options.text_system = &empty_text_system;
     options.intrinsic_query_limits.max_work = max_work;
     options.intrinsic_query_statistics = &scene.stats;
-    scene.boxes = LayoutEngine(resolver, {}, options).layout(*tree, 320, 240);
+    scene.boxes = LayoutEngine(resolver, options).layout(*tree, 320, 240);
     return scene;
 }
 

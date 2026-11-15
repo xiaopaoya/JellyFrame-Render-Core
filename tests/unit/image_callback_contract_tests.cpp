@@ -46,7 +46,7 @@ DisplayCommand image() {
 }
 void image_clipping_preserves_request() {
     Provider provider;
-    SoftwareRasterizer raster({}, {paint, &provider});
+    SoftwareRasterizer raster(ImagePainter{paint, &provider});
     FrameBuffer target(16, 12, {1, 2, 3, 255});
     auto command = image();
     SoftwareRasterizerScratch scratch;
@@ -73,7 +73,7 @@ void image_clipping_preserves_request() {
 }
 void rounded_paint_area_and_legacy_request() {
     Provider provider;
-    SoftwareRasterizer raster({}, {paint, &provider});
+    SoftwareRasterizer raster(ImagePainter{paint, &provider});
     auto command = image();
     command.image_paint().background_paint_clip = {2, 1, 8, 6};
     command.image_paint().border_radius = 3;
@@ -119,7 +119,7 @@ void values_and_flatten_preserve_sampling() {
     check(flattened.display_list[0].transform.enabled &&
           same_rect(flattened.display_list[0].rect, original.rect), "affine metadata retains sampling rectangle");
     Provider provider;
-    SoftwareCompositor compositor({}, {paint, &provider});
+    SoftwareCompositor compositor(ImagePainter{paint, &provider});
     auto target = compositor.render(root, 24, 24, {1, 2, 3, 255});
     check(provider.calls == 1 && provider.last.destination.width == 12 &&
           provider.last.background_painting_rect.width == 6, "affine source paint preserves complete request geometry");
