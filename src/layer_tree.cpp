@@ -1097,7 +1097,55 @@ int range_state_value(const FormControlState& state) {
     return static_cast<int>(parsed);
 }
 
-void paint_form_control(const LayoutBox& box, DisplayList& display_list) {
+// Native controls keep their established rectangles. Only label selection,
+// scalar positions and baseline metrics move to the Core-owned text service.
+bool prepare_control_label(const LayoutBox& box, const TextSystem& system,
+                           const std::string& text, Rect rect, Color color,
+                           TextCommandAlign align, DisplayCommand& command,
+                           std::size_t& remaining_glyphs) {
+    if (box.style.font_size < 0 || box.style.font_size > std::numeric_limits<std::int32_t>::max()/1000)
+        return false;
+    std::uint32_t family = 0;
+    if (!system.resolve_family_hash(box.style.font_family_hash, family)) return false;
+    TextFontRequest request;
+    request.families = &family; request.family_count = 1;
+    request.size_q1000 = box.style.font_size * 1000;
+    request.weight = static_cast<std::uint16_t>(std::clamp(box.style.font_weight,1,1000));
+    TextRunMetrics metrics;
+    // A full-input measure precedes allocation/preparation; truncation and host
+    // callbacks never conceal unsupported text or configured service refusal.
+    if (system.measure(text,request,metrics) != TextSystemStatus::Ok ||
+        metrics.glyph_count > remaining_glyphs) return false;
+    std::vector<PreparedTextGlyph> glyphs(metrics.glyph_count);
+    if (system.prepare(text,request,glyphs.data(),glyphs.size(),metrics) != TextSystemStatus::Ok) return false;
+    const std::int64_t spacing = static_cast<std::int64_t>(
+        bounded_letter_spacing(box.style.font_size,box.style.letter_spacing)) * 1000;
+    for (std::size_t i=0;i<glyphs.size();++i) {
+        const auto x = static_cast<std::int64_t>(glyphs[i].x) + static_cast<std::int64_t>(i)*spacing;
+        if (x < std::numeric_limits<std::int32_t>::min() || x > std::numeric_limits<std::int32_t>::max()) return false;
+        glyphs[i].x = static_cast<std::int32_t>(x);
+    }
+    const auto advance = std::max<std::int64_t>(0,static_cast<std::int64_t>(metrics.advance) +
+        static_cast<std::int64_t>(glyphs.empty()?0:glyphs.size()-1)*spacing);
+    const auto free_width = std::max<std::int64_t>(0,static_cast<std::int64_t>(rect.width)*1000-advance);
+    const auto offset = align == TextCommandAlign::Center ? free_width/2 :
+        align == TextCommandAlign::End ? free_width : 0;
+    const auto vertical = static_cast<std::int64_t>(rect.height)*1000-metrics.ascent-metrics.descent;
+    const auto origin = static_cast<std::int64_t>(rect.x)+offset/1000;
+    const auto baseline = static_cast<std::int64_t>(rect.y)+(vertical/2+metrics.ascent)/1000;
+    if (origin < std::numeric_limits<int>::min() || origin > std::numeric_limits<int>::max() ||
+        baseline < std::numeric_limits<int>::min() || baseline > std::numeric_limits<int>::max()) return false;
+    command.set_type(DisplayCommandType::PreparedText);
+    command.rect = rect; command.color = color;
+    set_prepared_text_origin(command,static_cast<int>(origin),static_cast<int>(baseline));
+    if (!encode_positioned_prepared_text(glyphs.data(),glyphs.size(),request.size_q1000,
+                                        static_cast<std::uint32_t>(text.size()),command.text)) return false;
+    remaining_glyphs -= glyphs.size();
+    return true;
+}
+
+void paint_form_control(const LayoutBox& box, DisplayList& display_list,
+                        const LayerTreeBuilderOptions& options, std::size_t remaining_commands) {
     if (box.node == nullptr || box.node->type != NodeType::Element || !is_form_control(*box.node)) {
         return;
     }
@@ -1168,8 +1216,33 @@ void paint_form_control(const LayoutBox& box, DisplayList& display_list) {
             text = "Choose file";
         }
         const int arrow_width = state.kind == FormControlKind::Select ? 14 : 0;
+        const Rect label_rect{inner.x+2,inner.y,std::max(0,inner.width-arrow_width-4),inner.height};
+        const Rect arrow_rect{inner.x+std::max(0,inner.width-12),inner.y,12,inner.height};
+        if (options.text_system) {
+            constexpr std::size_t max_control_glyphs = 128;
+            std::size_t glyph_budget = max_control_glyphs;
+            DisplayCommand label, arrow;
+            const std::size_t command_count = state.kind == FormControlKind::Select ? 2 : 1;
+            if (remaining_commands < command_count ||
+                !prepare_control_label(box,*options.text_system,text,label_rect,text_color,
+                    text_command_align(box.style.text_align),label,glyph_budget) ||
+                (state.kind == FormControlKind::Select &&
+                 !prepare_control_label(box,*options.text_system,"v",arrow_rect,Color{15,23,42,255},
+                    TextCommandAlign::Center,arrow,glyph_budget))) {
+                report_diagnostic(options.diagnostics,DiagnosticStage::LayerTree,DiagnosticSeverity::Warning,
+                    "layer-core-control-text-refused","Core TextSystem could not prepare the complete control label",
+                    "A native label/select pair must fit scalar, glyph, position and display-command budgets.");
+                return;
+            }
+            // Reserve before either publication so allocation failure cannot
+            // leave a select label without its arrow (or the reverse).
+            display_list.reserve(display_list.size()+command_count);
+            display_list.push_back(std::move(label));
+            if (state.kind == FormControlKind::Select) display_list.push_back(std::move(arrow));
+            return;
+        }
         push_text(display_list,
-                  Rect{inner.x + 2, inner.y, std::max(0, inner.width - arrow_width - 4), inner.height},
+                  label_rect,
                   text_color,
                   text,
                   box.style.font_size,
@@ -1179,7 +1252,7 @@ void paint_form_control(const LayoutBox& box, DisplayList& display_list) {
                   true);
         if (state.kind == FormControlKind::Select) {
             push_text(display_list,
-                      Rect{inner.x + std::max(0, inner.width - 12), inner.y, 12, inner.height},
+                      arrow_rect,
                       Color{15, 23, 42, 255},
                       "v",
                       box.style.font_size,
@@ -1573,7 +1646,9 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
     paint_outline(box, display_list);
 
     paint_meter_bar(box, display_list);
-    paint_form_control(box, display_list);
+    const auto used_commands = display_list.size()-box_command_begin;
+    paint_form_control(box, display_list, options,
+        used_commands >= remaining_commands ? 0 : remaining_commands-used_commands);
     if (!suppress_ellipsis_generated) {
         paint_list_marker(box, display_list, options.text_system);
         paint_generated_inline_content(box, display_list, CssPseudoElement::Before, options.text_system);

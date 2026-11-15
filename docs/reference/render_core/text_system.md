@@ -110,6 +110,32 @@ The layout path defaults to at most 128 prepared glyphs per text node so retaine
 JFTP packets remain bounded independently of the lower-level service's 4096-glyph
 limit; `LayoutEngineOptions::max_prepared_text_glyphs` can lower this bound.
 
+### Native closed-control labels
+
+With `LayerTreeBuilderOptions::text_system` selected, closed text, textarea,
+date, time, color, file and select controls emit retained `PreparedText` packets.
+Their existing content rectangles and control geometry are unchanged. Value,
+placeholder and default `Choose file` selection retain the existing policy;
+Core font metrics center the baseline vertically, and `text-align` positions
+the admitted run horizontally. Integer bounded letter spacing uses explicit
+Q1000 positions. Overflow clips to the label rectangle; this path does not
+wrap, ellipsize, shape or normalize multiline textarea contents.
+
+The complete label is admitted before publication. Each control has a fixed
+128-glyph allowance shared by its label and select `v` arrow, in addition to
+the configured TextSystem per-run limits. Select prepares both packets and
+reserves both display-command slots before publishing either. Missing family,
+unsupported text, service/glyph/position budget or packet refusal emits the
+`layer-core-control-text-refused` diagnostic and omits the complete label/arrow
+pair. It never retries a host callback. Empty labels may carry an empty packet
+and still use Core strut metrics. Layer builds read current control state;
+previously built packets remain immutable for retained replay. Resource IDs
+retain the same catalog-lifetime requirement as ordinary prepared text.
+
+Open select popup options, button descendant text and other generated/native
+text paths are separate migration work. Leaving TextSystem unset preserves
+the existing legacy control label path.
+
 ### Bounded paint-time ellipsis
 
 For a block-container owner with one direct text run, non-visible overflow and
