@@ -132,9 +132,14 @@ and still use Core strut metrics. Layer builds read current control state;
 previously built packets remain immutable for retained replay. Resource IDs
 retain the same catalog-lifetime requirement as ordinary prepared text.
 
-Open select popup options, button descendant text and other generated/native
-text paths are separate migration work. Leaving TextSystem unset preserves
-the existing legacy control label path.
+With `LayerTreeBuilderOptions::text_system` selected, visible open-select popup
+rows also emit Core-prepared `PreparedText` packets. The popup prepares every
+visible row before publishing the overlay; missing glyphs or service/packet
+budget refusal reports `layer-core-select-popup-text-refused` and omits the
+whole overlay instead of retrying a host callback. Text is clipped to each row
+rectangle; popup scrolling and ellipsis remain unsupported. Leaving TextSystem
+unset preserves the legacy popup and control-label paths. Button descendant
+text and other generated/native text paths remain separate migration work.
 
 ### Bounded paint-time ellipsis
 

@@ -1441,6 +1441,46 @@ bool paint_select_popup(const LayoutBox& box,
                           "Use a shorter option list or a page-level picker until popup scrolling is enabled.");
     }
 
+    std::vector<DisplayCommand> prepared_option_text;
+    if (options.text_system != nullptr) {
+        prepared_option_text.reserve(static_cast<std::size_t>(geometry.visible_option_count));
+        std::size_t popup_glyph_budget = 4096;
+        for (int visible_index = 0; visible_index < geometry.visible_option_count; ++visible_index) {
+            const int option_index = safe_add(geometry.first_option_index, visible_index);
+            const Node* option = option_index >= 0 &&
+                    static_cast<std::size_t>(option_index) < options_list.size()
+                ? options_list[static_cast<std::size_t>(option_index)]
+                : nullptr;
+            const std::string text = option != nullptr
+                ? form_control_option_text_from_node(*option) : std::string{};
+            const Color text_color = option != nullptr && form_control_option_is_disabled_node(*option)
+                ? Color{148, 163, 184, 255}
+                : box.style.color;
+            if (text.empty() || text_color.a == 0) {
+                prepared_option_text.emplace_back();
+                continue;
+            }
+            const int row_offset = clamp_int64_to_int(
+                static_cast<std::int64_t>(visible_index) * geometry.row_height);
+            const Rect row{safe_add(geometry.rect.x, 5),
+                           safe_add(safe_add(geometry.rect.y, row_offset), safe_negate(scroll_y)),
+                           std::max(0, safe_add(geometry.rect.width, -10)),
+                           geometry.row_height};
+            DisplayCommand command;
+            if (!prepare_control_label(box, *options.text_system, text, row, text_color,
+                                       TextCommandAlign::Start, command, popup_glyph_budget)) {
+                report_diagnostic(options.diagnostics,
+                                  DiagnosticStage::LayerTree,
+                                  DiagnosticSeverity::Warning,
+                                  "layer-core-select-popup-text-refused",
+                                  "Core TextSystem could not prepare every visible select popup option",
+                                  "Reduce visible option text or register a font that covers the complete popup.");
+                return false;
+            }
+            prepared_option_text.push_back(std::move(command));
+        }
+    }
+
     popup_bounds = geometry.rect;
     popup_bounds.y = safe_add(popup_bounds.y, safe_negate(scroll_y));
     push_fill_rect(display_list, popup_bounds, Color{248, 250, 252, 255}, 2);
@@ -1465,13 +1505,22 @@ bool paint_select_popup(const LayoutBox& box,
         const Color text_color = option != nullptr && form_control_option_is_disabled_node(*option)
             ? Color{148, 163, 184, 255}
             : box.style.color;
-        push_text_with_layout(display_list,
-                              Rect{safe_add(row.x, 5), row.y, std::max(0, safe_add(row.width, -10)), row.height},
-                              text_color,
-                              option != nullptr ? form_control_option_text_from_node(*option) : std::string{},
-                              box.style,
-                              TextCommandAlign::Start,
-                              options.text_measure);
+        if (options.text_system != nullptr) {
+            if (visible_index < static_cast<int>(prepared_option_text.size()) &&
+                prepared_option_text[static_cast<std::size_t>(visible_index)].type() ==
+                    DisplayCommandType::PreparedText) {
+                display_list.push_back(std::move(
+                    prepared_option_text[static_cast<std::size_t>(visible_index)]));
+            }
+        } else {
+            push_text_with_layout(display_list,
+                                  Rect{safe_add(row.x, 5), row.y, std::max(0, safe_add(row.width, -10)), row.height},
+                                  text_color,
+                                  option != nullptr ? form_control_option_text_from_node(*option) : std::string{},
+                                  box.style,
+                                  TextCommandAlign::Start,
+                                  options.text_measure);
+        }
     }
     return true;
 }
