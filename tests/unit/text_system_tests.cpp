@@ -616,6 +616,158 @@ void aligned_prepared_text_stays_inside_its_layout_box() {
         }
     }
 }
+void core_prepared_text_ellipsis() {
+    auto font = asset(400,16,4,1,{{32,250},{46,200},{65,500},{66,600},{0x2026,700},{0x4e00,1000}});
+    TextFontFace face{1,0,font.font}; TextSystem system;
+    assert(system.bind(&face,1)==S::Ok);
+    LayoutEngineOptions options; options.text_system=&system;
+    TextMeasureProvider forbidden;
+    forbidden.measure = [](const std::string&,int,int,TextMetrics*,void*) -> bool {
+        assert(false && "Core ellipsis must not call a host measurer"); return false;
+    };
+
+    std::vector<std::unique_ptr<Node>> documents;
+    const auto run = [&](std::string source, int width, const char* extra, std::size_t budget=128) {
+        auto document=HtmlParser().parse("<body><div>"+source+"</div></body>");
+        StyleResolver resolver(CssParser().parse("body { margin:0 } div { margin:0; color:#000000; font-size:16px; line-height:20px; width:"+
+            std::to_string(width)+"px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; "+extra+" }"));
+        auto local=options; local.max_prepared_text_glyphs=budget;
+        auto result=LayoutEngine(resolver,forbidden,local).layout(*document,100,40);
+        documents.push_back(std::move(document));
+        return result;
+    };
+    auto truncated=run("ABAB",24,"");
+    const auto* text=find_text_box(*truncated); assert(text && text->text_layout_cache.prepared_text);
+    assert(text->text_layout_cache.rendered_text=="ABAB");
+    assert(text->text_layout_cache.lines==std::vector<std::string>{"A\xE2\x80\xA6"});
+    PreparedTextView view; PreparedTextGlyph first,last;
+    assert(decode_prepared_text(text->text_layout_cache.prepared_packet,view) && view.size()==2);
+    assert(view.read(0,first) && view.read(1,last));
+    assert(first.source_codepoint=='A' && last.source_codepoint==0x2026 && last.x==8000);
+    assert(first.source_begin==0 && first.source_end==1 && last.source_begin==1 && last.source_end==4);
+    LayerTreeBuilderOptions layer_options; layer_options.text_system=&system;
+    auto layers=LayerTreeBuilder(layer_options).build(*truncated);
+    SoftwareCompositor::Options paint_options; paint_options.text_system=&system;
+    const auto frame=SoftwareCompositor({},paint_options).render(*layers,100,40,Color{255,255,255,255});
+    std::size_t ink=0;
+    for (const auto& pixel:frame.pixels) ink += pixel.r<255 || pixel.g<255 || pixel.b<255;
+    assert(ink>0);
+    auto fitting=run("AB",24,""); text=find_text_box(*fitting);
+    assert(text->text_layout_cache.lines==std::vector<std::string>{"AB"});
+    auto fractional=run("ABAB",28,"width:28.9px;"); text=find_text_box(*fractional);
+    assert(text->text_layout_cache.lines==std::vector<std::string>{"AB\xE2\x80\xA6"});
+    auto multiline=run("A A A",10,"white-space:normal;"); text=find_text_box(*multiline);
+    assert(text->text_layout_cache.prepared_text && text->text_layout_cache.prepared_lines.size()==3);
+    auto indented_multiline=run("A AB AB",20,"white-space:normal;text-indent:8px;"); text=find_text_box(*indented_multiline);
+    assert(text->text_layout_cache.prepared_text && text->text_layout_cache.prepared_lines.size()==3);
+    auto narrow=run("A",1,""); text=find_text_box(*narrow);
+    assert(text->text_layout_cache.lines==std::vector<std::string>{"A"});
+    auto cjk=run("\xE4\xB8\x80\xE4\xB8\x80\xE4\xB8\x80",30,""); text=find_text_box(*cjk);
+    assert(text->text_layout_cache.lines==std::vector<std::string>{"\xE4\xB8\x80\xE2\x80\xA6"});
+    auto spaced=run("ABAB",25,"letter-spacing:2px;"); text=find_text_box(*spaced);
+    assert(decode_prepared_text(text->text_layout_cache.prepared_packet,view) && view.size()==2);
+    assert(view.read(1,last) && last.x==10000);
+    auto negative=run("ABAB",20,"letter-spacing:-2px;"); text=find_text_box(*negative);
+    assert(decode_prepared_text(text->text_layout_cache.prepared_packet,view) && view.size()==2);
+    assert(view.read(1,last) && last.x==6000);
+    auto zero=run("AB",0,""); text=find_text_box(*zero);
+    assert(text->text_layout_cache.lines==std::vector<std::string>{"A"});
+    auto indent=run("ABAB",30,"text-indent:8px;text-align:right;"); text=find_text_box(*indent);
+    assert(text->text_layout_cache.lines==std::vector<std::string>{"A\xE2\x80\xA6"});
+    assert(text->text_layout_cache.prepared_lines.front().origin_x==8);
+    auto negative_indent=run("ABAB",24,"text-indent:-2px;"); text=find_text_box(*negative_indent);
+    assert(!text->text_layout_cache.prepared_text && text->text_layout_cache.prepared_lines.empty());
+    auto refused=run("ABAB",24,"",3); text=find_text_box(*refused);
+    assert(!text->text_layout_cache.prepared_text && text->text_layout_cache.prepared_lines.empty());
+    auto first_budget=run("A",1,"",1); text=find_text_box(*first_budget);
+    assert(text->text_layout_cache.prepared_text && text->text_layout_cache.lines==std::vector<std::string>{"A"});
+    auto mixed=run("A<span>B</span>A",10,"");
+    const auto assert_refused = [&](const auto& self,const LayoutBox& box) -> void {
+        if (box.node && box.node->type==NodeType::Text)
+            assert(!box.text_layout_cache.prepared_text && box.text_layout_cache.prepared_lines.empty());
+        for (const auto& child:box.children) self(self,*child);
+    };
+    assert_refused(assert_refused,*mixed);
+    auto generated_document=HtmlParser().parse("<body><div>ABAB</div></body>");
+    StyleResolver generated_resolver(CssParser().parse(
+        "div {width:24px;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
+        "div::before {content:'A'} div::after {content:'B'}"));
+    auto generated=LayoutEngine(generated_resolver,forbidden,options).layout(*generated_document,100,40);
+    assert_refused(assert_refused,*generated);
+    auto generated_layers=LayerTreeBuilder(layer_options).build(*generated);
+    const auto generated_commands=LayerTreeBuilder(layer_options).flatten(*generated_layers);
+    for (const auto& command:generated_commands)
+        assert(command.type()!=DisplayCommandType::Text && command.type()!=DisplayCommandType::PreparedText);
+    auto list_document=HtmlParser().parse("<body><ul><li>ABAB</li></ul></body>");
+    StyleResolver list_resolver(CssParser().parse(
+        "li {width:24px;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;list-style-type:disc}"));
+    auto list=LayoutEngine(list_resolver,forbidden,options).layout(*list_document,100,60);
+    assert_refused(assert_refused,*list);
+    auto list_layers=LayerTreeBuilder(layer_options).build(*list);
+    for (const auto& command:LayerTreeBuilder(layer_options).flatten(*list_layers))
+        assert(command.type()!=DisplayCommandType::Text && command.type()!=DisplayCommandType::PreparedText);
+    auto nested_document=HtmlParser().parse("<body><div>A<span>B</span>A</div></body>");
+    StyleResolver nested_resolver(CssParser().parse(
+        "div {width:24px;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
+        "span::before {content:'A'} span::after {content:'B'}"));
+    auto nested=LayoutEngine(nested_resolver,forbidden,options).layout(*nested_document,100,40);
+    assert_refused(assert_refused,*nested);
+    auto nested_layers=LayerTreeBuilder(layer_options).build(*nested);
+    for (const auto& command:LayerTreeBuilder(layer_options).flatten(*nested_layers))
+        assert(command.type()!=DisplayCommandType::Text && command.type()!=DisplayCommandType::PreparedText);
+    auto block_document=HtmlParser().parse("<body><div>A<span>B</span><p>AB</p></div></body>");
+    auto block=LayoutEngine(nested_resolver,forbidden,options).layout(*block_document,100,60);
+    auto block_layers=LayerTreeBuilder(layer_options).build(*block);
+    std::size_t independent_text=0;
+    for (const auto& command:LayerTreeBuilder(layer_options).flatten(*block_layers)) {
+        assert(command.type()!=DisplayCommandType::Text);
+        independent_text+=command.type()==DisplayCommandType::PreparedText;
+    }
+    assert(independent_text==1);
+    auto visible=run("ABAB",10,"overflow:visible;white-space:normal;"); text=find_text_box(*visible);
+    assert(text->text_layout_cache.prepared_text && text->text_layout_cache.lines==std::vector<std::string>{"ABAB"});
+    auto unbreakable=run("ABAB",24,"white-space:normal;"); text=find_text_box(*unbreakable);
+    assert(text->text_layout_cache.prepared_text && text->text_layout_cache.lines==std::vector<std::string>{"A\xE2\x80\xA6"});
+    // Reuse the same engine across source and width changes, and compare source
+    // geometry with overflow:visible so truncation cannot change layout metrics.
+    auto live=HtmlParser().parse("<body><div id='live'>ABAB</div></body>");
+    StyleResolver live_resolver(CssParser().parse(
+        "body { margin:0 } div { margin:0; width:24px; font-size:16px;line-height:20px;"
+        "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000000 }"));
+    LayoutEngine live_engine(live_resolver,forbidden,options);
+    Node* live_owner=nullptr;
+    const auto find_live=[&](const auto& self,Node& node)->void {
+        if (node.attribute("id")=="live") live_owner=&node;
+        for (auto& child:node.children) self(self,*child);
+    };
+    find_live(find_live,*live); assert(live_owner);
+    auto before=live_engine.layout(*live,100,40);
+    const Rect source_rect=find_text_box(*before)->rect;
+    live_owner->set_attribute("style","overflow:visible");
+    auto normal=live_engine.layout(*live,100,40);
+    const Rect normal_rect=find_text_box(*normal)->rect;
+    assert(source_rect.x==normal_rect.x && source_rect.width==normal_rect.width && source_rect.height==normal_rect.height);
+    live_owner->set_attribute("style","width:60px");
+    auto wider=live_engine.layout(*live,100,40);
+    assert(find_text_box(*wider)->text_layout_cache.lines==std::vector<std::string>{"ABAB"});
+    live_owner->set_text_content("ABABAB");
+    live_owner->set_attribute("style","width:24px");
+    auto mutated=live_engine.layout(*live,100,40);
+    assert(find_text_box(*mutated)->text_layout_cache.rendered_text=="ABABAB");
+    assert(find_text_box(*mutated)->text_layout_cache.lines==std::vector<std::string>{"A\xE2\x80\xA6"});
+    // Relayout must not mutate the prior frame's retained source snapshot.
+    assert(find_text_box(*before)->text_layout_cache.rendered_text=="ABAB");
+    auto dotfont=asset(400,16,4,2,{{46,200},{65,500},{66,600}},65);
+    face={2,0,dotfont.font}; assert(system.bind(&face,1)==S::Ok);
+    auto dots=run("AB",9,""); text=find_text_box(*dots);
+    assert(text->text_layout_cache.lines==std::vector<std::string>{"A..."});
+    assert(decode_prepared_text(text->text_layout_cache.prepared_packet,view) && view.size()==4);
+    auto marker_budget=run("AB",9,"",3); text=find_text_box(*marker_budget);
+    assert(!text->text_layout_cache.prepared_text && text->text_layout_cache.prepared_lines.empty());
+    auto unsupported=run("AB\xCC\x81",10,""); text=find_text_box(*unsupported);
+    assert(!text->text_layout_cache.prepared_text && text->text_layout_cache.prepared_lines.empty());
+}
+
 void core_prepared_text_applies_bounded_letter_spacing() {
     auto font = asset();
     const auto family_hash = normalized_font_family_hash("Core Test");
@@ -792,6 +944,26 @@ int inspect(int argc,char** argv) {
         faces[i]={i+1,0,assets[i].font};
     }
     TextSystem system;if (system.bind(faces.data(),faces.size())!=S::Ok) return 4;
+    {
+        auto document=HtmlParser().parse("<body><div>ABABAB</div></body>");
+        StyleResolver resolver(CssParser().parse(
+            "body { margin:0 } div { margin:0;width:40px;font-size:24px;line-height:30px;"
+            "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000000 }"));
+        LayoutEngineOptions layout_options;layout_options.text_system=&system;
+        auto layout=LayoutEngine(resolver,{},layout_options).layout(*document,80,40);
+        const auto* text=find_text_box(*layout);
+        if (!text || !text->text_layout_cache.prepared_text) return 15;
+        PreparedTextView packet;PreparedTextGlyph marker;
+        if (!decode_prepared_text(text->text_layout_cache.prepared_packet,packet) || packet.size()<2 ||
+            !packet.read(packet.size()-1,marker) || marker.codepoint!=0x2026) return 16;
+        LayerTreeBuilderOptions layer_options;layer_options.text_system=&system;
+        auto layers=LayerTreeBuilder(layer_options).build(*layout);
+        SoftwareCompositor::Options paint_options;paint_options.text_system=&system;
+        const auto frame=SoftwareCompositor({},paint_options).render(*layers,80,40,Color{255,255,255,255});
+        std::size_t visible=0;
+        for (const auto& pixel:frame.pixels) visible+=pixel.r<255 || pixel.g<255 || pixel.b<255;
+        if (!visible) return 17;
+    }
     std::cout<<"{\"rows\":[";bool first=true;
     for (auto size:{7000,8000,15500,24000,28000}) for (auto weight:{350,400,450,500,550,700,900}) {
         TextFontRequest r;r.size_q1000=size;r.weight=static_cast<std::uint16_t>(weight);
@@ -860,6 +1032,7 @@ int main(int argc,char** argv) {
     prepared_packet_paint();offset_prepared_packets();installed_shared_paragraph_path();html_layout_to_core_paint();
     route_relayout_keeps_prepared_text_while_dom_is_dirty();aligned_prepared_text_stays_inside_its_layout_box();
     core_prepared_text_applies_bounded_letter_spacing();
+    core_prepared_text_ellipsis();
     unrelated_input_mutation_preserves_static_prepared_text();
     core_layout_refusals_do_not_fall_back_to_host_text();
     std::cout<<"text system selection/geometry/transaction/budget tests passed\n";

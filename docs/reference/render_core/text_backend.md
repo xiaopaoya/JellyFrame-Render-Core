@@ -2,6 +2,12 @@
 
 > Last updated: 2026-07-07; Applies to: 0.5.0
 
+> Historical compatibility API. New ports register immutable JFFONT2 resources
+> with [TextSystem](text_system.md); Core owns selection, metrics, preparation
+> and painting. The callbacks below remain only while existing consumers migrate.
+> Their presence is not a requirement for a new port or a host fallback for a
+> refused CoreText layout.
+
 
 JellyFrame keeps font loading and platform text APIs outside `jellyframe_render_core`.
 The core only needs two services:

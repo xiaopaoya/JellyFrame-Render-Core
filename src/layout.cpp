@@ -131,6 +131,162 @@ bool has_temporary_style_replay(const Style& style) noexcept {
     return false;
 }
 
+// Ellipsis changes retained paint only, after owner geometry/alignment settles.
+// Shared/multiple-owner paragraphs deliberately remain outside this slice.
+void finalize_core_ellipsis(LayoutBox& owner, const LayoutEngineOptions& options) {
+    for (auto& child : owner.children) finalize_core_ellipsis(*child, options);
+    if (!owner.style.text_overflow_ellipsis || owner.style.overflow.empty() ||
+        owner.style.overflow == "visible" ||
+        (owner.style.display != Display::Block && owner.style.display != Display::InlineBlock &&
+         owner.style.display != Display::TableCell && owner.style.display != Display::TableCaption)) return;
+    const auto refuse = [&](LayoutBox& text, const char* detail) {
+        auto& cache = text.text_layout_cache;
+        cache.prepared_text = false;
+        cache.prepared_packet.clear();
+        cache.prepared_lines.clear();
+        cache.lines.clear();
+        report_diagnostic(options.diagnostics, DiagnosticStage::Layout, DiagnosticSeverity::Warning,
+            "layout-core-text-refused", "Core TextSystem could not prepare this text layout", detail);
+    };
+    if (owner.style.before_content_kind != GeneratedContentKind::None ||
+        owner.style.after_content_kind != GeneratedContentKind::None ||
+        (owner.node && owner.node->tag_name == "li" && owner.style.list_style_type != ListStyleType::None) ||
+        owner.children.size() != 1 || !owner.children.front()->node ||
+        owner.children.front()->node->type != NodeType::Text) {
+        const auto refuse_inline = [&](const auto& self, LayoutBox& child) -> void {
+            if (child.node && child.node->type == NodeType::Text) {
+                refuse(child, "ellipsis requires one direct text owner");
+            } else if (child.style.display == Display::Inline) {
+                for (auto& descendant : child.children) self(self, *descendant);
+            }
+        };
+        for (auto& child : owner.children) refuse_inline(refuse_inline, *child);
+        return;
+    }
+    auto& text = *owner.children.front();
+    auto& cache = text.text_layout_cache;
+    if (!cache.prepared_text) return;
+    const std::int64_t owner_width = owner.content_geometry.width >= 0
+        ? owner.content_geometry.width
+        : static_cast<std::int64_t>(std::max(0, owner.rect.width - owner.style.padding.left - owner.style.padding.right -
+                       owner.style.border_width.left - owner.style.border_width.right)) * 1000;
+    const auto indent = std::clamp<std::int64_t>(static_cast<std::int64_t>(text.style.text_indent) * 1000, 0, owner_width);
+    const auto available = owner_width - indent;
+    if (cache.prepared_lines.size() != 1) {
+        // Ordinary wrapped lines that fit have no active horizontal overflow.
+        bool overflow = false;
+        std::size_t line_index = 0;
+        for (const auto& line : cache.prepared_lines) {
+            PreparedTextView packet; PreparedTextGlyph last;
+            if (!decode_prepared_text(line.packet, packet) ||
+                (packet.size() && !packet.read(packet.size()-1,last))) {
+                refuse(text, "ellipsis wrapped source packet is invalid"); return;
+            }
+            const auto line_available = line_index++ == 0 ? available : owner_width;
+            overflow |= packet.size() && static_cast<std::int64_t>(last.x) + last.geometry.advance > line_available;
+        }
+        if (overflow) refuse(text, "ellipsis requires a single overflowing prepared text line");
+        return;
+    }
+    PreparedTextView source;
+    if (!decode_prepared_text(cache.prepared_lines.front().packet, source)) {
+        refuse(text, "ellipsis source packet is invalid"); return;
+    }
+    const std::int64_t spacing = static_cast<std::int64_t>(
+        bounded_letter_spacing(text.style.font_size, text.style.letter_spacing)) * 1000;
+    std::vector<PreparedTextGlyph> glyphs(source.size());
+    std::int64_t advance = 0;
+    for (std::size_t i = 0; i < source.size(); ++i) {
+        if (!source.read(i, glyphs[i])) { refuse(text, "ellipsis source glyph is invalid"); return; }
+        advance += glyphs[i].geometry.advance + (i ? spacing : 0);
+    }
+    if (advance <= available) return;
+    if (text.style.text_indent < 0) {
+        refuse(text, "overflowing ellipsis with negative text-indent is outside this profile"); return;
+    }
+    if (glyphs.size() <= 1) return;
+    const auto publish = [&](const std::string& visible, std::int64_t width) {
+        auto line = cache.prepared_lines.front();
+        line.width = static_cast<int>(std::min<std::int64_t>(
+            (std::max<std::int64_t>(0,width) + 999) / 1000, std::numeric_limits<int>::max()));
+        line.origin_x = owner.content_geometry.width >= 0 ? static_cast<int>(owner.content_geometry.x / 1000)
+            : owner.rect.x + owner.style.border_width.left + owner.style.padding.left;
+        line.origin_x += static_cast<int>(indent / 1000);
+        if (!encode_positioned_prepared_text(glyphs.data(), glyphs.size(), source.size_q1000(),
+                                            static_cast<std::uint32_t>(visible.size()), line.packet)) {
+            refuse(text, "ellipsis packet encoding was refused"); return;
+        }
+        cache.lines = {visible};
+        cache.prepared_lines = {std::move(line)};
+        cache.prepared_packet = cache.prepared_lines.front().packet;
+    };
+    // When the first scalar itself overflows, CSS clips it. No invisible marker
+    // needs resource admission. Negative spacing may bring later glyphs back in.
+    if (spacing >= 0 && glyphs.front().geometry.advance > available) {
+        const auto first_end = glyphs.front().source_end;
+        glyphs.resize(1);
+        publish(cache.rendered_text.substr(0,first_end), glyphs.front().geometry.advance);
+        return;
+    }
+    std::uint32_t family = 0;
+    if (!options.text_system->resolve_family_hash(text.style.font_family_hash, family)) {
+        refuse(text, "ellipsis font family is unavailable"); return;
+    }
+    TextFontRequest request;
+    request.families = &family; request.family_count = 1;
+    request.size_q1000 = text.style.font_size * 1000;
+    request.weight = static_cast<std::uint16_t>(std::clamp(text.style.font_weight, 1, 1000));
+    std::string marker = "\xE2\x80\xA6";
+    PreparedTextGlyph marker_glyphs[3];
+    TextRunMetrics marker_metrics;
+    auto status = options.text_system->prepare(marker, request, marker_glyphs, 3, marker_metrics);
+    // Explicit resource policy: use three real dots only for missing coverage.
+    if (status == TextSystemStatus::MissingGlyph ||
+        (status == TextSystemStatus::Ok && marker_metrics.substitutions)) {
+        marker = "...";
+        status = options.text_system->prepare(marker, request, marker_glyphs, 3, marker_metrics);
+    }
+    if (status != TextSystemStatus::Ok || marker_metrics.substitutions ||
+        marker_metrics.glyph_count > options.max_prepared_text_glyphs) {
+        refuse(text, "ellipsis marker coverage or budget was refused"); return;
+    }
+    const auto marker_width = static_cast<std::int64_t>(marker_metrics.advance) +
+        static_cast<std::int64_t>(marker_metrics.glyph_count - 1) * spacing;
+    // CSS preserves the first scalar and clips it when even that scalar cannot
+    // fit. The marker follows it and can itself be partly/fully clipped.
+    std::size_t prefix = glyphs.empty() ? 0 : 1;
+    std::int64_t prefix_width = 0, selected_width = std::max<std::int64_t>(0,
+        marker_width + (glyphs.empty() ? 0 : glyphs.front().geometry.advance + spacing));
+    // Negative spacing can make prefix widths nonmonotonic: scan every prefix.
+    for (std::size_t i = 0; i + 1 < glyphs.size(); ++i) {
+        prefix_width += glyphs[i].geometry.advance + (i ? spacing : 0);
+        const auto candidate = prefix_width + spacing + marker_width;
+        if (i + 1 + marker_metrics.glyph_count <= options.max_prepared_text_glyphs &&
+            candidate <= available) {
+            prefix = i + 1; selected_width = std::max<std::int64_t>(0, candidate);
+        }
+    }
+    const auto bytes = prefix ? glyphs[prefix - 1].source_end : 0;
+    if (prefix + marker_metrics.glyph_count > options.max_prepared_text_glyphs) {
+        refuse(text, "ellipsis output exceeds the configured glyph budget"); return;
+    }
+    const std::string visible = cache.rendered_text.substr(0, bytes) + marker;
+    // Output scratch includes marker overhead even when source is one scalar.
+    glyphs.resize(prefix + marker_metrics.glyph_count);
+    TextRunMetrics metrics;
+    if (options.text_system->prepare(visible, request, glyphs.data(), glyphs.size(), metrics) != TextSystemStatus::Ok) {
+        refuse(text, "ellipsis final preparation was refused"); return;
+    }
+    for (std::size_t i = 0; i < glyphs.size(); ++i) {
+        const auto x = static_cast<std::int64_t>(glyphs[i].x) + static_cast<std::int64_t>(i) * spacing;
+        if (x < std::numeric_limits<std::int32_t>::min() || x > std::numeric_limits<std::int32_t>::max()) {
+            refuse(text, "ellipsis glyph position overflow"); return;
+        }
+        glyphs[i].x = static_cast<std::int32_t>(x);
+    }
+    publish(visible, selected_width);
+}
+
 TextSystemStatus measure_core_text(const TextSystem& text_system, std::string_view text,
                                    const Style& style, TextRunMetrics& metrics) {
     if (style.font_size < 0 || style.font_size > std::numeric_limits<std::int32_t>::max() / 1000)
@@ -1212,6 +1368,7 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
     pass_engine.layout_box(*root_box, 0, 0, viewport_width, viewport_height, 1, &precision);
     const LayoutContentGeometry viewport{0, 0, precision.width, precision.height, true};
     pass_engine.layout_positioned_children(*root_box, PositionedContext{viewport, viewport}, 1);
+    if (options_.text_system) finalize_core_ellipsis(*root_box, options_);
     if (options_.intrinsic_query_statistics)
         *options_.intrinsic_query_statistics = intrinsic_queries.snapshot();
     return root_box;
@@ -2373,6 +2530,10 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
         cache.text_overflow_ellipsis = box.style.text_overflow_ellipsis;
         cache.text_align = box.style.text_align;
         const auto refuse = [&](const char* detail) {
+            cache.lines.clear();
+            cache.prepared_lines.clear();
+            cache.prepared_packet.clear();
+            cache.prepared_text = false;
             cache.valid = true;
             report_diagnostic(options_.diagnostics, DiagnosticStage::Layout,
                               DiagnosticSeverity::Warning, "layout-core-text-refused",
@@ -2382,9 +2543,8 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
             cache.rect_y = box.rect.y;
             return 0;
         };
-        if (box.style.text_overflow_ellipsis ||
-            box.style.font_size < 0 || box.style.font_size > std::numeric_limits<std::int32_t>::max() / 1000) {
-            return refuse("text-overflow ellipsis or font-size is outside the prepared-text profile");
+        if (box.style.font_size < 0 || box.style.font_size > std::numeric_limits<std::int32_t>::max() / 1000) {
+            return refuse("font-size is outside the prepared-text profile");
         }
         std::uint32_t family_id = 0;
         if (!options_.text_system->resolve_family_hash(box.style.font_family_hash, family_id)) {

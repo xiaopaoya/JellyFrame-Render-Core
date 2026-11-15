@@ -2,6 +2,10 @@
 
 > 最后更新：2026-07-07；适用版本：0.5.0
 
+> 历史兼容接口。新移植应向 [TextSystem](text_system.md) 注册不可变 JFFONT2
+> 字体资源，由 Core 负责选择、度量、准备和绘制。下述回调仅在现有消费者迁移期间
+> 保留，不是新移植必须提供的接口，也不能用于接管 CoreText 已拒绝的布局。
+
 
 JellyFrame 不把字体加载和平台文本 API 放进 `jellyframe_render_core`。核心只需要两类服务：
 

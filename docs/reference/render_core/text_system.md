@@ -3,9 +3,10 @@
 [TextSystem](../../../include/render_core/text_system.h) implements project-owned
 family/weight/strike selection, metrics, actual glyph references and Q1000 scalar
 positions from [JFFONT2 resources](font_resource_format.md). It has no host policy
-callbacks. This is a bounded first service implementation; production layout,
-software paint, Runtime registration/transport and removal of old providers remain
-the coordinated migration in the [architecture decision](../../evaluation/2026-10-31-core-font-ownership/decision.md).
+callbacks. Production layout, prepared display commands and software paint use
+this service when it is selected. Runtime also has an owned-catalog canonical
+worker transport path; production defaults and removal of old callback providers
+remain the coordinated migration in the [architecture decision](../../evaluation/2026-10-31-core-font-ownership/decision.md).
 
 ## Inputs and lifetime
 
@@ -80,18 +81,21 @@ rounded Q1000 scalar advances, matching the actual prepared positions.
 resource/glyph IDs, resolved/source scalar, original UTF-8 byte interval, pen X
 and scaled glyph geometry. It does not retain a text pointer, callback/context or
 borrowed font pointer in the records. Their resource IDs must remain resolvable
-to the same assets when consumed. The JFTP v1/v2 packet codec in `prepared_text.h`
+to the same assets when consumed. The JFTP v1/v2/v3 packet codec in `prepared_text.h`
 preserves those per-glyph choices and geometry and decodes to a borrowed,
 allocation-free view. It does not carry source text or raw pointers and does not
 reuse the old single-font packet. `LayoutEngineOptions::text_system` can measure,
-break and prepare supported scalar text into per-line packets when no letter
-spacing or ellipsis is required. The cache retains each line's packet and
+break and prepare supported scalar text into per-line packets. Bounded integer
+`letter-spacing` is included in wrapping and explicit Q1000 glyph positions;
+v3 packets carry those positions without changing v1/v2 decoding. The cache
+retains each line's packet and
 baseline plus the bound TextSystem generation; the layer builder must receive
 the same service instance and generation and emits one
 `PreparedText` command per line. Current line opportunities are ASCII whitespace,
 hyphen/slash and CJK punctuation/ideographs; `overflow-wrap:anywhere` may split
 at scalar boundaries. This remains bounded scalar wrapping, not cluster-safe
-Unicode line breaking. Worker transport remains pending.
+Unicode line breaking. Runtime's canonical transport must admit the exact packet
+capability and retain the corresponding immutable resource catalog through replay.
 
 `TextSystem::paint` consumes a JFTP view against the same bound font set. It
 revalidates exact resource/glyph identity and scaled geometry, admits total
@@ -99,12 +103,39 @@ glyph/pixel/work before writing, and rasterizes the canonical bitmap coverage
 with Core source-over blending. Target and dirty clipping are applied after
 complete glyph bounds are charged, so tiled paints stay under the same work
 policy. Refusal leaves the target unchanged. Unsupported shaping, line controls,
-letter spacing, ellipsis or an unregistered CSS family is refused on the Core
+unsupported ellipsis contexts or an unregistered CSS family is refused on the Core
 layout path; it does not fall back to a host callback. Leaving the TextSystem
 option unset retains the existing provider path during this ABI migration.
 The layout path defaults to at most 128 prepared glyphs per text node so retained
 JFTP packets remain bounded independently of the lower-level service's 4096-glyph
 limit; `LayoutEngineOptions::max_prepared_text_glyphs` can lower this bound.
+
+### Bounded paint-time ellipsis
+
+For a block-container owner with one direct text run, non-visible overflow and
+one overflowing prepared line, `text-overflow:ellipsis` selects a scalar prefix
+after final layout geometry settles. This includes nowrap and a single
+unbreakable line under normal whitespace. Q1000 advances and bounded letter
+spacing determine the cutoff; negative spacing requires scanning every prefix
+rather than assuming widths increase. Original source, layout dimensions and
+intrinsic contributions remain unchanged. Only retained paint packets change.
+
+The marker is a real U+2026 glyph. If it is missing or substituted, Core tries
+three real ASCII dots; other service failures do not trigger fallback. Full
+source admission happens before truncation, and the complete output including
+the marker must fit the configured glyph budget. A lone scalar, or a first
+scalar too wide for the content box with nonnegative spacing, is clipped without
+requiring an invisible marker. Fitting text and visible overflow retain normal
+painting/alignment. Overflowing admitted lines begin at the content start plus
+the admitted nonnegative indent; the owner's overflow clip also clips a marker
+that cannot fit completely.
+
+This is not whole-paragraph ellipsis. Mixed inline owners, generated siblings
+and native list-marker contexts,
+overflowing multiline text and negative active indent remain outside admission;
+they must not be painted as independently truncated leaf runs or retried through
+host callbacks. Bidi and shaping stay outside the scalar text profile. The
+public layout/relayout operation is required when owner geometry or style changes.
 
 Both methods strictly reject malformed UTF-8, overflow, unavailable glyphs and
 budget refusal. Failure zeroes the metric result. Preparation validates the
@@ -148,9 +179,9 @@ that an MCU can afford that output. No general target RAM/stack/latency admissio
 is inferred from host correctness. Static arrays bound candidate/family scratch;
 there is no persistent policy cache or hidden global registration state.
 
-Next route Core layout/count/cache/emission and software paint to this service,
-extend supported shaping as required, and migrate Runtime font ownership, stable
-IDs and worker/UI transport. The convenience host adapter is removed; callback
+Core layout/count/cache/emission and software paint have selected TextSystem
+paths. Remaining work includes consumer/default adoption, supported shaping and
+complete resource delivery qualification. The convenience host adapter is removed; callback
 provider APIs remain until their Runtime consumers migrate in a coordinated
 ABI/package/codec update.
 
