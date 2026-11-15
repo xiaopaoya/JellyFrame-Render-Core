@@ -847,7 +847,14 @@ bool refused_core_ellipsis_generated_owner(const LayoutBox& box, const TextSyste
          (box.node && box.node->tag_name == "li" && style.list_style_type != ListStyleType::None));
 }
 
-void paint_list_marker(const LayoutBox& box, DisplayList& display_list, const TextSystem* text_system) {
+bool push_core_generated_text(const LayoutBox& box, DisplayList& display_list,
+                              const TextSystem& system, const std::string& text,
+                              Rect rect, Color color, int font_weight, TextCommandAlign align,
+                              DiagnosticSink* diagnostics, const char* diagnostic_code,
+                              const char* source_name);
+
+void paint_list_marker(const LayoutBox& box, DisplayList& display_list, const TextSystem* text_system,
+                       DiagnosticSink* diagnostics) {
     if (refused_core_ellipsis_generated_owner(box, text_system)) return;
     if (box.node == nullptr || box.node->type != NodeType::Element || box.node->tag_name != "li") {
         return;
@@ -858,6 +865,14 @@ void paint_list_marker(const LayoutBox& box, DisplayList& display_list, const Te
     }
     std::string marker = generated_before_text(box);
     bool generated = !marker.empty();
+    if (text_system != nullptr && box.style.before_content_kind == GeneratedContentKind::Counter &&
+        box.style.before_counter_name != "list-num") {
+        report_diagnostic(diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                          "layer-core-list-marker-text-refused",
+                          "Core TextSystem cannot resolve this list marker counter",
+                          "Only the migrated list-num counter has a Core source proof.");
+        return;
+    }
     if (!generated) {
         marker = native_marker_text(box);
     }
@@ -873,21 +888,22 @@ void paint_list_marker(const LayoutBox& box, DisplayList& display_list, const Te
     const int marker_x = generated
         ? box.rect.x + (box.style.before_left_specified ? box.style.before_left : 0)
         : box.rect.x - width - 4;
-    push_text(display_list,
-              Rect{marker_x, box.rect.y, width, std::max(box.rect.height, box.style.font_size + 4)},
-              color,
-              marker,
-              box.style.font_size,
-              font_weight,
-              box.style.font_family_hash,
-              TextCommandAlign::Start,
-              true);
+    const Rect marker_rect{marker_x, box.rect.y, width, std::max(box.rect.height, box.style.font_size + 4)};
+    if (text_system != nullptr) {
+        push_core_generated_text(box, display_list, *text_system, marker, marker_rect, color,
+                                 font_weight, TextCommandAlign::Start, diagnostics,
+                                 "layer-core-list-marker-text-refused", "A list marker");
+    } else {
+        push_text(display_list, marker_rect, color, marker, box.style.font_size, font_weight,
+                  box.style.font_family_hash, TextCommandAlign::Start, true);
+    }
 }
 
 void paint_generated_inline_content(const LayoutBox& box,
                                     DisplayList& display_list,
                                     CssPseudoElement pseudo_element,
-                                    const TextSystem* text_system) {
+                                    const TextSystem* text_system,
+                                    DiagnosticSink* diagnostics) {
     // Layout refuses this complete generated-owner context. Do not publish a
     // legacy pseudo fragment after its ordinary Core text has been refused.
     if (refused_core_ellipsis_generated_owner(box, text_system)) return;
@@ -897,6 +913,17 @@ void paint_generated_inline_content(const LayoutBox& box,
     if (box.text_layout_cache.shared_inline &&
         detail::shared_inline_current(*box.text_layout_cache.shared_inline,
             text_system)) {
+        return;
+    }
+    const bool before = pseudo_element == CssPseudoElement::Before;
+    const auto content_kind = before ? box.style.before_content_kind : box.style.after_content_kind;
+    const auto& counter_name = before ? box.style.before_counter_name : box.style.after_counter_name;
+    if (text_system != nullptr && content_kind == GeneratedContentKind::Counter &&
+        counter_name != "list-num") {
+        report_diagnostic(diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                          "layer-core-generated-inline-text-refused",
+                          "Core TextSystem cannot resolve this generated counter",
+                          "Only the migrated list-num counter has a Core source proof.");
         return;
     }
     const Rect content = content_rect_for(box);
@@ -920,15 +947,15 @@ void paint_generated_inline_content(const LayoutBox& box,
             rect.x = safe_add(rect.x, box.style.after_left);
             rect.width = std::max(0, rect.width - box.style.after_left);
         }
-        push_text(display_list,
-                  rect,
-                  color,
-                  text,
-                  box.style.font_size,
-                  font_weight,
-                  box.style.font_family_hash,
-                  align,
-                  true);
+        if (text_system != nullptr) {
+            push_core_generated_text(box, display_list, *text_system, text, rect, color,
+                                     font_weight, align, diagnostics,
+                                     "layer-core-generated-inline-text-refused",
+                                     "Generated pseudo-element text");
+        } else {
+            push_text(display_list, rect, color, text, box.style.font_size, font_weight,
+                      box.style.font_family_hash, align, true);
+        }
     };
 
     if (pseudo_element == CssPseudoElement::Before) {
@@ -1102,7 +1129,7 @@ int range_state_value(const FormControlState& state) {
 bool prepare_control_label(const LayoutBox& box, const TextSystem& system,
                            const std::string& text, Rect rect, Color color,
                            TextCommandAlign align, DisplayCommand& command,
-                           std::size_t& remaining_glyphs) {
+                           std::size_t& remaining_glyphs, int font_weight_override = -1) {
     if (box.style.font_size < 0 || box.style.font_size > std::numeric_limits<std::int32_t>::max()/1000)
         return false;
     std::uint32_t family = 0;
@@ -1110,7 +1137,8 @@ bool prepare_control_label(const LayoutBox& box, const TextSystem& system,
     TextFontRequest request;
     request.families = &family; request.family_count = 1;
     request.size_q1000 = box.style.font_size * 1000;
-    request.weight = static_cast<std::uint16_t>(std::clamp(box.style.font_weight,1,1000));
+    request.weight = static_cast<std::uint16_t>(std::clamp(
+        font_weight_override >= 0 ? font_weight_override : box.style.font_weight, 1, 1000));
     TextRunMetrics metrics;
     // A full-input measure precedes allocation/preparation; truncation and host
     // callbacks never conceal unsupported text or configured service refusal.
@@ -1141,6 +1169,27 @@ bool prepare_control_label(const LayoutBox& box, const TextSystem& system,
     if (!encode_positioned_prepared_text(glyphs.data(),glyphs.size(),request.size_q1000,
                                         static_cast<std::uint32_t>(text.size()),command.text)) return false;
     remaining_glyphs -= glyphs.size();
+    return true;
+}
+
+bool push_core_generated_text(const LayoutBox& box, DisplayList& display_list,
+                              const TextSystem& system, const std::string& text,
+                              Rect rect, Color color, int font_weight, TextCommandAlign align,
+                              DiagnosticSink* diagnostics, const char* diagnostic_code,
+                              const char* source_name) {
+    if (text.empty() || rect.width <= 0 || rect.height <= 0 || color.a == 0) return true;
+    constexpr std::size_t max_generated_glyphs = 128;
+    std::size_t remaining_glyphs = max_generated_glyphs;
+    DisplayCommand command;
+    if (!prepare_control_label(box, system, text, rect, color, align, command,
+                               remaining_glyphs, font_weight)) {
+        report_diagnostic(diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                          diagnostic_code,
+                          "Core TextSystem could not prepare generated text",
+                          std::string(source_name) + " must fit the registered font, glyph and packet budgets.");
+        return false;
+    }
+    display_list.push_back(std::move(command));
     return true;
 }
 
@@ -1699,8 +1748,9 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
     paint_form_control(box, display_list, options,
         used_commands >= remaining_commands ? 0 : remaining_commands-used_commands);
     if (!suppress_ellipsis_generated) {
-        paint_list_marker(box, display_list, options.text_system);
-        paint_generated_inline_content(box, display_list, CssPseudoElement::Before, options.text_system);
+        paint_list_marker(box, display_list, options.text_system, options.diagnostics);
+        paint_generated_inline_content(box, display_list, CssPseudoElement::Before,
+                                       options.text_system, options.diagnostics);
     }
 
     ResolvedImageResource content_resource;
@@ -2170,7 +2220,8 @@ LayerNodePtr LayerTreeBuilder::build_with_arena(const LayoutBox& root, Monotonic
     build_children(root, *root_layer, arena, root.rect, remaining_commands, display_budget_reported);
     if (!root.style.visibility_hidden) {
         const std::size_t command_begin = root_layer->display_list.size();
-        paint_generated_inline_content(root, root_layer->display_list, CssPseudoElement::After, options_.text_system);
+        paint_generated_inline_content(root, root_layer->display_list, CssPseudoElement::After,
+                                      options_.text_system, options_.diagnostics);
         trim_display_list(root_layer->display_list, command_begin, remaining_commands, display_budget_reported);
         stamp_trace_owner(root_layer->display_list, command_begin, trace_owner_token_for(root, options_));
     }
@@ -2300,7 +2351,7 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
                 const std::size_t command_begin = current_layer.display_list.size();
                 if (!current.suppress_ellipsis_generated)
                     paint_generated_inline_content(*current_box, current_layer.display_list,
-                        CssPseudoElement::After, options_.text_system);
+                        CssPseudoElement::After, options_.text_system, options_.diagnostics);
                 translate_display_commands(current_layer.display_list, command_begin, 0, -current.scroll_y);
                 trim_display_list(current_layer.display_list,
                                   command_begin,
