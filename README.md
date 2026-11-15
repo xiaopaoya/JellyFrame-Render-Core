@@ -1,6 +1,6 @@
 # JellyFrame Render Core
 
-> Last updated: 2026-11-10; Applies to: 0.9.0 development line
+> Last updated: 2026-11-16; Applies to: 0.9.0 / ABI4 release candidate
 
 JellyFrame Render Core is a platform-neutral, modular HTML/CSS subset,
 document/layout pipeline and CPU software renderer for bounded embedded and
@@ -65,16 +65,23 @@ private-header tier. Before `1.0`, deliberate source API replacement is
 allowed only with an explicit version/ABI decision and a package-consumer
 regression update; it is not silently covered by compatibility aliases.
 
-The unpublished 0.9.0 / ABI4 line replaces flat `DisplayCommand` paint fields
+Text layout and glyph painting are Core-owned in ABI4. Hosts provide immutable
+font resources and display access; they no longer implement `TextMeasureProvider`
+or `TextPainter` callbacks. Range/family measurement wrappers and bitmap-font
+measure/paint callbacks were removed without ABI4 compatibility aliases. See
+the [text migration reference](docs/reference/render_core/core_owned_text_migration.md)
+for the supported resource and prepared-text contract.
+
+The 0.9.0 / ABI4 line replaces flat `DisplayCommand` paint fields
 with active typed payloads. Select a command kind with the constructor or
 `set_type()`, inspect it with `type()`, and use `basic_paint()`, `text_paint()`
 or `image_paint()` for that kind. A changed kind resets its payload. Selecting
 the same kind preserves it. A mismatched accessor throws `std::logic_error`.
 Prepared text stores its explicit origin and baseline in the text payload.
 The public installed-consumer regression covers the source API replacement.
-Hosts qualify and pin the new source manifest before adopting this candidate.
+Hosts must rebuild and pin the source manifest when adopting this release.
 
-The unpublished ABI4 radius contract also carries horizontal and vertical
+The ABI4 radius contract also carries horizontal and vertical
 corner values in paint commands and clips. Only `border_radius_y == -1` means
 inherit the horizontal value; a negative packed four-corner value is valid
 geometry. `FlattenedClip` appends Y after its existing parent index. The x64
@@ -96,7 +103,7 @@ layers. Unsupported or invalid declarations leave prior winners intact. See
 the CSS parser scope references for the supported gradient forms, image
 geometry values and explicit exclusions.
 
-The same ABI4 candidate replaces image resolver output with
+The ABI4 image contract replaces resolver output with
 `ResolvedImageResource` (handle plus Unknown/Known/Invalid natural-size metadata)
 and image paint arguments with `ImagePaintRequest`. Known background dimensions
 must be positive and at most 8191 per axis; invalid background metadata omits
@@ -118,7 +125,7 @@ the handles. A callback return value does not transfer provider ownership to
 Core. The installed `image_callback_consumer` regression exercises this public
 contract with full and cropped feature profiles.
 
-The same unpublished 0.9.0 / ABI4 candidate adds the opt-in
+The 0.9.0 / ABI4 release adds the opt-in
 `LayoutEngineOptions::natural_image_sizing` contract, gated by
 `JELLYFRAME_NATURAL_IMAGE_LAYOUT_API_VERSION == 1`. The metadata-only callback
 returns the existing `ImageIntrinsicSize` value from the host's immutable image
@@ -153,7 +160,7 @@ version and engine ABI according to their own compatibility policy.
 The JellyFrame Runtime repository owns App packages, JerryScript integration,
 desktop tooling and device-layer documentation.
 
-The ABI4 shared-inline candidate adds a sparse 16-byte layout-cache binding and
+The ABI4 shared-inline contract adds a sparse 16-byte layout-cache binding and
 pass-local shared paragraph options/statistics. JFTP capability version 2 adds a
 signed initial Q1000 glyph X while retaining v1 decoding and fixed packet sizes.
 See [shared inline paragraphs](docs/reference/render_core/shared_inline_paragraphs.md)

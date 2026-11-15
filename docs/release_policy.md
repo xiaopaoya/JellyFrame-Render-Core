@@ -1,6 +1,6 @@
 # Render Core Release And Extraction Policy
 
-> Last updated: 2026-11-06; Applies to: 0.8.0 development line
+> Last updated: 2026-11-16; Applies to: 0.9.0 / ABI4 release candidate
 
 This policy governs the transition from the current monorepo boundary to an independently governed `jellyframe-render-core` project. It complements [engine_architecture.md](engine_architecture.md); it is not a user-facing app compatibility promise.
 
@@ -15,22 +15,15 @@ This policy governs the transition from the current monorepo boundary to an inde
 ## Migration Status
 
 The history-preserving `xiaopaoya/JellyFrame-Render-Core` repository retains
-the existing license and contributor history unchanged. Its first signed
-`v0.6.0` release established the deterministic source archive and SHA-256
-sidecar; the Runtime currently accepts signed `v0.6.2`. Its `master` now contains
-the post-release development synchronization through JellyFrame `b1196f67`;
-the `0.7.0` development line used Core ABI `2` because the new
-`CssParserOptions` preference field changes its public layout on 32-bit targets.
-The current `0.8.0` candidate uses ABI `3` for the coordinated Core-owned font
-and text migration, which changes public layout, renderer, and Canvas2D APIs.
-The signed `v0.6.2` artifact remains ABI `1` and is unchanged. This development
-head is not a Runtime dependency. No license change,
-contributor-policy change or open-source intent is implied. The Runtime
-accepts a release only through an explicit dependency-lock update;
-its in-tree provider remains the default for synchronized development only.
-The Runtime CI downloads the published archive, verifies the reviewed
-SHA-256, installs it and runs the locked package-consumer regression; this
-prevents a monorepo export from being mistaken for the released dependency.
+the existing license and contributor history unchanged. Its signed `v0.6.0`
+release established the deterministic source archive and SHA-256 sidecar; the
+Runtime currently locks signed `v0.8.0` (ABI 3), while `v0.6.2` (ABI 1) remains
+an unchanged historical release. Releases `0.7.0` and `0.8.0`
+established ABI 2 and ABI 3 development contracts. This `0.9.0` release
+candidate declares ABI 4 for the Core-owned text contract and associated public
+layout/API changes. Runtime production still uses its explicit ABI3 lock until
+a separate reviewed dependency update. No license, contributor-policy or
+open-source intent changes are part of this release.
 
 ## Release Unit
 
@@ -60,7 +53,7 @@ candidate archive. A signed release is still created from the reviewed tag.
   pre-release contracts may be removed rather than preserved as aliases.
 - ABI changes are independent of package version and increment only when the
   exported CMake/public-header binary contract is incompatible.
-- The `0.7.0` development line uses ABI `2`; the `0.8.0` candidate uses ABI `3`.
+- `0.7.0` uses ABI `2`; `0.8.0` uses ABI `3`; `0.9.0` uses ABI `4`.
   The previously published `0.6.2` package remains ABI `1`.
 - JFDP follows `JFDP/<major>`; a breaking wire change increments the major.
 
