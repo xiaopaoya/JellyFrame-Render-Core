@@ -7,6 +7,7 @@
 #include "render_core/layout.h"
 #include "render_core/layer_tree.h"
 #include "render_core/text_backend.h"
+#include "render_core/form_control.h"
 
 #include <array>
 #include <algorithm>
@@ -616,6 +617,137 @@ void aligned_prepared_text_stays_inside_its_layout_box() {
         }
     }
 }
+void core_native_control_prepared_labels() {
+    std::vector<std::pair<unsigned,unsigned>> coverage;
+    for(unsigned cp=32;cp<127;++cp) coverage.push_back({cp,500});
+    auto font=asset(400,16,4,1,coverage);
+    const auto hash=normalized_font_family_hash("Controls");
+    std::array<TextFontFace,2> faces={{{1,0,font.font},{2,7,font.font,hash}}};
+    TextSystem system;assert(system.bind(faces.data(),faces.size())==S::Ok);
+    TextMeasureProvider forbidden;
+    forbidden.measure=[](const std::string&,int,int,TextMetrics*,void*)->bool {assert(false);return false;};
+    const auto packets=[&](const std::string& markup,const char* extra="",std::size_t max_commands=8192) {
+        auto document=HtmlParser().parse("<body>"+markup+"</body>");
+        StyleResolver resolver(CssParser().parse(std::string(
+            "body {margin:0} input,textarea,select {margin:0;width:100px;height:24px;padding:0;"
+            "border:0;font-size:16px;color:#000000;")+extra+"}"));
+        LayoutEngineOptions lo;lo.text_system=&system;
+        auto layout=LayoutEngine(resolver,forbidden,lo).layout(*document,160,80);
+        LayerTreeBuilderOptions po;po.text_system=&system;po.max_display_commands=max_commands;
+        auto layers=LayerTreeBuilder(po).build(*layout);
+        auto commands=LayerTreeBuilder(po).flatten(*layers);
+        std::vector<DisplayCommand> output;
+        for(auto& command:commands) {
+            assert(command.type()!=DisplayCommandType::Text);
+            if(command.type()==DisplayCommandType::PreparedText) output.push_back(std::move(command));
+        }
+        return output;
+    };
+    const auto text_of=[](const DisplayCommand& command) {
+        PreparedTextView view;assert(decode_prepared_text(command.text,view));
+        std::string text;
+        for(std::size_t i=0;i<view.size();++i) {PreparedTextGlyph glyph;assert(view.read(i,glyph));text.push_back(static_cast<char>(glyph.source_codepoint));}
+        return text;
+    };
+    SoftwareCompositor::Options paint_options;paint_options.text_system=&system;
+    SoftwareCompositor compositor({},paint_options);
+    const auto replay=[&](const std::vector<DisplayCommand>& commands) {
+        LayerNode layer;layer.type=LayerType::Root;layer.bounds={0,0,160,80};layer.display_list=commands;
+        return compositor.render(layer,160,80,Color{255,255,255,255});
+    };
+    const auto assert_clipped_ink=[&](const std::vector<DisplayCommand>& commands) {
+        for(const auto& command:commands) {
+            // Exercise the real painterless compositor dispatch, one retained
+            // native packet at a time so each label/arrow clip is verified.
+            const auto frame=replay({command});std::size_t ink=0;
+            for(int y=0;y<frame.height;++y) for(int x=0;x<frame.width;++x) {
+                const auto& pixel=frame.pixels[static_cast<std::size_t>(y)*frame.width+x];
+                if(pixel.r==255 && pixel.g==255 && pixel.b==255) continue;
+                ++ink;assert(x>=command.rect.x && x<command.rect.x+command.rect.width &&
+                    y>=command.rect.y && y<command.rect.y+command.rect.height);
+            }
+            assert(ink>0);
+        }
+    };
+    for(const auto& fixture:std::vector<std::pair<std::string,std::string>>{
+        {"<input value='AB'>","AB"},{"<textarea>AB</textarea>","AB"},
+        {"<input placeholder='AB'>","AB"},{"<input type='date' value='2026-11-15'>","2026-11-15"},
+        {"<input type='time' value='12:34'>","12:34"},{"<input type='color' value='#112233'>","#112233"},
+        {"<input type='file'>","Choose file"},{"<input type='file' value='A.txt'>","A.txt"}}) {
+        const auto commands=packets(fixture.first);assert(commands.size()==1 && text_of(commands[0])==fixture.second);
+        const auto& command=commands[0];
+        assert(prepared_text_baseline_y(command)>command.rect.y);
+        assert(prepared_text_baseline_y(command)<=command.rect.y+command.rect.height);
+        assert_clipped_ink(commands);
+    }
+    auto select=packets("<select><option>AB</option></select>");
+    assert(select.size()==2 && text_of(select[0])=="AB" && text_of(select[1])=="v");
+    assert_clipped_ink(select);
+    assert_clipped_ink(packets("<input value='"+std::string(100,'A')+"'>"));
+    assert_clipped_ink(packets("<select><option>"+std::string(100,'A')+"</option></select>"));
+    auto centered=packets("<input value='AB'>","text-align:center;");
+    auto right=packets("<input value='AB'>","text-align:right;font-family:Controls;");
+    assert(prepared_text_origin_x(centered[0])>centered[0].rect.x);
+    assert(prepared_text_origin_x(right[0])>prepared_text_origin_x(centered[0]));
+    PreparedTextView named;PreparedTextGlyph named_glyph;
+    assert(decode_prepared_text(right[0].text,named) && named.read(0,named_glyph) && named_glyph.resource_id==2);
+    assert(packets("<input value='AB'>","font-family:Absent;").empty());
+    assert(packets("<input value='A&#x301;'>").empty());
+    assert(packets("<textarea>A&#10;B</textarea>").empty());
+    assert(packets("<input value='"+std::string(129,'A')+"'>").empty());
+    assert(packets("<select><option>"+std::string(128,'A')+"</option></select>").empty());
+    assert(packets("<select><option>"+std::string(127,'A')+"</option></select>").size()==2);
+    const auto placeholder=packets("<input placeholder='AB'>");
+    assert(placeholder[0].color.r==100 && placeholder[0].color.g==116 && placeholder[0].color.b==139);
+    const auto spaced=packets("<input value='AB'>","letter-spacing:2px;");
+    PreparedTextView spaced_view;PreparedTextGlyph spaced_glyph;
+    assert(decode_prepared_text(spaced[0].text,spaced_view) && spaced_view.read(1,spaced_glyph) && spaced_glyph.x==10000);
+    TextSystemLimits limits;limits.max_glyphs=1;assert(system.bind(faces.data(),faces.size(),limits)==S::Ok);
+    assert(packets("<select><option>AB</option></select>").empty());
+    assert(system.bind(faces.data(),faces.size())==S::Ok);
+    auto no_arrow_font=asset();TextFontFace no_arrow{3,0,no_arrow_font.font};assert(system.bind(&no_arrow,1)==S::Ok);
+    assert(packets("<select><option>AB</option></select>").empty());
+    assert(packets("<input value='C'>").empty());
+    assert(system.bind(faces.data(),faces.size())==S::Ok);
+    assert(packets("<select><option>AB</option></select>","",1).empty());
+    auto live=HtmlParser().parse("<input value='AB'>");
+    StyleResolver resolver(CssParser().parse("input {width:100px;height:24px;font-size:16px;color:#000000}"));
+    LayoutEngineOptions lo;lo.text_system=&system;auto layout=LayoutEngine(resolver,forbidden,lo).layout(*live,160,80);
+    LayerTreeBuilderOptions po;po.text_system=&system;
+    auto before=LayerTreeBuilder(po).build(*layout);const auto retained=LayerTreeBuilder(po).flatten(*before);
+    const auto before_pixels=replay(retained);
+    Node* control=nullptr;
+    const auto find=[&](const auto& self,Node& node)->void {if(node.tag_name=="input")control=&node;for(auto& c:node.children)self(self,*c);};
+    find(find,*live);assert(control && set_form_control_value(*control,"BA"));
+    auto after=LayerTreeBuilder(po).build(*layout);
+    bool changed=false;
+    for(const auto& command:LayerTreeBuilder(po).flatten(*after)) if(command.type()==DisplayCommandType::PreparedText) changed=text_of(command)=="BA";
+    assert(changed);
+    for(const auto& command:retained) if(command.type()==DisplayCommandType::PreparedText) assert(text_of(command)=="AB");
+    const auto replay_pixels=replay(retained);
+    for(std::size_t i=0;i<before_pixels.pixels.size();++i) {
+        const auto& a=before_pixels.pixels[i];const auto& b=replay_pixels.pixels[i];
+        assert(a.r==b.r && a.g==b.g && a.b==b.b && a.a==b.a);
+    }
+    auto live_select=HtmlParser().parse("<select><option>AB</option><option>BA</option></select>");
+    auto select_layout=LayoutEngine(resolver,forbidden,lo).layout(*live_select,160,80);
+    auto old_select=LayerTreeBuilder(po).build(*select_layout);
+    const auto old_select_commands=LayerTreeBuilder(po).flatten(*old_select);
+    const auto old_select_pixels=replay(old_select_commands);
+    Node* select_node=nullptr;
+    const auto find_select=[&](const auto& self,Node& node)->void {if(node.tag_name=="select")select_node=&node;for(auto& c:node.children)self(self,*c);};
+    find_select(find_select,*live_select);assert(select_node && set_form_control_selected_index(*select_node,1));
+    auto new_select=LayerTreeBuilder(po).build(*select_layout);bool selected_changed=false;
+    for(const auto& command:LayerTreeBuilder(po).flatten(*new_select))
+        if(command.type()==DisplayCommandType::PreparedText && text_of(command)=="BA") selected_changed=true;
+    assert(selected_changed);
+    const auto old_select_replayed=replay(old_select_commands);
+    for(std::size_t i=0;i<old_select_pixels.pixels.size();++i) {
+        const auto& a=old_select_pixels.pixels[i];const auto& b=old_select_replayed.pixels[i];
+        assert(a.r==b.r && a.g==b.g && a.b==b.b && a.a==b.a);
+    }
+}
+
 void core_prepared_text_ellipsis() {
     auto font = asset(400,16,4,1,{{32,250},{46,200},{65,500},{66,600},{0x2026,700},{0x4e00,1000}});
     TextFontFace face{1,0,font.font}; TextSystem system;
@@ -1033,6 +1165,7 @@ int main(int argc,char** argv) {
     route_relayout_keeps_prepared_text_while_dom_is_dirty();aligned_prepared_text_stays_inside_its_layout_box();
     core_prepared_text_applies_bounded_letter_spacing();
     core_prepared_text_ellipsis();
+    core_native_control_prepared_labels();
     unrelated_input_mutation_preserves_static_prepared_text();
     core_layout_refusals_do_not_fall_back_to_host_text();
     std::cout<<"text system selection/geometry/transaction/budget tests passed\n";
