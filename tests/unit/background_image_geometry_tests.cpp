@@ -84,8 +84,12 @@ void box_area_cases() {
           "invalid box area does not publish partial output");
     invalid = request;
     invalid.padding.bottom = 9;
+    check(resolve_background_box_areas(invalid, unchanged) == BackgroundBoxAreasStatus::Ready &&
+              unchanged.positioning_area.x == 28 && unchanged.positioning_area.width == 96,
+          "unused nonuniform padding does not affect padding-box origin or border-box clip");
+    invalid.origin = BackgroundBoxArea::ContentBox;
     check(resolve_background_box_areas(invalid, unchanged) == BackgroundBoxAreasStatus::InvalidInput,
-          "nonuniform padding is rejected");
+          "nonuniform padding is rejected when content-box geometry uses it");
     invalid = request;
     invalid.border.left = -1;
     check(resolve_background_box_areas(invalid, unchanged) == BackgroundBoxAreasStatus::InvalidInput,

@@ -1,12 +1,7 @@
-﻿#pragma once
-
-#include "render_core/geometry.h"
-#include "render_core/software_renderer.h"
-#include "render_core/text_backend.h"
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
 
 namespace jellyframe {
 
@@ -28,65 +23,6 @@ struct BitmapFont {
     std::uint8_t fallback_advance = 0;
 };
 
-struct BitmapFontContext {
-    const BitmapFont* font = nullptr;
-    int scale = 1;
-};
-
-struct BitmapFontFallbackContext {
-    const BitmapFont* const* fonts = nullptr;
-    std::size_t font_count = 0;
-    int scale = 1;
-};
-
 const BitmapFontGlyph* find_bitmap_glyph(const BitmapFont& font, std::uint32_t codepoint);
-TextMetrics measure_bitmap_text(const BitmapFontContext& context,
-                                const std::string& text,
-                                int font_size,
-                                int font_weight);
-TextMetrics measure_bitmap_text_with_fallback(const BitmapFontFallbackContext& context,
-                                              const std::string& text,
-                                              int font_size,
-                                              int font_weight);
-TextMetrics measure_bitmap_text_range(const BitmapFontContext& context,
-                                      std::string_view text,
-                                      int font_size,
-                                      int font_weight);
-TextMetrics measure_bitmap_text_with_fallback_range(const BitmapFontFallbackContext& context,
-                                                    std::string_view text,
-                                                    int font_size,
-                                                    int font_weight);
-
-bool bitmap_font_measure_callback(const std::string& text,
-                                  int font_size,
-                                  int font_weight,
-                                  TextMetrics* metrics,
-                                  void* context);
-
-bool bitmap_font_fallback_measure_callback(const std::string& text,
-                                           int font_size,
-                                           int font_weight,
-                                           TextMetrics* metrics,
-                                           void* context);
-
-bool bitmap_font_paint_callback(FrameBuffer& target,
-                                Rect rect,
-                                Color color,
-                                const std::string& text,
-                                int font_size,
-                                int font_weight,
-                                TextCommandAlign align,
-                                bool single_line,
-                                void* context);
-
-bool bitmap_font_fallback_paint_callback(FrameBuffer& target,
-                                         Rect rect,
-                                         Color color,
-                                         const std::string& text,
-                                         int font_size,
-                                         int font_weight,
-                                         TextCommandAlign align,
-                                         bool single_line,
-                                         void* context);
 
 } // namespace jellyframe

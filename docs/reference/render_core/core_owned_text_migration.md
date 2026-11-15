@@ -1,6 +1,6 @@
 # Core-Owned Font and Text Migration
 
-> **Status note (2026-11-15): The checkpoints below describe historical implementation slices.** Current Core implements selected TextSystem layout/paint, shared inline paragraphs, bounded letter spacing and JFTP v3 explicit positions (PR #60), plus bounded owner-side paint ellipsis. See [TextSystem](text_system.md) for actual admission and [Runtime's ABI4 migration plan](https://github.com/xiaopaoya/JellyFrame/blob/master/docs/render_core_abi4_migration_plan.md) for consumer/default adoption. `TextMeasureProvider` and `TextPainter` still have production consumers and remain public; their retirement and the signed ABI4 release are not complete. Historical statements below about missing spacing, packets or transport are not the current capability contract.
+> **Status note (2026-11-16): The checkpoints below describe historical implementation slices.** The isolated, unpublished Core ABI4 candidate implements selected TextSystem layout/paint, shared inline paragraphs, bounded letter spacing and JFTP v3 explicit positions (PR #60), plus bounded owner-side paint ellipsis. It has removed the public `TextMeasureProvider`/`TextPainter` callback path, including range/family/additive measurement wrappers and bitmap-font measure/paint callback helpers. The JFFONT0/1 byte-resource loader remains separately available; it is resource parsing, not a text-policy callback. Runtime production and its signed package lock remain on Core ABI3, and ABI4 package, Runtime, and device qualification gates are pending. See [TextSystem](text_system.md) for actual admission and [Runtime's ABI4 migration plan](https://github.com/xiaopaoya/JellyFrame/blob/master/docs/render_core_abi4_migration_plan.md) for consumer/default adoption. Historical statements below about missing spacing, packets or transport are not the current capability contract.
 
 ## Goal
 
@@ -10,10 +10,14 @@ immutable font resources and provide storage/display access; they do not
 provide text measurement, line metrics, shaping decisions, or glyph-paint
 callbacks.
 
-This pre-release cleanup removes the convenience callback adapter. The existing
-`TextMeasureProvider` and `TextPainter` APIs remain available for consumers
-until their font resources and call sites migrate together in a later ABI
-change. The old JFFONT resource loader also remains until that migration.
+The ABI4 candidate removes callback-based text measurement, wrapping, and
+painting from Core's public integration surface. Core owns those policies
+through `TextSystem`; ports provide immutable font resources and keep their
+bytes alive for all dependent layout and paint work. The legacy JFFONT0/1
+resource parser remains available pending Runtime resource migration, but it
+does not provide text metrics or painting callbacks. This candidate is
+unreleased; Runtime and package adoption remain gated on matched ABI4
+qualification.
 
 ## Contract
 
@@ -38,9 +42,9 @@ change. The old JFFONT resource loader also remains until that migration.
 
 | Existing Core surface | Replacement |
 | --- | --- |
-| `BitmapFontResource` and JFFONT0/1 parsing | `FontResource` and JFFONT2 |
-| `TextMeasureProvider` in `LayoutEngine` | `LayoutEngineOptions::text_system` |
-| `TextPainter` in layer/software rendering | Core-prepared text consumed by `TextSystem::paint` |
+| JFFONT0/1 `BitmapFontResource` bytes | JFFONT2 `FontResource`; the legacy byte parser remains available during Runtime migration |
+| `TextMeasureProvider` and measurement/wrapping helpers | `LayoutEngineOptions::text_system` |
+| `TextPainter` and bitmap-font paint callbacks | Core-prepared text consumed by `TextSystem::paint` |
 | Provider parameters on style/text repaint | Retained Core text snapshots and the bound `TextSystem` |
 | Callback text on Canvas2D | Core text service in the Canvas2D context |
 

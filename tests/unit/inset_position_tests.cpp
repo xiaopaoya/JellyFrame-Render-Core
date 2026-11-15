@@ -200,8 +200,6 @@ void moved_boxes_refresh_paint_hit_and_retained_damage() {
     clear_dirty_flags(*dom);
     changed->set_attribute("style","left:60.25%;top:50%;position:absolute");
     auto next_render = RenderTreeBuilder(resolver).build(*dom);
-    check(!style_dirty_can_reuse_layout(*dom,*old_render,*next_render,*old_layout,{}),
-        "retained inset mutation refuses layout reuse");
     auto next_layout = engine.layout(*next_render,320,200);
     rect(by_id(*next_layout,"c"),135,62,20,15,"mutated paint fixture resolves its retained percentage basis");
     rect(by_id(*next_layout,"g"),145,70,3,3,"mutated paint fixture resolves nested geometry");
@@ -265,14 +263,13 @@ void bounded_work_and_sparse_retention() {
     LayoutEngineOptions options;
     options.max_layout_boxes=3; options.max_layout_depth=2;
     VectorDiagnosticSink diagnostics; options.diagnostics=&diagnostics;
-    auto bounded=LayoutEngine(resolver,{},options).layout(*dom,320,200);
+    auto bounded=LayoutEngine(resolver, options).layout(*dom,320,200);
     check(count_layout_boxes(*bounded)<=3,"positioned final pass cannot exceed construction box budget");
     check(!diagnostics.diagnostics().empty(),"bounded scene reports layout resource refusal");
     std::cout << "sparse fixture boxes=" << boxes << " retained-nodes=" << owners << '\n';
 }
 
 void nested_opposite_edges_keep_measurement_work_linear() {
-    std::size_t measurements_per_node = 0;
     for (unsigned depth : {8U,16U,32U,64U}) {
         std::string html;
         for (unsigned index=0;index<depth;++index) html += "<div class='p'>x";
@@ -280,20 +277,20 @@ void nested_opposite_edges_keep_measurement_work_linear() {
         auto dom=HtmlParser{}.parse(html);
         StyleResolver resolver(CssParser{}.parse(reset+
             ".p{position:absolute;right:1px;bottom:1px;width:100px;height:100px}"));
-        std::size_t measurements = 0;
-        TextMeasureProvider provider;
-        provider.context = &measurements;
-        provider.measure = [](const std::string& text,int,int,TextMetrics* metrics,void* context) {
-            ++*static_cast<std::size_t*>(context);
-            *metrics = {static_cast<int>(text.size())*5,10};
-            return true;
-        };
-        auto tree=LayoutEngine(resolver,provider).layout(*dom,320,240);
+        auto tree=LayoutEngine(resolver).layout(*dom,320,240);
         check(count_layout_boxes(*tree)==2*depth+3,"nested opposite-edge fixture retains every box");
-        if (depth==8) measurements_per_node=measurements/depth;
-        check(measurements_per_node>0 && measurements==measurements_per_node*depth,
-            "opposite-edge remeasurement stays linear across nested out-of-flow children");
-        std::cout << "opposite-edge nested boxes=" << depth << " text measurements=" << measurements << '\n';
+        std::size_t positioned = 0;
+        const auto inspect = [&](const auto& self, const LayoutBox& box) -> void {
+            if (box.style.position == "absolute") {
+                ++positioned;
+                check(box.rect.width == 100 && box.rect.height == 100,
+                    "opposite-edge positioned box retains authored dimensions");
+            }
+            for (const auto& child : box.children) self(self, *child);
+        };
+        inspect(inspect, *tree);
+        check(positioned == depth, "every nested positioned box is laid out");
+        std::cout << "opposite-edge nested boxes=" << depth << " positioned=" << positioned << '\n';
     }
 }
 

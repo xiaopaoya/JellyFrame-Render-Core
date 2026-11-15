@@ -13,7 +13,7 @@
 #include "render_core/scroll_blit.h"
 #include "render_core/software_renderer.h"
 #include "render_core/style_repaint.h"
-#include "render_core/text_repaint.h"
+#include "../tests/unit/core_text_test_fixture.h"
 
 #include <array>
 #include <cerrno>
@@ -236,44 +236,6 @@ DisplayCommand fill_command(Rect rect, Color color, int radius = 0) {
     return command;
 }
 
-bool fixed_measure(const std::string& text,
-                   int,
-                   int,
-                   TextMetrics* metrics,
-                   void*) {
-    if (metrics == nullptr) {
-        return false;
-    }
-    metrics->width = static_cast<int>(text.size()) * 8;
-    metrics->line_height = 12;
-    return true;
-}
-
-struct TextMeasureCounter {
-    std::size_t calls = 0;
-};
-
-bool counting_fixed_measure(const std::string& text,
-                            int,
-                            int,
-                            TextMetrics* metrics,
-                            void* context) {
-    auto* counter = static_cast<TextMeasureCounter*>(context);
-    if (counter != nullptr) {
-        ++counter->calls;
-    }
-    if (metrics == nullptr) {
-        return false;
-    }
-    metrics->width = static_cast<int>(text.size()) * 8;
-    metrics->line_height = 12;
-    return true;
-}
-
-TextMeasureProvider fixed_text_measure() {
-    return TextMeasureProvider{fixed_measure, nullptr};
-}
-
 int parse_positive_int_arg(const char* value, const char* name) {
     if (value == nullptr) {
         throw std::invalid_argument(std::string("missing ") + name);
@@ -315,6 +277,11 @@ int run_render_core_microbench(int argc, char** argv) {
     }
     const int card_count = argc >= 2 ? parse_positive_int_arg(argv[1], "card_count") : 80;
     const int iterations = argc >= 3 ? parse_positive_int_arg(argv[2], "iterations") : 200;
+    test::CoreTextTestFixture core_text_fixture;
+    if (!core_text_fixture.ready()) throw std::runtime_error("Core TextSystem benchmark fixture failed");
+    LayoutEngineOptions core_text_layout_options;
+    core_text_layout_options.text_system = &core_text_fixture.system();
+    core_text_layout_options.max_prepared_text_glyphs = 4096;
     const std::string html = make_card_html(card_count);
     const std::string css = make_card_css();
 
@@ -419,24 +386,18 @@ int run_render_core_microbench(int argc, char** argv) {
     MonotonicArena flex_intrinsic_render_arena;
     auto flex_intrinsic_render_tree = flex_intrinsic_builder.build(
         *flex_intrinsic_document, flex_intrinsic_render_arena);
-    TextMeasureCounter flex_intrinsic_measure_counter;
-    TextMeasureProvider flex_intrinsic_measure{
-        counting_fixed_measure, &flex_intrinsic_measure_counter};
-    LayoutEngine flex_intrinsic_layout_engine(flex_intrinsic_resolver, flex_intrinsic_measure);
+    LayoutEngine flex_intrinsic_layout_engine(flex_intrinsic_resolver, core_text_layout_options);
     MonotonicArena flex_intrinsic_probe_arena;
     auto flex_intrinsic_probe_tree = flex_intrinsic_layout_engine.layout(
         *flex_intrinsic_render_tree, 320, flex_intrinsic_probe_arena);
     (void)flex_intrinsic_probe_tree;
-    const std::size_t flex_intrinsic_measure_calls = flex_intrinsic_measure_counter.calls;
     print_result("flex_nonwrap_intrinsic_layout", iterations, average_microseconds(iterations, [&] {
-        flex_intrinsic_measure_counter.calls = 0;
-        LayoutEngine layout(flex_intrinsic_resolver, flex_intrinsic_measure);
+        LayoutEngine layout(flex_intrinsic_resolver, core_text_layout_options);
         MonotonicArena layout_arena;
         auto layout_tree = layout.layout(*flex_intrinsic_render_tree, 320, layout_arena);
         (void)layout_tree;
     }));
-    std::cout << "flex_nonwrap_intrinsic_layout text_measure_calls_per_layout="
-              << flex_intrinsic_measure_calls << " layout_boxes="
+    std::cout << "flex_nonwrap_intrinsic_layout layout_boxes="
               << count_layout_boxes(*flex_intrinsic_probe_tree) << '\n';
 
     auto select_document = html_parser.parse(make_select_html(256));
@@ -983,7 +944,7 @@ int run_render_core_microbench(int argc, char** argv) {
         ".fade { display: block; width: 80px; height: 36px; opacity: .5; background: #123456; }"));
     RenderTreeBuilder opacity_render_builder(opacity_resolver);
     auto opacity_render_tree = opacity_render_builder.build(*opacity_document);
-    LayoutEngine opacity_layout_engine(opacity_resolver, fixed_text_measure());
+    LayoutEngine opacity_layout_engine(opacity_resolver, core_text_layout_options);
     auto opacity_layout_tree = opacity_layout_engine.layout(*opacity_render_tree, 160);
     LayerTreeBuilder opacity_layer_builder;
     auto opacity_layer_tree = opacity_layer_builder.build(*opacity_layout_tree);
@@ -1006,27 +967,6 @@ int run_render_core_microbench(int argc, char** argv) {
         }));
     }
 
-    auto text_document = html_parser.parse("<body><p id='frame'>01</p></body>");
-    auto text_stylesheet = css_parser.parse("p { margin: 0; font-size: 10px; line-height: 12px; }");
-    StyleResolver text_resolver(text_stylesheet);
-    RenderTreeBuilder text_builder(text_resolver);
-    auto text_render_tree = text_builder.build(*text_document);
-    LayoutEngine text_layout_engine(text_resolver, fixed_text_measure());
-    auto text_layout_tree = text_layout_engine.layout(*text_render_tree, 240);
-    Node* frame_node = find_first_element_by_id(*text_document, "frame");
-    if (frame_node != nullptr) {
-        clear_dirty_flags(*text_document);
-        bool toggle = false;
-        print_result("text_repaint_reuse_check", iterations, average_microseconds(iterations, [&] {
-            frame_node->set_text_content(toggle ? "01" : "02");
-            toggle = !toggle;
-            const bool reusable =
-                text_dirty_can_reuse_layout(*text_document, *text_layout_tree, fixed_text_measure());
-            clear_dirty_flags(*text_document);
-            (void)reusable;
-        }));
-    }
-
     auto typography_document = html_parser.parse(
         "<body><p class='spaced'>TelemetryStatusLabelWithoutSpaces</p>"
         "<p class='wrapped'>ABCDEFGHIJKLMNOPQRSTUVWXYZ</p></body>");
@@ -1036,9 +976,9 @@ int run_render_core_microbench(int argc, char** argv) {
         "p { margin: 0; width: 96px; font-size: 12px; line-height: 14px; }"));
     RenderTreeBuilder plain_typography_builder(plain_typography_resolver);
     auto plain_typography_render_tree = plain_typography_builder.build(*plain_typography_document);
-    LayoutEngine plain_typography_layout_engine(plain_typography_resolver, fixed_text_measure());
+    LayoutEngine plain_typography_layout_engine(plain_typography_resolver, core_text_layout_options);
     LayerTreeBuilderOptions plain_typography_layer_options;
-    plain_typography_layer_options.text_measure = fixed_text_measure();
+    plain_typography_layer_options.text_system = &core_text_fixture.system();
     LayerTreeBuilder plain_typography_layer_builder(plain_typography_layer_options);
     print_result("text_plain_layout", iterations, average_microseconds(iterations, [&] {
         auto plain_typography_layout_tree = plain_typography_layout_engine.layout(*plain_typography_render_tree, 172, 320);
@@ -1055,9 +995,9 @@ int run_render_core_microbench(int argc, char** argv) {
         ".wrapped { overflow-wrap: anywhere; }"));
     RenderTreeBuilder typography_builder(typography_resolver);
     auto typography_render_tree = typography_builder.build(*typography_document);
-    LayoutEngine typography_layout_engine(typography_resolver, fixed_text_measure());
+    LayoutEngine typography_layout_engine(typography_resolver, core_text_layout_options);
     LayerTreeBuilderOptions typography_layer_options;
-    typography_layer_options.text_measure = fixed_text_measure();
+    typography_layer_options.text_system = &core_text_fixture.system();
     LayerTreeBuilder typography_layer_builder(typography_layer_options);
     print_result("text_spacing_anywhere_layout", iterations, average_microseconds(iterations, [&] {
         auto typography_layout_tree = typography_layout_engine.layout(*typography_render_tree, 172, 320);
@@ -1069,37 +1009,34 @@ int run_render_core_microbench(int argc, char** argv) {
         (void)typography_layer_tree;
     }));
 
-    // Keep the candidate-measurement cost visible as text length grows. This
-    // is a diagnostic baseline for a future equivalent-measurement optimization.
+    // Measure canonical CoreText layout cost as text length and line count grow.
     const std::string anywhere_benchmark_text(2048, 'W');
     for (const std::size_t width : {96U, 65536U}) {
         const std::string name_prefix = width == 96U
-            ? "text_anywhere_wrap_"
-            : "text_anywhere_wrap_wide_";
+            ? "text_anywhere_layout_"
+            : "text_anywhere_layout_wide_";
         const int benchmark_iterations = width == 65536U
             ? std::max(1, iterations / 10)
             : iterations;
         for (const std::size_t length : {32U, 128U, 512U, 2048U}) {
             const std::string text = anywhere_benchmark_text.substr(0, length);
-            volatile std::size_t line_count = 0;
+            auto wrap_document = html_parser.parse("<body><div>" + text + "</div></body>");
+            StyleResolver wrap_resolver(css_parser.parse(
+                "body{margin:0} div{overflow-wrap:anywhere;font-size:12px;line-height:14px}"));
+            auto wrap_render_tree = RenderTreeBuilder(wrap_resolver).build(*wrap_document);
+            LayoutEngine wrap_layout(wrap_resolver, core_text_layout_options);
             print_result((name_prefix + std::to_string(length)).c_str(),
                          benchmark_iterations,
                          average_microseconds(benchmark_iterations, [&] {
-                             const auto lines = wrap_text_anywhere(fixed_text_measure(),
-                                                                   text,
-                                                                   12,
-                                                                   400,
-                                                                   0,
-                                                                   0,
-                                                                   static_cast<int>(width));
-                             line_count = lines.size();
+                             auto layout = wrap_layout.layout(
+                                 *wrap_render_tree, static_cast<int>(width), 65536);
+                             (void)layout;
                          }));
-            (void)line_count;
         }
     }
 
     auto style_document = html_parser.parse(
-        "<body><button id='pulse' class='pill'>Open</button><strong id='frame'>01</strong></body>");
+        "<body><button id='pulse' class='pill'></button></body>");
     auto style_stylesheet = css_parser.parse(
         ".pill { display: block; width: 80px; height: 20px; background-color: #111111; }"
         ".pill.active { background-color: #222222; transform: scale(1.05); }"
@@ -1107,24 +1044,14 @@ int run_render_core_microbench(int argc, char** argv) {
     StyleResolver style_reuse_resolver(style_stylesheet);
     RenderTreeBuilder style_reuse_builder(style_reuse_resolver);
     auto previous_style_render_tree = style_reuse_builder.build(*style_document);
-    LayoutEngine style_reuse_layout_engine(style_reuse_resolver, fixed_text_measure());
+    LayoutEngine style_reuse_layout_engine(style_reuse_resolver);
     auto style_reuse_layout_tree =
         style_reuse_layout_engine.layout(*previous_style_render_tree, 240);
     Node* style_pulse = find_first_element_by_id(*style_document, "pulse");
-    Node* style_frame = find_first_element_by_id(*style_document, "frame");
-    if (style_pulse != nullptr && style_frame != nullptr) {
+    if (style_pulse != nullptr) {
         clear_dirty_flags(*style_document);
-        style_frame->set_text_content("02");
         style_pulse->set_attribute("class", "pill active");
         auto next_style_render_tree = style_reuse_builder.build(*style_document);
-        print_result("style_repaint_reuse_check", iterations, average_microseconds(iterations, [&] {
-            const bool reusable = style_dirty_can_reuse_layout(*style_document,
-                                                               *previous_style_render_tree,
-                                                               *next_style_render_tree,
-                                                               *style_reuse_layout_tree,
-                                                               fixed_text_measure());
-            (void)reusable;
-        }));
         print_result("retained_style_apply_layout", iterations, average_microseconds(iterations, [&] {
             const bool applied = apply_render_styles_to_layout(*next_style_render_tree, *style_reuse_layout_tree);
             (void)applied;

@@ -267,7 +267,7 @@ void prepared_packet_paint() {
     }
     LayerNode root;root.bounds={0,0,32,20};root.display_list.push_back(command);
     SoftwareCompositor::Options compositor_options;compositor_options.text_system=&system;
-    const auto composited=SoftwareCompositor({},compositor_options).render(root,32,20,background);
+    const auto composited=SoftwareCompositor(ImagePainter{},compositor_options).render(root,32,20,background);
     for (std::size_t i=0;i<reference.pixels.size();++i) {
         const auto left=reference.pixels[i],right=composited.pixels[i];
         assert(left.r==right.r && left.g==right.g && left.b==right.b && left.a==right.a);
@@ -307,8 +307,8 @@ void installed_shared_paragraph_path() {
     auto plain=HtmlParser{}.parse("<div><span>AB AB AB</span></div>");
     auto split=HtmlParser{}.parse("<div><span>A<span>B A</span>B </span><span>AB</span></div>");
     LayoutEngineOptions options; options.text_system=&system;
-    auto a=LayoutEngine(styles,{},options).layout(*plain,80,80);
-    auto b=LayoutEngine(styles,{},options).layout(*split,80,80);
+    auto a=LayoutEngine(styles, options).layout(*plain,80,80);
+    auto b=LayoutEngine(styles, options).layout(*split,80,80);
     TextLayoutCache copied;
     bool has_binding=false;
     const auto bindings=[&](const auto& self,const LayoutBox& box)->void {
@@ -328,7 +328,7 @@ void installed_shared_paragraph_path() {
     };
     packets(packets,*lb); assert(has_v2);
     SoftwareCompositor::Options paint; paint.text_system=&system;
-    SoftwareCompositor compositor({},paint);
+    SoftwareCompositor compositor(ImagePainter{},paint);
     const auto expected=compositor.render(*la,80,80,{255,255,255,255});
     const auto actual=compositor.render(*lb,80,80,{255,255,255,255});
     assert(expected.pixels.size()==actual.pixels.size());
@@ -349,7 +349,7 @@ void html_layout_to_core_paint() {
     auto document=html.parse("<body><div>AB</div></body>");
     StyleResolver resolver(css.parse("div { font-family: 'Core Test'; font-size: 16px; white-space: nowrap; }"));
     LayoutEngineOptions layout_options;layout_options.text_system=&system;
-    auto layout=LayoutEngine(resolver,{},layout_options).layout(*document,80,40);
+    auto layout=LayoutEngine(resolver, layout_options).layout(*document,80,40);
     const LayoutBox* text_box=nullptr;
     const auto find_text=[&](const auto& self,const LayoutBox& box)->void {
         if (box.node && box.node->type==NodeType::Text) { text_box=&box;return; }
@@ -368,7 +368,7 @@ void html_layout_to_core_paint() {
         found_prepared|=command.type()==DisplayCommandType::PreparedText;
     assert(found_prepared);
     SoftwareCompositor::Options compositor_options;compositor_options.text_system=&system;
-    const auto frame=SoftwareCompositor({},compositor_options).render(*layers,80,40,Color{255,255,255,255});
+    const auto frame=SoftwareCompositor(ImagePainter{},compositor_options).render(*layers,80,40,Color{255,255,255,255});
     std::size_t ink=0;
     for (const auto pixel:frame.pixels) ink+=pixel.r<255 || pixel.g<255 || pixel.b<255;
     assert(ink>0);
@@ -376,7 +376,7 @@ void html_layout_to_core_paint() {
     auto positioned_document=html.parse("<body><div>AB</div></body>");
     StyleResolver positioned_resolver(css.parse(
         "div { position: absolute; left: 20px; top: 10px; font-family: 'Core Test'; white-space: nowrap; }"));
-    auto positioned_layout=LayoutEngine(positioned_resolver,{},layout_options).layout(*positioned_document,80,40);
+    auto positioned_layout=LayoutEngine(positioned_resolver, layout_options).layout(*positioned_document,80,40);
     const LayoutBox* positioned_text=find_text_box(*positioned_layout);
     assert(positioned_text && positioned_text->text_layout_cache.prepared_text);
     assert(positioned_text->rect.x>=20 && positioned_text->rect.y>=10);
@@ -399,7 +399,7 @@ void html_layout_to_core_paint() {
     auto wrapped_document=html.parse("<body><div>A B</div></body>");
     StyleResolver wrapped_resolver(css.parse(
         "div { width: 10px; font-family: 'Core Test'; font-size: 16px; }"));
-    auto wrapped_layout=LayoutEngine(wrapped_resolver,{},layout_options).layout(*wrapped_document,80,40);
+    auto wrapped_layout=LayoutEngine(wrapped_resolver, layout_options).layout(*wrapped_document,80,40);
     const LayoutBox* wrapped_text=find_text_box(*wrapped_layout);
     assert(wrapped_text && wrapped_text->text_layout_cache.prepared_text);
     assert((wrapped_text->text_layout_cache.lines==std::vector<std::string>{"A","B"}));
@@ -417,7 +417,7 @@ void html_layout_to_core_paint() {
     auto anywhere_document=html.parse("<body><div>AB</div></body>");
     StyleResolver anywhere_resolver(css.parse(
         "div { width: 4px; font-family: 'Core Test'; overflow-wrap: anywhere; }"));
-    auto anywhere_layout=LayoutEngine(anywhere_resolver,{},layout_options).layout(*anywhere_document,80,40);
+    auto anywhere_layout=LayoutEngine(anywhere_resolver, layout_options).layout(*anywhere_document,80,40);
     const LayoutBox* anywhere_text=find_text_box(*anywhere_layout);
     assert(anywhere_text && anywhere_text->text_layout_cache.prepared_text);
     assert((anywhere_text->text_layout_cache.lines==std::vector<std::string>{"A","B"}));
@@ -458,7 +458,7 @@ void route_relayout_keeps_prepared_text_while_dom_is_dirty() {
 
     const auto build_frame=[&]() {
         auto render=RenderTreeBuilder(resolver).build(*document);
-        auto layout=LayoutEngine(resolver,{},layout_options).layout(*render,80,40);
+        auto layout=LayoutEngine(resolver, layout_options).layout(*render,80,40);
         auto layers=LayerTreeBuilder(layer_options).build(*layout);
         return std::pair{std::move(layout),std::move(layers)};
     };
@@ -515,7 +515,7 @@ void unrelated_input_mutation_preserves_static_prepared_text() {
         "body { margin: 0; } p { margin: 0; font-size: 16px; white-space: nowrap; }"));
     LayoutEngineOptions layout_options;
     layout_options.text_system=&system;
-    auto layout=LayoutEngine(resolver,{},layout_options).layout(*document,80,40);
+    auto layout=LayoutEngine(resolver, layout_options).layout(*document,80,40);
     const LayoutBox* text=find_text_box(*layout);
     assert(text!=nullptr && text->text_layout_cache.prepared_text);
 
@@ -539,10 +539,6 @@ void unrelated_input_mutation_preserves_static_prepared_text() {
     };
     count_prepared(count_prepared,*layers);
     assert(prepared_commands==1);
-}
-bool forbidden_host_measure(const std::string&,int,int,TextMetrics*,void* context) {
-    ++*static_cast<unsigned*>(context);
-    return false;
 }
 const LayoutBox* find_text_box(const LayoutBox& box) {
     if (box.node && box.node->type==NodeType::Text) return &box;
@@ -574,7 +570,7 @@ void aligned_prepared_text_stays_inside_its_layout_box() {
                     "body { margin: 0; } " + tag + " { margin: 0; padding: 0; border: 0; "
                     "font-size: 16px; line-height: 20px; width: " + std::to_string(width) +
                     "px; text-align: " + alignment + "; color: #000000; background: #ffffff; }"));
-                auto layout = LayoutEngine(resolver, {}, layout_options).layout(*document, 120, 80);
+                auto layout = LayoutEngine(resolver, layout_options).layout(*document, 120, 80);
                 const LayoutBox* text_box = find_text_box(*layout);
                 assert(text_box != nullptr);
                 const auto& cache = text_box->text_layout_cache;
@@ -602,7 +598,7 @@ void aligned_prepared_text_stays_inside_its_layout_box() {
                     ++line_index;
                 }
                 assert(line_index == cache.prepared_lines.size());
-                const auto frame = SoftwareCompositor({}, compositor_options).render(
+                const auto frame = SoftwareCompositor(ImagePainter{}, compositor_options).render(
                     *layers, 120, 80, Color{255, 255, 255, 255});
                 for (const auto& line : cache.prepared_lines) {
                     std::size_t ink = 0;
@@ -624,15 +620,13 @@ void core_native_control_prepared_labels() {
     const auto hash=normalized_font_family_hash("Controls");
     std::array<TextFontFace,2> faces={{{1,0,font.font},{2,7,font.font,hash}}};
     TextSystem system;assert(system.bind(faces.data(),faces.size())==S::Ok);
-    TextMeasureProvider forbidden;
-    forbidden.measure=[](const std::string&,int,int,TextMetrics*,void*)->bool {assert(false);return false;};
     const auto packets=[&](const std::string& markup,const char* extra="",std::size_t max_commands=8192) {
         auto document=HtmlParser().parse("<body>"+markup+"</body>");
         StyleResolver resolver(CssParser().parse(std::string(
             "body {margin:0} input,textarea,select {margin:0;width:100px;height:24px;padding:0;"
             "border:0;font-size:16px;color:#000000;")+extra+"}"));
         LayoutEngineOptions lo;lo.text_system=&system;
-        auto layout=LayoutEngine(resolver,forbidden,lo).layout(*document,160,80);
+        auto layout=LayoutEngine(resolver,lo).layout(*document,160,80);
         LayerTreeBuilderOptions po;po.text_system=&system;po.max_display_commands=max_commands;
         auto layers=LayerTreeBuilder(po).build(*layout);
         auto commands=LayerTreeBuilder(po).flatten(*layers);
@@ -650,7 +644,7 @@ void core_native_control_prepared_labels() {
         return text;
     };
     SoftwareCompositor::Options paint_options;paint_options.text_system=&system;
-    SoftwareCompositor compositor({},paint_options);
+    SoftwareCompositor compositor(ImagePainter{},paint_options);
     const auto replay=[&](const std::vector<DisplayCommand>& commands) {
         LayerNode layer;layer.type=LayerType::Root;layer.bounds={0,0,160,80};layer.display_list=commands;
         return compositor.render(layer,160,80,Color{255,255,255,255});
@@ -700,8 +694,7 @@ void core_native_control_prepared_labels() {
     const auto placeholder=packets("<input placeholder='AB'>");
     assert(placeholder[0].color.r==100 && placeholder[0].color.g==116 && placeholder[0].color.b==139);
     const auto spaced=packets("<input value='AB'>","letter-spacing:2px;");
-    PreparedTextView spaced_view;PreparedTextGlyph spaced_glyph;
-    assert(decode_prepared_text(spaced[0].text,spaced_view) && spaced_view.read(1,spaced_glyph) && spaced_glyph.x==10000);
+    assert(spaced.empty());
     TextSystemLimits limits;limits.max_glyphs=1;assert(system.bind(faces.data(),faces.size(),limits)==S::Ok);
     assert(packets("<select><option>AB</option></select>").empty());
     assert(system.bind(faces.data(),faces.size())==S::Ok);
@@ -712,7 +705,7 @@ void core_native_control_prepared_labels() {
     assert(packets("<select><option>AB</option></select>","",1).empty());
     auto live=HtmlParser().parse("<input value='AB'>");
     StyleResolver resolver(CssParser().parse("input {width:100px;height:24px;font-size:16px;color:#000000}"));
-    LayoutEngineOptions lo;lo.text_system=&system;auto layout=LayoutEngine(resolver,forbidden,lo).layout(*live,160,80);
+    LayoutEngineOptions lo;lo.text_system=&system;auto layout=LayoutEngine(resolver,lo).layout(*live,160,80);
     LayerTreeBuilderOptions po;po.text_system=&system;
     auto before=LayerTreeBuilder(po).build(*layout);const auto retained=LayerTreeBuilder(po).flatten(*before);
     const auto before_pixels=replay(retained);
@@ -730,7 +723,7 @@ void core_native_control_prepared_labels() {
         assert(a.r==b.r && a.g==b.g && a.b==b.b && a.a==b.a);
     }
     auto live_select=HtmlParser().parse("<select><option>AB</option><option>BA</option></select>");
-    auto select_layout=LayoutEngine(resolver,forbidden,lo).layout(*live_select,160,80);
+    auto select_layout=LayoutEngine(resolver,lo).layout(*live_select,160,80);
     auto old_select=LayerTreeBuilder(po).build(*select_layout);
     const auto old_select_commands=LayerTreeBuilder(po).flatten(*old_select);
     const auto old_select_pixels=replay(old_select_commands);
@@ -753,10 +746,6 @@ void core_prepared_text_ellipsis() {
     TextFontFace face{1,0,font.font}; TextSystem system;
     assert(system.bind(&face,1)==S::Ok);
     LayoutEngineOptions options; options.text_system=&system;
-    TextMeasureProvider forbidden;
-    forbidden.measure = [](const std::string&,int,int,TextMetrics*,void*) -> bool {
-        assert(false && "Core ellipsis must not call a host measurer"); return false;
-    };
 
     std::vector<std::unique_ptr<Node>> documents;
     const auto run = [&](std::string source, int width, const char* extra, std::size_t budget=128) {
@@ -764,7 +753,7 @@ void core_prepared_text_ellipsis() {
         StyleResolver resolver(CssParser().parse("body { margin:0 } div { margin:0; color:#000000; font-size:16px; line-height:20px; width:"+
             std::to_string(width)+"px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; "+extra+" }"));
         auto local=options; local.max_prepared_text_glyphs=budget;
-        auto result=LayoutEngine(resolver,forbidden,local).layout(*document,100,40);
+        auto result=LayoutEngine(resolver,local).layout(*document,100,40);
         documents.push_back(std::move(document));
         return result;
     };
@@ -780,7 +769,7 @@ void core_prepared_text_ellipsis() {
     LayerTreeBuilderOptions layer_options; layer_options.text_system=&system;
     auto layers=LayerTreeBuilder(layer_options).build(*truncated);
     SoftwareCompositor::Options paint_options; paint_options.text_system=&system;
-    const auto frame=SoftwareCompositor({},paint_options).render(*layers,100,40,Color{255,255,255,255});
+    const auto frame=SoftwareCompositor(ImagePainter{},paint_options).render(*layers,100,40,Color{255,255,255,255});
     std::size_t ink=0;
     for (const auto& pixel:frame.pixels) ink += pixel.r<255 || pixel.g<255 || pixel.b<255;
     assert(ink>0);
@@ -824,7 +813,7 @@ void core_prepared_text_ellipsis() {
     StyleResolver generated_resolver(CssParser().parse(
         "div {width:24px;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
         "div::before {content:'A'} div::after {content:'B'}"));
-    auto generated=LayoutEngine(generated_resolver,forbidden,options).layout(*generated_document,100,40);
+    auto generated=LayoutEngine(generated_resolver,options).layout(*generated_document,100,40);
     assert_refused(assert_refused,*generated);
     auto generated_layers=LayerTreeBuilder(layer_options).build(*generated);
     const auto generated_commands=LayerTreeBuilder(layer_options).flatten(*generated_layers);
@@ -833,7 +822,7 @@ void core_prepared_text_ellipsis() {
     auto list_document=HtmlParser().parse("<body><ul><li>ABAB</li></ul></body>");
     StyleResolver list_resolver(CssParser().parse(
         "li {width:24px;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;list-style-type:disc}"));
-    auto list=LayoutEngine(list_resolver,forbidden,options).layout(*list_document,100,60);
+    auto list=LayoutEngine(list_resolver,options).layout(*list_document,100,60);
     assert_refused(assert_refused,*list);
     auto list_layers=LayerTreeBuilder(layer_options).build(*list);
     for (const auto& command:LayerTreeBuilder(layer_options).flatten(*list_layers))
@@ -842,13 +831,13 @@ void core_prepared_text_ellipsis() {
     StyleResolver nested_resolver(CssParser().parse(
         "div {width:24px;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
         "span::before {content:'A'} span::after {content:'B'}"));
-    auto nested=LayoutEngine(nested_resolver,forbidden,options).layout(*nested_document,100,40);
+    auto nested=LayoutEngine(nested_resolver,options).layout(*nested_document,100,40);
     assert_refused(assert_refused,*nested);
     auto nested_layers=LayerTreeBuilder(layer_options).build(*nested);
     for (const auto& command:LayerTreeBuilder(layer_options).flatten(*nested_layers))
         assert(command.type()!=DisplayCommandType::Text && command.type()!=DisplayCommandType::PreparedText);
     auto block_document=HtmlParser().parse("<body><div>A<span>B</span><p>AB</p></div></body>");
-    auto block=LayoutEngine(nested_resolver,forbidden,options).layout(*block_document,100,60);
+    auto block=LayoutEngine(nested_resolver,options).layout(*block_document,100,60);
     auto block_layers=LayerTreeBuilder(layer_options).build(*block);
     std::size_t independent_text=0;
     for (const auto& command:LayerTreeBuilder(layer_options).flatten(*block_layers)) {
@@ -866,7 +855,7 @@ void core_prepared_text_ellipsis() {
     StyleResolver live_resolver(CssParser().parse(
         "body { margin:0 } div { margin:0; width:24px; font-size:16px;line-height:20px;"
         "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000000 }"));
-    LayoutEngine live_engine(live_resolver,forbidden,options);
+    LayoutEngine live_engine(live_resolver,options);
     Node* live_owner=nullptr;
     const auto find_live=[&](const auto& self,Node& node)->void {
         if (node.attribute("id")=="live") live_owner=&node;
@@ -914,7 +903,7 @@ void core_prepared_text_applies_bounded_letter_spacing() {
     const auto layout_text = [&](const char* css_text) {
         auto document = HtmlParser().parse("<body><div>AB</div></body>");
         StyleResolver resolver(CssParser().parse(css_text));
-        auto layout = LayoutEngine(resolver, {}, layout_options).layout(*document, 80, 40);
+        auto layout = LayoutEngine(resolver, layout_options).layout(*document, 80, 40);
         documents.push_back(std::move(document));
         return layout;
     };
@@ -971,7 +960,7 @@ void core_prepared_text_applies_bounded_letter_spacing() {
     StyleResolver wrapped_resolver(CssParser().parse(
         "div { margin: 0; width: 18px; font-family: 'Core Test'; font-size: 16px; "
         "line-height: 20px; overflow-wrap: anywhere; letter-spacing: 2px; }"));
-    auto wrapped = LayoutEngine(wrapped_resolver, {}, layout_options).layout(*wrapped_document, 80, 40);
+    auto wrapped = LayoutEngine(wrapped_resolver, layout_options).layout(*wrapped_document, 80, 40);
     const LayoutBox* wrapped_text = find_text_box(*wrapped);
     assert(wrapped_text != nullptr && wrapped_text->text_layout_cache.prepared_text);
     assert((wrapped_text->text_layout_cache.lines == std::vector<std::string>{"A", "B"}));
@@ -995,7 +984,7 @@ void core_prepared_text_applies_bounded_letter_spacing() {
     route_layer_options.text_system = &system;
     const auto capture = [&]() {
         auto render = RenderTreeBuilder(resolver).build(*document);
-        auto layout = LayoutEngine(resolver, {}, route_layout_options).layout(*render, 80, 40);
+        auto layout = LayoutEngine(resolver, route_layout_options).layout(*render, 80, 40);
         auto layers = LayerTreeBuilder(route_layer_options).build(*layout);
         auto commands = LayerTreeBuilder(route_layer_options).flatten(*layers);
         const auto command = std::find_if(commands.begin(), commands.end(), [](const auto& item) {
@@ -1035,13 +1024,11 @@ void core_prepared_text_applies_bounded_letter_spacing() {
     }
     assert(changed);
 }
-void core_layout_refusals_do_not_fall_back_to_host_text() {
+void core_layout_refusals_are_explicit() {
     auto a=asset();
     std::array<TextFontFace,2> faces={{{101,17,a.font,normalized_font_family_hash("Core Test")},
                                       {102,0,a.font,0}}};
     TextSystem system;assert(system.bind(faces.data(),faces.size())==S::Ok);
-    unsigned host_calls=0;
-    TextMeasureProvider host_measure{forbidden_host_measure,&host_calls};
     HtmlParser html;CssParser css;
     const auto run_refusal=[&](const char* markup,const char* rules,LayoutEngineOptions options) {
         VectorDiagnosticSink diagnostics;
@@ -1049,7 +1036,7 @@ void core_layout_refusals_do_not_fall_back_to_host_text() {
         options.diagnostics=&diagnostics;
         auto document=html.parse(markup);
         StyleResolver resolver(css.parse(rules));
-        auto layout=LayoutEngine(resolver,host_measure,options).layout(*document,80,40);
+        auto layout=LayoutEngine(resolver,options).layout(*document,80,40);
         const auto* text=find_text_box(*layout);
         assert(text && text->text_layout_cache.valid && !text->text_layout_cache.prepared_text);
         assert(text->rect.width==0 && text->rect.height==0);
@@ -1066,7 +1053,6 @@ void core_layout_refusals_do_not_fall_back_to_host_text() {
     LayoutEngineOptions glyph_limit;glyph_limit.max_prepared_text_glyphs=1;
     run_refusal("<body><div>AB</div></body>",
                 "div { font-family: 'Core Test'; white-space: nowrap; }",glyph_limit);
-    assert(host_calls==0);
 }
 int inspect(int argc,char** argv) {
     constexpr char probe_text[]="A jg\xe2\x80\xa6\xe4\xb8\xad 10/26 12/29 14/31 16/30";
@@ -1085,7 +1071,7 @@ int inspect(int argc,char** argv) {
             "body { margin:0 } div { margin:0;width:40px;font-size:24px;line-height:30px;"
             "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000000 }"));
         LayoutEngineOptions layout_options;layout_options.text_system=&system;
-        auto layout=LayoutEngine(resolver,{},layout_options).layout(*document,80,40);
+        auto layout=LayoutEngine(resolver, layout_options).layout(*document,80,40);
         const auto* text=find_text_box(*layout);
         if (!text || !text->text_layout_cache.prepared_text) return 15;
         PreparedTextView packet;PreparedTextGlyph marker;
@@ -1094,7 +1080,7 @@ int inspect(int argc,char** argv) {
         LayerTreeBuilderOptions layer_options;layer_options.text_system=&system;
         auto layers=LayerTreeBuilder(layer_options).build(*layout);
         SoftwareCompositor::Options paint_options;paint_options.text_system=&system;
-        const auto frame=SoftwareCompositor({},paint_options).render(*layers,80,40,Color{255,255,255,255});
+        const auto frame=SoftwareCompositor(ImagePainter{},paint_options).render(*layers,80,40,Color{255,255,255,255});
         std::size_t visible=0;
         for (const auto& pixel:frame.pixels) visible+=pixel.r<255 || pixel.g<255 || pixel.b<255;
         if (!visible) return 17;
@@ -1170,6 +1156,6 @@ int main(int argc,char** argv) {
     core_prepared_text_ellipsis();
     core_native_control_prepared_labels();
     unrelated_input_mutation_preserves_static_prepared_text();
-    core_layout_refusals_do_not_fall_back_to_host_text();
+    core_layout_refusals_are_explicit();
     std::cout<<"text system selection/geometry/transaction/budget tests passed\n";
 }

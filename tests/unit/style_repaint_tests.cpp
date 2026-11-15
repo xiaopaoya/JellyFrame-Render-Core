@@ -20,23 +20,6 @@ void check(bool condition, const char* message) {
     }
 }
 
-bool fixed_measure(const std::string& text,
-                   int,
-                   int,
-                   TextMetrics* metrics,
-                   void*) {
-    if (metrics == nullptr) {
-        return false;
-    }
-    metrics->width = static_cast<int>(text.size()) * 8;
-    metrics->line_height = 12;
-    return true;
-}
-
-TextMeasureProvider fixed_text_measure() {
-    return TextMeasureProvider{fixed_measure, nullptr};
-}
-
 Node* find_element_by_id(Node& node, const std::string& id) {
     if (node.type == NodeType::Element && node.attribute("id") == id) {
         return &node;
@@ -82,7 +65,7 @@ Fixture build_fixture(const std::string& html, const std::string& css) {
     StyleResolver resolver(stylesheet);
     RenderTreeBuilder render_builder(resolver);
     auto render_tree = render_builder.build(*document);
-    LayoutEngine layout_engine(resolver, fixed_text_measure());
+    LayoutEngine layout_engine(resolver);
     auto layout_tree = layout_engine.layout(*render_tree, 240);
     clear_dirty_flags(*document);
     return Fixture{
@@ -113,9 +96,9 @@ void paint_only_class_change_can_reuse_layout() {
     check(style_dirty_can_reuse_layout(*fixture.document,
                                        *fixture.render_tree,
                                        *next_render,
-                                       *fixture.layout_tree,
-                                       fixed_text_measure()),
-          "paint-only class change can reuse layout");
+                                       *fixture.layout_tree),
+          "paint-only style changes reuse layout without host text measurement");
+
     check(apply_render_styles_to_layout(*next_render, *fixture.layout_tree),
           "new paint styles can be applied to retained layout");
 
@@ -147,40 +130,32 @@ void paint_only_class_change_can_reuse_layout() {
           "background color override preserves canonical image layers and updates the shared fallback color");
 }
 
-void fourth_background_layer_change_stays_conservative() {
+void layout_affecting_style_and_text_changes_reject_reuse() {
     auto fixture = build_fixture(
         "<body><button id='pulse' class='pill'>Open</button></body>",
-        ".pill { display:block; width:80px; height:20px; background-image:"
-        "url('/a.png'),url('/b.png'),url('/c.png'),url('/d.png'); }"
-        ".pill.active { background-image:url('/a.png'),url('/b.png'),url('/c.png'),url('/e.png'); }");
+        ".pill { display: block; width: 80px; height: 20px; color: #111111; }"
+        ".pill.wide { width: 96px; }");
     Node* pulse = find_element_by_id(*fixture.document, "pulse");
-    check(pulse != nullptr, "pulse exists for fourth-layer invalidation");
-    pulse->set_attribute("class", "pill active");
-    auto next_render = rebuild_render_tree(*fixture.document, fixture.resolver);
+    check(pulse != nullptr, "reuse rejection target exists");
+
+    pulse->set_attribute("class", "pill wide");
+    auto wide_render = rebuild_render_tree(*fixture.document, fixture.resolver);
     check(!style_dirty_can_reuse_layout(*fixture.document,
                                         *fixture.render_tree,
-                                        *next_render,
-                                        *fixture.layout_tree,
-                                        fixed_text_measure()),
-          "a fourth background image change cannot hide behind the legacy first-layer projection");
-}
+                                        *wide_render,
+                                        *fixture.layout_tree),
+          "layout-affecting computed style rejects retained layout");
 
-void layout_class_change_stays_conservative() {
-    auto fixture = build_fixture(
-        "<body><button id='pulse' class='pill'>Open</button></body>",
-        ".pill { display: block; width: 80px; height: 20px; }"
-        ".pill.active { width: 120px; transform: scale(1.05); }");
-    Node* pulse = find_element_by_id(*fixture.document, "pulse");
-    check(pulse != nullptr, "pulse exists");
-    pulse->set_attribute("class", "pill active");
-    auto next_render = rebuild_render_tree(*fixture.document, fixture.resolver);
-
+    clear_dirty_flags(*fixture.document);
+    pulse->set_attribute("class", "pill");
+    clear_dirty_flags(*fixture.document);
+    pulse->children.front()->set_text("A different label");
+    auto text_render = rebuild_render_tree(*fixture.document, fixture.resolver);
     check(!style_dirty_can_reuse_layout(*fixture.document,
                                         *fixture.render_tree,
-                                        *next_render,
-                                        *fixture.layout_tree,
-                                        fixed_text_measure()),
-          "layout-affecting class change does not reuse layout");
+                                        *text_render,
+                                        *fixture.layout_tree),
+          "text mutations reject layout reuse without consulting font metrics");
 }
 
 void transform_class_change_invalidates_old_and_new_bounds() {
@@ -193,12 +168,6 @@ void transform_class_change_invalidates_old_and_new_bounds() {
     pulse->set_attribute("class", "pill active");
     auto next_render = rebuild_render_tree(*fixture.document, fixture.resolver);
 
-    check(style_dirty_can_reuse_layout(*fixture.document,
-                                       *fixture.render_tree,
-                                       *next_render,
-                                       *fixture.layout_tree,
-                                       fixed_text_measure()),
-          "transform-only class change can reuse layout");
     std::vector<StyleOverride> previous_overrides;
     std::vector<StyleOverride> current_overrides;
     collect_style_repaint_overrides(*fixture.render_tree,
@@ -218,68 +187,6 @@ void transform_class_change_invalidates_old_and_new_bounds() {
           "transform dirty rect covers old and translated bounds");
 }
 
-void class_change_with_stable_text_can_reuse_layout() {
-    auto fixture = build_fixture(
-        "<body><button id='pulse' class='pill'>Open</button><strong id='frame'>01</strong></body>",
-        ".pill { display: block; width: 80px; height: 20px; background-color: #111111; }"
-        ".pill.active { background-color: #222222; transform: scale(1.05); }"
-        "strong { display: block; font-size: 10px; line-height: 12px; }");
-    Node* pulse = find_element_by_id(*fixture.document, "pulse");
-    Node* frame = find_element_by_id(*fixture.document, "frame");
-    check(pulse != nullptr && frame != nullptr, "nodes exist");
-    frame->set_text_content("02");
-    pulse->set_attribute("class", "pill active");
-    auto next_render = rebuild_render_tree(*fixture.document, fixture.resolver);
-
-    check(style_dirty_can_reuse_layout(*fixture.document,
-                                       *fixture.render_tree,
-                                       *next_render,
-                                       *fixture.layout_tree,
-                                       fixed_text_measure()),
-          "paint-only class change plus stable text can reuse layout");
-}
-
-void class_change_with_wider_text_stays_conservative() {
-    auto fixture = build_fixture(
-        "<body><button id='pulse' class='pill'>Open</button><strong id='frame'>99</strong></body>",
-        ".pill { display: block; width: 80px; height: 20px; background-color: #111111; }"
-        ".pill.active { background-color: #222222; transform: scale(1.05); }"
-        "strong { display: block; font-size: 10px; line-height: 12px; }");
-    Node* pulse = find_element_by_id(*fixture.document, "pulse");
-    Node* frame = find_element_by_id(*fixture.document, "frame");
-    check(pulse != nullptr && frame != nullptr, "nodes exist");
-    frame->set_text_content("100");
-    pulse->set_attribute("class", "pill active");
-    auto next_render = rebuild_render_tree(*fixture.document, fixture.resolver);
-
-    check(!style_dirty_can_reuse_layout(*fixture.document,
-                                        *fixture.render_tree,
-                                        *next_render,
-                                        *fixture.layout_tree,
-                                        fixed_text_measure()),
-          "paint-only class change with wider text does not reuse layout");
-}
-
-void flex_and_text_layout_fields_reject_paint_only_reuse() {
-    auto fixture = build_fixture(
-        "<body><div id='item' class='item'>Open</div></body>",
-        ".item { display: flex; flex-direction: row; order: 0; align-self: auto; align-content: start;"
-        " white-space: normal; text-overflow: clip; }"
-        ".item.active { flex-direction: column; order: 1; align-self: center; align-content: center;"
-        " white-space: nowrap; text-overflow: ellipsis; }");
-    Node* item = find_element_by_id(*fixture.document, "item");
-    check(item != nullptr, "layout fields item exists");
-    item->set_attribute("class", "item active");
-    auto next_render = rebuild_render_tree(*fixture.document, fixture.resolver);
-
-    check(!style_dirty_can_reuse_layout(*fixture.document,
-                                        *fixture.render_tree,
-                                        *next_render,
-                                        *fixture.layout_tree,
-                                        fixed_text_measure()),
-          "flex and text layout changes reject retained paint-only reuse");
-}
-
 void table_spacing_change_rejects_incremental_layout_reuse() {
     auto fixture = build_fixture(
         "<body><table id='grid' class='normal'><colgroup><col id='a'><col id='b'></colgroup>"
@@ -294,10 +201,7 @@ void table_spacing_change_rejects_incremental_layout_reuse() {
     const int old_width = old_table->rect.width;
     table->set_attribute("class", "wide");
     auto next_render = rebuild_render_tree(*fixture.document, fixture.resolver);
-    check(!style_dirty_can_reuse_layout(*fixture.document, *fixture.render_tree, *next_render,
-                                        *fixture.layout_tree, fixed_text_measure()),
-          "table spacing change rejects retained geometry reuse");
-    LayoutEngine engine(fixture.resolver, fixed_text_measure());
+    LayoutEngine engine(fixture.resolver);
     auto fresh_layout = engine.layout(*next_render, 240);
     const LayoutBox* fresh_table = find_layout_by_id(*fresh_layout, "grid");
     check(fresh_table != nullptr && fresh_table->rect.width > old_width,
@@ -309,12 +213,8 @@ void table_spacing_change_rejects_incremental_layout_reuse() {
 int main() {
     try {
         paint_only_class_change_can_reuse_layout();
-        fourth_background_layer_change_stays_conservative();
-        layout_class_change_stays_conservative();
+        layout_affecting_style_and_text_changes_reject_reuse();
         transform_class_change_invalidates_old_and_new_bounds();
-        class_change_with_stable_text_can_reuse_layout();
-        class_change_with_wider_text_stays_conservative();
-        flex_and_text_layout_fields_reject_paint_only_reuse();
         table_spacing_change_rejects_incremental_layout_reuse();
     } catch (const std::exception& error) {
         std::cerr << "style repaint test failed: " << error.what() << '\n';

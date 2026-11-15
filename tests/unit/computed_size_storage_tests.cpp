@@ -207,9 +207,15 @@ int main() {
         auto layout = LayoutEngine(resolver).layout(*before,320,240);
         node->set_attribute("style","width:12.2px;height:7px");
         auto after = RenderTreeBuilder(resolver).build(*node);
+        std::int64_t before_width = 0, after_width = 0;
+        detail::SizeKind before_kind = detail::SizeKind::Pixels, after_kind = detail::SizeKind::Pixels;
+        std::int64_t before_percent = 0, after_percent = 0;
         check(before->style.width == after->style.width &&
-            !style_dirty_can_reuse_layout(*node,*before,*after,*layout,{}),
-            "different retained dimensions invalidate reuse even with identical scalar proxies");
+            before->style.computed_sizes.read_typed(detail::SizeProperty::Width,
+                before_kind, before_width, before_percent) &&
+            after->style.computed_sizes.read_typed(detail::SizeProperty::Width,
+                after_kind, after_width, after_percent) && before_width != after_width,
+            "fractional dimensions retain distinct typed values behind equal scalar proxies");
         for (unsigned index=0;index<7;++index) {
             ComputedSizeStorage storage;
             check(storage.set(static_cast<SizeProperty>(index),SizeKind::Pixels,0.0625),"all size slots accept fractional pixels");

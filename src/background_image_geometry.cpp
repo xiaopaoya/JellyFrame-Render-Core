@@ -144,8 +144,6 @@ BackgroundBoxAreasStatus resolve_background_box_areas(
     if (!valid_area_kind(request.origin) || !valid_area_kind(request.clip) ||
         !is_valid_corner_radius_encoding(request.border_radius) || !is_valid_corner_radius_encoding(radius_y))
         return BackgroundBoxAreasStatus::InvalidInput;
-    if (!uniform_nonnegative(request.border) || !uniform_nonnegative(request.padding))
-        return BackgroundBoxAreasStatus::InvalidInput;
     if (request.border_radius > kMaxDimension || radius_y > kMaxDimension)
         return BackgroundBoxAreasStatus::DimensionLimit;
     if (request.border_box.width <= 0 || request.border_box.height <= 0)
@@ -156,6 +154,8 @@ BackgroundBoxAreasStatus resolve_background_box_areas(
 
     const auto origin_insets = selected_insets(request.origin, request.border, request.padding);
     const auto clip_insets = selected_insets(request.clip, request.border, request.padding);
+    if (!uniform_nonnegative(origin_insets) || !uniform_nonnegative(clip_insets))
+        return BackgroundBoxAreasStatus::InvalidInput;
     if (origin_insets.top > kMaxDimension || clip_insets.top > kMaxDimension)
         return BackgroundBoxAreasStatus::DimensionLimit;
 

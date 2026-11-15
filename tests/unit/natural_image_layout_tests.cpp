@@ -41,7 +41,7 @@ void dimensions(const char* css, std::int64_t width, std::int64_t height,
     NaturalImageSizingStatistics stats;
     auto dom = HtmlParser{}.parse(std::string("<div><img id='i' src='image' ")+attributes+"></div>");
     StyleResolver styles(CssParser{}.parse(std::string("*{margin:0;padding:0;border:0}img{display:block;")+css+"}"));
-    auto tree = LayoutEngine(styles, {}, options(snapshot, stats)).layout(*dom, 320, 240);
+    auto tree = LayoutEngine(styles, options(snapshot, stats)).layout(*dom, 320, 240);
     const auto& image = find(*tree, "i");
     if (image.content_geometry.width != width || image.content_geometry.height() != height) {
         std::cerr << css << " expected " << width << ',' << height << " got "
@@ -86,7 +86,7 @@ void refusal_and_budgets() {
         ImageIntrinsicSize{static_cast<ImageIntrinsicSizeState>(255),120,60}}) {
         Snapshot snapshot; snapshot.size = invalid;
         NaturalImageSizingStatistics stats;
-        auto with = LayoutEngine(styles, {}, options(snapshot,stats)).layout(*dom,320,240);
+        auto with = LayoutEngine(styles, options(snapshot,stats)).layout(*dom,320,240);
         auto legacy = LayoutEngine(styles).layout(*dom,320,240);
         check(find(*with,"i").rect.width == find(*legacy,"i").rect.width &&
               find(*with,"i").rect.height == find(*legacy,"i").rect.height, "missing/invalid metadata retains legacy fallback");
@@ -96,14 +96,14 @@ void refusal_and_budgets() {
     NaturalImageSizingStatistics stats;
     auto opts = options(snapshot,stats);
     opts.natural_image_sizing.max_queries = 1;
-    auto tree = LayoutEngine(styles,{},opts).layout(*dom,320,240);
+    auto tree = LayoutEngine(styles, opts).layout(*dom,320,240);
     check(find(*tree,"i").rect.width == 120 && find(*tree,"j").rect.width == 320,
         "query exhaustion preserves previously admitted results and falls back deterministically");
     check(stats.queries == 1 && stats.limit_refusals == 1, "query limit reported");
     for (auto budget : {std::size_t{0}, sizeof(detail::NaturalImageSizingFrame::Entry)-1}) {
         snapshot.metadata_calls = 0;
         opts.natural_image_sizing.max_scratch_bytes = budget;
-        tree = LayoutEngine(styles,{},opts).layout(*dom,320,240);
+        tree = LayoutEngine(styles, opts).layout(*dom,320,240);
         check(stats.queries == 0 && snapshot.metadata_calls == 0 && stats.limit_refusals == 2,
             "scratch exhaustion never queries host");
     }
@@ -120,13 +120,13 @@ void refusal_and_budgets() {
     }
     check(stats.cache_hits == 1, "memo hit statistics published");
     opts.natural_image_sizing.max_memo_entries = 0;
-    tree = LayoutEngine(styles,{},opts).layout(*dom,320,240);
+    tree = LayoutEngine(styles, opts).layout(*dom,320,240);
     check(stats.queries == 0 && stats.limit_refusals == 2, "zero memo budget cannot invoke provider");
     opts = options(snapshot,stats);
     opts.natural_image_sizing.provider.intrinsic_size = [](const Node&, void*) -> ImageIntrinsicSize {
         throw std::bad_alloc{};
     };
-    tree = LayoutEngine(styles,{},opts).layout(*dom,320,240);
+    tree = LayoutEngine(styles, opts).layout(*dom,320,240);
     check(stats.queries == 2 && stats.allocation_failures == 2 && stats.unknown == 2,
         "provider allocation failure is retained as unknown fallback");
 }
@@ -162,17 +162,17 @@ void unsupported_contexts() {
         auto dom = HtmlParser{}.parse("<div><img id='i' src='image'></div>");
         StyleResolver styles(CssParser{}.parse(css));
         Snapshot snapshot; NaturalImageSizingStatistics stats;
-        auto tree = LayoutEngine(styles,{},options(snapshot,stats)).layout(*dom,320,240);
+        auto tree = LayoutEngine(styles, options(snapshot,stats)).layout(*dom,320,240);
         check(stats.queries == 0, "unsupported formatting context does not query natural metadata");
     }
     auto dom = HtmlParser{}.parse("<div><img id='i'></div>");
     StyleResolver styles(CssParser{}.parse("img{display:block}"));
     Snapshot snapshot; NaturalImageSizingStatistics stats;
-    auto tree = LayoutEngine(styles,{},options(snapshot,stats)).layout(*dom,320,240);
+    auto tree = LayoutEngine(styles, options(snapshot,stats)).layout(*dom,320,240);
     check(stats.queries == 0, "empty src is not an image metadata source");
     auto picture = HtmlParser{}.parse("<picture><img src='image'></picture>");
     StyleResolver picture_styles(CssParser{}.parse("picture,img{display:block}"));
-    tree = LayoutEngine(picture_styles,{},options(snapshot,stats)).layout(*picture,320,240);
+    tree = LayoutEngine(picture_styles, options(snapshot,stats)).layout(*picture,320,240);
     check(stats.queries == 0, "picture source selection remains outside the first metadata consumer");
 }
 void typed_mixed_geometry() {
@@ -188,7 +188,7 @@ void typed_mixed_geometry() {
     };
     apply(apply,*render);
     Snapshot snapshot; NaturalImageSizingStatistics stats;
-    auto tree = LayoutEngine(styles,{},options(snapshot,stats)).layout(*render,320,240);
+    auto tree = LayoutEngine(styles, options(snapshot,stats)).layout(*render,320,240);
     check(find(*tree,"i").content_geometry.width == 38094 && find(*tree,"i").content_geometry.height() == 19047,
         "natural sizing consumes exact mixed typed geometry without changing parser admission");
     TextSystem text;
@@ -220,7 +220,7 @@ void lifetime_and_fractional_paint() {
     Snapshot old;
     NaturalImageSizingStatistics stats;
     auto opts = options(old,stats);
-    auto tree = LayoutEngine(styles,{},opts).layout(*dom,320,240);
+    auto tree = LayoutEngine(styles, opts).layout(*dom,320,240);
     const auto old_width = find(*tree,"i").content_geometry.width;
     check(old_width == 37594 && find(*tree,"i").content_geometry.height() == 18797,
         "mixed dimension retains Q1000 natural geometry");
@@ -234,10 +234,10 @@ void lifetime_and_fractional_paint() {
     check(old.metadata_calls == 2 && old.resolve_calls == 2, "layout metadata and paint handle resolution are separate once-only stages");
     Snapshot next; next.size = {ImageIntrinsicSizeState::Known,80,80}; next.handle = 74;
     opts = options(next,stats);
-    auto next_tree = LayoutEngine(styles,{},opts).layout(*dom,320,240);
+    auto next_tree = LayoutEngine(styles, opts).layout(*dom,320,240);
     check(find(*next_tree,"i").content_geometry.height() == 37594 &&
         find(*tree,"i").content_geometry.height() == 18797, "old and new layout snapshots coexist");
-    SoftwareCompositor compositor({}, {paint,&old});
+    SoftwareCompositor compositor(ImagePainter{paint,&old});
     for (int replay = 0; replay < 2; ++replay) {
         auto frame = compositor.render(*layers,320,240,Color{255,255,255,255});
         check(frame.pixel(2,20).r == 220 && frame.pixel(2,39).r == 255, "paint follows retained natural-image geometry");
@@ -245,7 +245,7 @@ void lifetime_and_fractional_paint() {
     check(old.metadata_calls == 2 && old.resolve_calls == 2 && old.paint_calls == 4,
         "replay does not query metadata or reload handles");
     MonotonicArena arena(256);
-    auto arena_tree = LayoutEngine(styles,{},opts).layout(*dom,320,240,arena);
+    auto arena_tree = LayoutEngine(styles, opts).layout(*dom,320,240,arena);
     check(find(*arena_tree,"i").content_geometry.width == old_width, "arena layout uses same metadata path");
 }
 }

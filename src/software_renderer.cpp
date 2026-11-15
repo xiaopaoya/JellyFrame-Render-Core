@@ -1,6 +1,5 @@
 ﻿#include "render_core/software_renderer.h"
 
-#include "render_core/text_scan.h"
 #include "render_core/prepared_text.h"
 #include "render_core/modern_paint.h"
 #include "render_core/feature_config.h"
@@ -10,7 +9,6 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <cctype>
 #include <cmath>
 #include <cstdint>
 #ifdef JELLYFRAME_ENABLE_IMAGE_FILE_IO
@@ -872,180 +870,6 @@ void fill_soft_box_shadow(FrameBuffer& target, Rect rect, Rect clip, Color color
 
 #endif
 
-std::array<std::uint8_t, 7> glyph_rows(char raw_ch) {
-    const char ch = static_cast<char>(std::toupper(static_cast<unsigned char>(raw_ch)));
-    switch (ch) {
-    case '0': return {0x0e, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0e};
-    case '1': return {0x04, 0x0c, 0x04, 0x04, 0x04, 0x04, 0x0e};
-    case '2': return {0x0e, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1f};
-    case '3': return {0x1e, 0x01, 0x01, 0x0e, 0x01, 0x01, 0x1e};
-    case '4': return {0x02, 0x06, 0x0a, 0x12, 0x1f, 0x02, 0x02};
-    case '5': return {0x1f, 0x10, 0x10, 0x1e, 0x01, 0x01, 0x1e};
-    case '6': return {0x06, 0x08, 0x10, 0x1e, 0x11, 0x11, 0x0e};
-    case '7': return {0x1f, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08};
-    case '8': return {0x0e, 0x11, 0x11, 0x0e, 0x11, 0x11, 0x0e};
-    case '9': return {0x0e, 0x11, 0x11, 0x0f, 0x01, 0x02, 0x0c};
-    case 'A': return {0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11};
-    case 'B': return {0x1e, 0x11, 0x11, 0x1e, 0x11, 0x11, 0x1e};
-    case 'C': return {0x0f, 0x10, 0x10, 0x10, 0x10, 0x10, 0x0f};
-    case 'D': return {0x1e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1e};
-    case 'E': return {0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x1f};
-    case 'F': return {0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x10};
-    case 'G': return {0x0f, 0x10, 0x10, 0x13, 0x11, 0x11, 0x0f};
-    case 'H': return {0x11, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11};
-    case 'I': return {0x0e, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0e};
-    case 'J': return {0x07, 0x02, 0x02, 0x02, 0x12, 0x12, 0x0c};
-    case 'K': return {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11};
-    case 'L': return {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1f};
-    case 'M': return {0x11, 0x1b, 0x15, 0x15, 0x11, 0x11, 0x11};
-    case 'N': return {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11};
-    case 'O': return {0x0e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e};
-    case 'P': return {0x1e, 0x11, 0x11, 0x1e, 0x10, 0x10, 0x10};
-    case 'Q': return {0x0e, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0d};
-    case 'R': return {0x1e, 0x11, 0x11, 0x1e, 0x14, 0x12, 0x11};
-    case 'S': return {0x0f, 0x10, 0x10, 0x0e, 0x01, 0x01, 0x1e};
-    case 'T': return {0x1f, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04};
-    case 'U': return {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e};
-    case 'V': return {0x11, 0x11, 0x11, 0x11, 0x0a, 0x0a, 0x04};
-    case 'W': return {0x11, 0x11, 0x11, 0x15, 0x15, 0x1b, 0x11};
-    case 'X': return {0x11, 0x11, 0x0a, 0x04, 0x0a, 0x11, 0x11};
-    case 'Y': return {0x11, 0x11, 0x0a, 0x04, 0x04, 0x04, 0x04};
-    case 'Z': return {0x1f, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1f};
-    case '.': return {0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x0c};
-    case '-': return {0x00, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00};
-    case '_': return {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f};
-    case ':': return {0x00, 0x0c, 0x0c, 0x00, 0x0c, 0x0c, 0x00};
-    case '/': return {0x01, 0x01, 0x02, 0x04, 0x08, 0x10, 0x10};
-    case ' ': return {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-    default: return {0x1f, 0x11, 0x01, 0x02, 0x04, 0x00, 0x04};
-    }
-}
-
-char fallback_glyph_for_codepoint(const std::string& text, std::size_t& index) {
-    const std::uint32_t codepoint = consume_utf8_codepoint(text, index);
-    return codepoint < 0x80U ? static_cast<char>(codepoint) : '?';
-}
-
-void paint_fallback_cell(FrameBuffer& target, int x, int y, int size, Color color) {
-    const Rect visible = intersect_rect(Rect{x, y, size, size}, target_rect(target));
-    if (empty_rect(visible)) {
-        return;
-    }
-    const int x_end = safe_edge(visible.x, visible.width);
-    const int y_end = safe_edge(visible.y, visible.height);
-    if (color.a == 255) {
-        for (int row_index = visible.y; row_index < y_end; ++row_index) {
-            Color* row = target.pixels.data() + static_cast<std::size_t>(row_index) *
-                static_cast<std::size_t>(target.width) + static_cast<std::size_t>(visible.x);
-            std::fill(row, row + visible.width, color);
-        }
-        return;
-    }
-    for (int row_index = visible.y; row_index < y_end; ++row_index) {
-        Color* row = target.pixels.data() + static_cast<std::size_t>(row_index) *
-            static_cast<std::size_t>(target.width) + static_cast<std::size_t>(visible.x);
-        for (int column = visible.x; column < x_end; ++column) {
-            blend_color(row[column - visible.x], color);
-        }
-    }
-}
-
-void draw_text(FrameBuffer& target,
-               Rect rect,
-               Color color,
-               const std::string& text,
-               int font_size,
-               int font_weight,
-               std::uint32_t font_family_hash,
-               TextCommandAlign align,
-               bool single_line,
-               TextPainter text_painter,
-               DiagnosticSink* diagnostics) {
-    (void)single_line;
-    if (color.a == 0 || empty_rect(rect)) {
-        return;
-    }
-    if (font_family_hash != 0 && text_painter.paint_family != nullptr &&
-        text_painter.paint_family(target,
-                                  rect,
-                                  color,
-                                  text,
-                                  font_size,
-                                  font_weight,
-                                  font_family_hash,
-                                  align,
-                                  single_line,
-                                  text_painter.context)) {
-        return;
-    }
-    if (text_painter.paint != nullptr &&
-        text_painter.paint(target, rect, color, text, font_size, font_weight, align, single_line, text_painter.context)) {
-        return;
-    }
-    const bool has_non_ascii = std::any_of(text.begin(), text.end(), [](char ch) {
-        return static_cast<unsigned char>(ch) >= 0x80U;
-    });
-    if (text_painter.paint != nullptr) {
-        report_diagnostic(diagnostics,
-                          DiagnosticStage::Paint,
-                          DiagnosticSeverity::Warning,
-                          "paint-text-backend-failed",
-                          "Text painter rejected a text command; built-in bitmap fallback was used",
-                          text);
-    }
-    if (has_non_ascii) {
-        report_diagnostic(diagnostics,
-                          DiagnosticStage::Paint,
-                          DiagnosticSeverity::Warning,
-                          "paint-non-ascii-fallback",
-                          "Built-in text fallback cannot draw real non-ASCII glyphs",
-                          text);
-    }
-    const int scale = font_size >= 22 ? 2 : 1;
-    const int glyph_width = 5 * scale;
-    const int advance = 6 * scale;
-    const int glyph_height = 7 * scale;
-    const int stroke_passes = font_weight >= 600 ? 2 : 1;
-    std::size_t glyph_count = 0;
-    for (std::size_t index = 0; index < text.size();) {
-        fallback_glyph_for_codepoint(text, index);
-        ++glyph_count;
-    }
-    const int text_width = std::min(rect.width, clamp_int64_to_int(
-        std::min<std::int64_t>(std::numeric_limits<int>::max(),
-                               static_cast<std::int64_t>(glyph_count) * advance)));
-    int cursor_x = rect.x;
-    if (align == TextCommandAlign::Center) {
-        cursor_x = safe_add(cursor_x, std::max(0, (rect.width - text_width) / 2));
-    } else if (align == TextCommandAlign::End) {
-        cursor_x = safe_add(cursor_x, std::max(0, rect.width - text_width));
-    }
-    const int baseline_y = safe_add(rect.y, std::max(0, (rect.height - glyph_height) / 2));
-    for (std::size_t index = 0; index < text.size();) {
-        if (static_cast<std::int64_t>(cursor_x) + glyph_width >
-            static_cast<std::int64_t>(safe_edge(rect.x, rect.width))) {
-            break;
-        }
-        const char ch = fallback_glyph_for_codepoint(text, index);
-        const std::array<std::uint8_t, 7> rows = glyph_rows(ch);
-        for (int row = 0; row < 7; ++row) {
-            for (int col = 0; col < 5; ++col) {
-                if ((rows[static_cast<std::size_t>(row)] & (1U << (4 - col))) == 0U) {
-                    continue;
-                }
-                for (int pass = 0; pass < stroke_passes; ++pass) {
-                    paint_fallback_cell(target,
-                                        safe_add(safe_add(cursor_x, col * scale), pass),
-                                        safe_add(baseline_y, row * scale),
-                                        scale,
-                                        color);
-                }
-            }
-        }
-        cursor_x = safe_add(cursor_x, advance);
-    }
-}
-
 void composite_source_row(Color* destination,
                           const Color* source,
                           std::size_t count,
@@ -1485,16 +1309,14 @@ const Color& FrameBuffer::pixel(int x, int y) const {
     return pixels[index];
 }
 
-SoftwareRasterizer::SoftwareRasterizer(TextPainter text_painter,
-                                       DiagnosticSink* diagnostics,
+SoftwareRasterizer::SoftwareRasterizer(DiagnosticSink* diagnostics,
                                        SoftwareRasterizerOptions options)
-    : SoftwareRasterizer(text_painter, {}, diagnostics, options) {}
+    : SoftwareRasterizer(ImagePainter{}, diagnostics, options) {}
 
-SoftwareRasterizer::SoftwareRasterizer(TextPainter text_painter,
-                                       ImagePainter image_painter,
+SoftwareRasterizer::SoftwareRasterizer(ImagePainter image_painter,
                                        DiagnosticSink* diagnostics,
                                        SoftwareRasterizerOptions options)
-    : text_painter_(text_painter), image_painter_(image_painter), diagnostics_(diagnostics), options_(options) {}
+    : image_painter_(image_painter), diagnostics_(diagnostics), options_(options) {}
 
 bool SoftwareRasterizer::prepare_temporary_surface(FrameBuffer& surface, int width, int height) const {
     std::size_t pixels = 0;
@@ -1537,6 +1359,12 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                                    int offset_x,
                                    int offset_y,
                                    SoftwareRasterizerScratch* scratch) const {
+    if (command.type() == DisplayCommandType::Text) {
+        report_diagnostic(diagnostics_, DiagnosticStage::Paint, DiagnosticSeverity::Warning,
+                          "paint-legacy-text-refused",
+                          "Legacy text commands require Core-prepared text");
+        return;
+    }
     Rect rect = command.rect;
     rect.x = safe_add(rect.x, offset_x);
     rect.y = safe_add(rect.y, offset_y);
@@ -1740,47 +1568,8 @@ void SoftwareRasterizer::rasterize(const DisplayCommand& command,
         }
         break;
     }
-    case DisplayCommandType::Text: {
-        if (rect.width <= 0 || rect.height <= 0) {
-            break;
-        }
-        if (contains_rect(clip, rect)) {
-            draw_text(target,
-                      rect,
-                      effective_color,
-                      command.text,
-                      command.text_paint().font_size,
-                      command.text_paint().font_weight,
-                      command.text_paint().font_family_hash,
-                      command.text_paint().text_align,
-                      command.text_paint().text_single_line,
-                      text_painter_,
-                      diagnostics_);
-            break;
-        }
-        const Rect visible = intersect_rect(rect, clip);
-        if (empty_rect(visible)) {
-            break;
-        }
-        FrameBuffer local_buffer;
-        FrameBuffer& text_buffer = scratch != nullptr ? scratch->temporary_surface : local_buffer;
-        if (!prepare_temporary_surface(text_buffer, visible.width, visible.height)) {
-            break;
-        }
-        draw_text(text_buffer,
-                  Rect{rect.x - visible.x, rect.y - visible.y, rect.width, rect.height},
-                  effective_color,
-                  command.text,
-                  command.text_paint().font_size,
-                  command.text_paint().font_weight,
-                  command.text_paint().font_family_hash,
-                  command.text_paint().text_align,
-                  command.text_paint().text_single_line,
-                  text_painter_,
-                  diagnostics_);
-        composite_buffer_clipped(target, text_buffer, visible.x, visible.y, clip, 1.0F);
+    case DisplayCommandType::Text:
         break;
-    }
     case DisplayCommandType::Image: {
         Rect image_clip = clip;
         const bool has_background_clip = command.image_paint().background_paint_clip.dx != 0 ||
@@ -2219,20 +2008,13 @@ void SoftwareRasterizer::rasterize_clipped(const DisplayCommand* commands,
 }
 
 SoftwareCompositor::SoftwareCompositor()
-    : SoftwareCompositor(TextPainter{}) {}
+    : SoftwareCompositor(ImagePainter{}, Options{}) {}
 
-SoftwareCompositor::SoftwareCompositor(TextPainter text_painter)
-    : SoftwareCompositor(text_painter, Options{}) {}
+SoftwareCompositor::SoftwareCompositor(ImagePainter image_painter)
+    : SoftwareCompositor(image_painter, Options{}) {}
 
-SoftwareCompositor::SoftwareCompositor(TextPainter text_painter, Options options)
-    : SoftwareCompositor(text_painter, {}, options) {}
-
-SoftwareCompositor::SoftwareCompositor(TextPainter text_painter, ImagePainter image_painter)
-    : SoftwareCompositor(text_painter, image_painter, Options{}) {}
-
-SoftwareCompositor::SoftwareCompositor(TextPainter text_painter, ImagePainter image_painter, Options options)
-    : rasterizer_(text_painter,
-                  image_painter,
+SoftwareCompositor::SoftwareCompositor(ImagePainter image_painter, Options options)
+    : rasterizer_(image_painter,
                   options.diagnostics,
                   SoftwareRasterizerOptions{options.max_offscreen_pixels,
                                             nullptr,

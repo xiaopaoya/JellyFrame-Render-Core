@@ -5,6 +5,7 @@
 #include "render_core/html_parser.h"
 #include "render_core/layer_tree.h"
 #include "render_core/layout.h"
+#include "core_text_test_fixture.h"
 #include "render_core/modern_paint.h"
 #include "render_core/raster_primitives.h"
 #include "render_core/render_tree.h"
@@ -153,66 +154,6 @@ void reference_composite_rounded_clip_surface(FrameBuffer& target,
     }
 }
 
-bool rejecting_text_painter(FrameBuffer&,
-                            Rect,
-                            Color,
-                            const std::string&,
-                            int,
-                            int,
-                            TextCommandAlign,
-                            bool,
-                            void*) {
-    return false;
-}
-
-bool center_pixel_text_painter(FrameBuffer& target,
-                               Rect rect,
-                               Color color,
-                               const std::string&,
-                               int,
-                               int,
-                               TextCommandAlign,
-                               bool,
-                               void*) {
-    const int x = rect.x + rect.width / 2;
-    const int y = rect.y + rect.height / 2;
-    if (target.contains(x, y)) {
-        target.pixel(x, y) = color;
-    }
-    return true;
-}
-
-struct TextPaintCounter {
-    int calls = 0;
-};
-
-struct OpacityTextProbe {
-    std::string text;
-    Color color;
-    int calls = 0;
-};
-
-bool opacity_text_probe_painter(FrameBuffer& target,
-                               Rect rect,
-                               Color color,
-                               const std::string& text,
-                               int,
-                               int,
-                               TextCommandAlign,
-                               bool,
-                               void* raw_context) {
-    auto* probe = static_cast<OpacityTextProbe*>(raw_context);
-    if (probe != nullptr) {
-        probe->text = text;
-        probe->color = color;
-        ++probe->calls;
-    }
-    if (target.contains(rect.x, rect.y)) {
-        target.pixel(rect.x, rect.y) = color;
-    }
-    return true;
-}
-
 struct ReplayTimingClock {
     const std::uint64_t* samples = nullptr;
     std::size_t sample_count = 0;
@@ -238,25 +179,6 @@ std::uint64_t replay_timing_clock(void* raw_context) {
     const std::size_t index = std::min(clock->calls, clock->sample_count - 1);
     ++clock->calls;
     return clock->samples[index];
-}
-
-bool counting_text_painter(FrameBuffer& target,
-                           Rect rect,
-                           Color color,
-                           const std::string&,
-                           int,
-                           int,
-                           TextCommandAlign,
-                           bool,
-                           void* context) {
-    auto* counter = static_cast<TextPaintCounter*>(context);
-    if (counter != nullptr) {
-        ++counter->calls;
-    }
-    if (target.contains(rect.x, rect.y)) {
-        target.pixel(rect.x, rect.y) = color;
-    }
-    return true;
 }
 
 struct ImagePaintProbe {
@@ -323,7 +245,7 @@ void rounded_image_clip_preserves_corner_underpaint() {
     FrameBuffer frame_buffer(16, 16, Color{255, 255, 255, 255});
     ImagePaintProbe probe;
     probe.expected_handle = 17;
-    SoftwareRasterizer rasterizer({}, ImagePainter{probe_image_painter, &probe});
+    SoftwareRasterizer rasterizer(ImagePainter{probe_image_painter, &probe});
     DisplayCommand command;
     command.set_type(DisplayCommandType::Image);
     command.rect = Rect{2, 2, 10, 10};
@@ -586,7 +508,7 @@ void rasterizer_refuses_elliptical_box_shadow_commands() {
     command.basic_paint().gradient_stop_percent = 3;
     VectorDiagnosticSink diagnostics;
     FrameBuffer refused(20, 20, background);
-    SoftwareRasterizer({}, &diagnostics).rasterize(command, refused, {0, 0, 20, 20});
+    SoftwareRasterizer(&diagnostics).rasterize(command, refused, {0, 0, 20, 20});
     check(diagnostics.size() == 1 &&
           has_diagnostic_code(diagnostics, "paint-elliptical-box-shadow-unsupported"),
           "raw elliptical shadow command reports its unsupported paint boundary");
@@ -601,9 +523,9 @@ void rasterizer_refuses_elliptical_box_shadow_commands() {
     diagnostics.clear();
     FrameBuffer inherited(20, 20, background), explicit_circle(20, 20, background);
     command.basic_paint().border_radius_y = -1;
-    SoftwareRasterizer({}, &diagnostics).rasterize(command, inherited, {0, 0, 20, 20});
+    SoftwareRasterizer(&diagnostics).rasterize(command, inherited, {0, 0, 20, 20});
     command.basic_paint().border_radius_y = 7;
-    SoftwareRasterizer({}, &diagnostics).rasterize(command, explicit_circle, {0, 0, 20, 20});
+    SoftwareRasterizer(&diagnostics).rasterize(command, explicit_circle, {0, 0, 20, 20});
     check(diagnostics.empty(), "inherited and explicit circular shadows remain admitted");
     for (std::size_t i = 0; i < inherited.pixels.size(); ++i) {
         const Color a = inherited.pixels[i], b = explicit_circle.pixels[i];
@@ -788,7 +710,7 @@ void clipping_limits_rasterization() {
 void image_command_uses_injected_painter() {
     FrameBuffer frame_buffer(8, 8, Color{255, 255, 255, 255});
     ImagePaintProbe probe{42, ObjectFit::Fill, {}, ImageRendering::Auto, 0};
-    SoftwareRasterizer rasterizer({}, ImagePainter{probe_image_painter, &probe});
+    SoftwareRasterizer rasterizer(ImagePainter{probe_image_painter, &probe});
     DisplayCommand command;
     command.set_type(DisplayCommandType::Image);
     command.rect = Rect{1, 2, 3, 2};
@@ -845,13 +767,17 @@ void compositor_renders_pipeline_non_empty() {
 }
 
 void wrapped_text_layout_keeps_descent_padding() {
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
     HtmlParser html_parser;
     CssParser css_parser;
     auto document = html_parser.parse("<body><p>Long wearable interface text wraps onto several compact display lines.</p></body>");
     StyleResolver resolver(css_parser.parse("p { font-size: 18px; width: 90px; margin: 0; }"));
     RenderTreeBuilder render_tree_builder(resolver);
     auto render_tree = render_tree_builder.build(*document);
-    LayoutEngine layout_engine(resolver);
+    LayoutEngineOptions options;
+    options.text_system = &fonts.system();
+    LayoutEngine layout_engine(resolver, options);
     auto layout_tree = layout_engine.layout(*render_tree, 120);
 
     const LayoutBox* text_box = find_first_text_box(*layout_tree);
@@ -859,33 +785,26 @@ void wrapped_text_layout_keeps_descent_padding() {
     check(text_box->rect.height > 44, "wrapped text keeps descent padding");
 }
 
-bool fixed_text_measure(const std::string&,
-                        int,
-                        int font_weight,
-                        TextMetrics* metrics,
-                        void*) {
-    if (metrics == nullptr || font_weight < 600) {
-        return false;
-    }
-    metrics->width = 32;
-    metrics->line_height = 21;
-    return true;
-}
-
-void layout_uses_injected_text_measurement() {
+void layout_uses_core_text_system() {
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
     HtmlParser html_parser;
     CssParser css_parser;
     auto document = html_parser.parse("<body><p><strong>Measured</strong></p></body>");
     StyleResolver resolver(css_parser.parse("p { width: 120px; margin: 0; } strong { font-weight: 700; }"));
     RenderTreeBuilder render_tree_builder(resolver);
     auto render_tree = render_tree_builder.build(*document);
-    LayoutEngine layout_engine(resolver, TextMeasureProvider{fixed_text_measure, nullptr});
+    LayoutEngineOptions options;
+    options.text_system = &fonts.system();
+    LayoutEngine layout_engine(resolver, options);
     auto layout_tree = layout_engine.layout(*render_tree, 160);
 
     const LayoutBox* text_box = find_first_text_box(*layout_tree);
     check(text_box != nullptr, "measured text box exists");
-    check(text_box->rect.width == 32, "layout uses injected text width without extra pad");
-    check(text_box->rect.height == 21, "layout uses injected line height");
+    check(text_box->rect.width > 0, "Core text system supplies a measurable text width");
+    check(text_box->text_layout_cache.prepared_text &&
+          text_box->text_layout_cache.text_system_generation == fonts.system().generation(),
+          "layout caches text prepared by the current Core font generation");
 }
 
 void dirty_render_only_updates_requested_clip() {
@@ -984,9 +903,9 @@ void compositor_clips_children_to_rounded_overflow() {
           "rounded overflow clip keeps child content in the center");
 }
 
-void built_in_text_fallback_preserves_clipped_pixel_output() {
+void legacy_text_command_is_refused_without_writing_pixels() {
     VectorDiagnosticSink diagnostics;
-    SoftwareRasterizer rasterizer(TextPainter{rejecting_text_painter, nullptr}, &diagnostics);
+    SoftwareRasterizer rasterizer(&diagnostics);
     DisplayCommand command;
     command.set_type(DisplayCommandType::Text);
     command.rect = Rect{2, 2, 5, 7};
@@ -999,26 +918,12 @@ void built_in_text_fallback_preserves_clipped_pixel_output() {
     FrameBuffer frame(8, 8, background);
     rasterizer.rasterize(command, frame, Rect{0, 0, 8, 8});
 
-    const std::array<std::uint8_t, 7> rows = {
-        0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11,
-    };
-    for (int y = 0; y < frame.height; ++y) {
-        for (int x = 0; x < frame.width; ++x) {
-            Color expected = background;
-            const int row = y - command.rect.y;
-            const int col = x - command.rect.x;
-            if (row >= 0 && row < 7 && col >= 0 && col < 5 &&
-                (rows[static_cast<std::size_t>(row)] & (1U << (4 - col))) != 0U) {
-                expected = command.color;
-            }
-            const Color actual = frame.pixel(x, y);
-            check(actual.r == expected.r && actual.g == expected.g && actual.b == expected.b &&
-                      actual.a == expected.a,
-                  "built-in text fallback preserves clipped glyph pixels exactly");
-        }
-    }
-    check(has_diagnostic_code(diagnostics, "paint-text-backend-failed"),
-          "pixel-output fallback regression uses the built-in path");
+    check(std::all_of(frame.pixels.begin(), frame.pixels.end(), [&](const Color& pixel) {
+        return pixel.r == background.r && pixel.g == background.g &&
+            pixel.b == background.b && pixel.a == background.a;
+    }), "legacy Text command leaves the target unchanged");
+    check(has_diagnostic_code(diagnostics, "paint-legacy-text-refused"),
+          "legacy Text command reports explicit refusal");
 }
 
 void rasterizer_applies_value_rounded_clip_chain() {
@@ -1529,27 +1434,26 @@ void dirty_render_skips_contained_dirty_rects() {
     LayerNode root;
     root.type = LayerType::Root;
     root.bounds = Rect{0, 0, 80, 40};
-    DisplayCommand command;
-    command.set_type(DisplayCommandType::Text);
-    command.rect = Rect{10, 10, 20, 10};
-    command.color = Color{0, 0, 0, 255};
-    command.text = "once";
-    command.text_paint().font_size = 10;
-    command.text_paint().text_single_line = true;
-    root.display_list.push_back(std::move(command));
+    DisplayCommand image;
+    image.set_type(DisplayCommandType::Image);
+    image.rect = Rect{10, 10, 55, 20};
+    image.image_paint().image_handle = 41;
+    root.display_list.push_back(std::move(image));
+    root.display_list.push_back(black_fill(Rect{10, 10, 20, 10}));
 
     FrameBuffer frame_buffer(80, 40, Color{255, 255, 255, 255});
-    TextPaintCounter counter;
-    SoftwareCompositor compositor(TextPainter{counting_text_painter, &counter});
     const Rect dirty_rects[] = {
         Rect{0, 0, 50, 30},
         Rect{12, 12, 4, 4},
-        Rect{45, 0, 20, 30},
+        Rect{55, 0, 20, 30},
         Rect{0, 0, 50, 30},
     };
-    compositor.render_into(root, frame_buffer, Color{255, 255, 255, 255}, dirty_rects, 3);
+    ImagePaintProbe probe;
+    probe.expected_handle = 41;
+    SoftwareCompositor compositor(ImagePainter{probe_image_painter, &probe});
+    compositor.render_into(root, frame_buffer, Color{255, 255, 255, 255}, dirty_rects, 4);
 
-    check(counter.calls == 1, "contained, duplicate, and overlapping dirty rects are rendered once");
+    check(probe.calls == 2, "contained and duplicate dirty rects do not repeat image painting");
     check(frame_buffer.pixel(10, 10).r == 0, "normalized dirty rect still paints content");
 }
 
@@ -1580,22 +1484,22 @@ void compositor_keeps_non_fill_prefix_side_effects() {
     LayerNode root;
     root.type = LayerType::Root;
     root.bounds = Rect{0, 0, 8, 8};
-    DisplayCommand text;
-    text.set_type(DisplayCommandType::Text);
-    text.rect = Rect{1, 1, 4, 4};
-    text.color = Color{0, 0, 0, 255};
-    text.text = "x";
-    root.display_list.push_back(std::move(text));
+    DisplayCommand image;
+    image.set_type(DisplayCommandType::Image);
+    image.rect = Rect{1, 1, 4, 4};
+    image.image_paint().image_handle = 41;
+    root.display_list.push_back(std::move(image));
     DisplayCommand cover = black_fill(Rect{0, 0, 8, 8});
     cover.color = Color{255, 255, 255, 255};
     root.display_list.push_back(std::move(cover));
 
-    TextPaintCounter counter;
+    ImagePaintProbe probe;
+    probe.expected_handle = 41;
     FrameBuffer frame_buffer(8, 8, Color{0, 0, 0, 255});
-    SoftwareCompositor compositor(TextPainter{counting_text_painter, &counter});
+    SoftwareCompositor compositor(ImagePainter{probe_image_painter, &probe});
     compositor.render_into(root, frame_buffer, Color{255, 0, 255, 255});
 
-    check(counter.calls == 1, "non-fill prefix remains rasterized before opaque cover");
+    check(probe.calls == 1, "non-fill prefix remains rasterized before opaque cover");
     check(frame_buffer.pixel(2, 2).r == 255, "later opaque fill still determines final pixels");
 }
 
@@ -1678,8 +1582,7 @@ void compositor_applies_opacity_to_radial_gradient_pixels() {
           "radial gradient center preserves opacity on the second channel");
 }
 
-void opacity_fallback_preserves_text_without_copying_command() {
-    OpacityTextProbe probe;
+void compositor_opacity_path_refuses_legacy_text_without_writing() {
     SoftwareCompositor::Options options;
     options.max_offscreen_pixels = 1;
     LayerNode root;
@@ -1698,14 +1601,14 @@ void opacity_fallback_preserves_text_without_copying_command() {
     child->display_list.push_back(text);
     root.children.push_back(std::move(child));
 
-    const FrameBuffer output = SoftwareCompositor(
-        TextPainter{opacity_text_probe_painter, &probe}, options).render(
-            root, 2, 1, Color{255, 255, 255, 255});
-    check(probe.calls == 1 && probe.text == text.text,
-          "opacity fallback passes the original text without changing command fields");
-    check(probe.color.a == 127, "opacity fallback passes effective text alpha");
-    check(output.pixel(0, 0).r == 20 && output.pixel(0, 0).a == 127,
-          "opacity fallback paints the effective text color");
+    VectorDiagnosticSink diagnostics;
+    options.diagnostics = &diagnostics;
+    const FrameBuffer output = SoftwareCompositor({}, options).render(
+        root, 2, 1, Color{255, 255, 255, 255});
+    check(output.pixel(0, 0).r == 255 && output.pixel(0, 0).a == 255,
+          "opacity path leaves pixels unchanged for refused legacy text");
+    check(has_diagnostic_code(diagnostics, "paint-legacy-text-refused"),
+          "opacity path preserves explicit legacy-text refusal");
 }
 
 void compositor_degrades_oversized_offscreen_layers_without_crashing() {
@@ -1918,7 +1821,7 @@ void compositor_rejects_oversized_framebuffer_before_allocation() {
     check(has_diagnostic_code(diagnostics, "paint-framebuffer-budget"), "framebuffer rejection is reported");
 }
 
-void rasterizer_reports_text_fallback() {
+void rasterizer_rejects_legacy_text_commands() {
     VectorDiagnosticSink diagnostics;
     SoftwareRasterizer rasterizer({}, &diagnostics);
     DisplayCommand command;
@@ -1932,19 +1835,24 @@ void rasterizer_reports_text_fallback() {
 
     rasterizer.rasterize(command, frame, Rect{0, 0, 80, 20});
 
-    check(has_diagnostic_code(diagnostics, "paint-non-ascii-fallback"), "non-ascii fallback is reported");
+    check(has_diagnostic_code(diagnostics, "paint-legacy-text-refused"),
+          "non-ascii legacy text is explicitly refused");
+    check(std::all_of(frame.pixels.begin(), frame.pixels.end(), [](const Color& pixel) {
+        return pixel.r == 255 && pixel.g == 255 && pixel.b == 255 && pixel.a == 255;
+    }), "non-ascii legacy text does not alter the framebuffer");
 
-    VectorDiagnosticSink backend_diagnostics;
-    SoftwareRasterizer rejecting_rasterizer(TextPainter{rejecting_text_painter, nullptr}, &backend_diagnostics);
+    VectorDiagnosticSink ascii_diagnostics;
+    SoftwareRasterizer rejecting_rasterizer(&ascii_diagnostics);
     command.text = "ASCII";
     rejecting_rasterizer.rasterize(command, frame, Rect{0, 0, 80, 20});
-    check(has_diagnostic_code(backend_diagnostics, "paint-text-backend-failed"),
-          "text backend rejection is reported");
+    check(has_diagnostic_code(ascii_diagnostics, "paint-legacy-text-refused"),
+          "ASCII legacy text is explicitly refused");
 }
 
 void dirty_text_clip_preserves_original_text_geometry() {
     FrameBuffer frame_buffer(40, 10, Color{255, 255, 255, 255});
-    SoftwareRasterizer rasterizer(TextPainter{center_pixel_text_painter, nullptr});
+    VectorDiagnosticSink diagnostics;
+    SoftwareRasterizer rasterizer(&diagnostics);
     DisplayCommand command;
     command.set_type(DisplayCommandType::Text);
     command.rect = Rect{0, 0, 40, 10};
@@ -1955,13 +1863,16 @@ void dirty_text_clip_preserves_original_text_geometry() {
 
     rasterizer.rasterize(command, frame_buffer, Rect{20, 0, 5, 10});
 
-    check(frame_buffer.pixel(20, 5).r == 0, "partial text clip keeps original command geometry");
-    check(frame_buffer.pixel(22, 5).r == 255, "partial text clip does not recenter text inside dirty rect");
+    check(frame_buffer.pixel(20, 5).r == 255 && frame_buffer.pixel(22, 5).r == 255,
+          "partial clip leaves the target unchanged for legacy text");
+    check(has_diagnostic_code(diagnostics, "paint-legacy-text-refused"),
+          "partial clip still reports legacy-text refusal");
 }
 
 void rasterizer_scratch_reuses_clipped_command_storage() {
     FrameBuffer frame_buffer(40, 10, Color{255, 255, 255, 255});
-    SoftwareRasterizer rasterizer(TextPainter{center_pixel_text_painter, nullptr});
+    VectorDiagnosticSink diagnostics;
+    SoftwareRasterizer rasterizer(&diagnostics);
     SoftwareRasterizerScratch scratch;
     DisplayCommand command;
     command.set_type(DisplayCommandType::Text);
@@ -1973,24 +1884,16 @@ void rasterizer_scratch_reuses_clipped_command_storage() {
     const Rect dirty{20, 0, 5, 10};
 
     rasterizer.rasterize(command, frame_buffer, dirty, 0, 0, &scratch);
-    const std::size_t capacity = scratch.temporary_surface.pixels.capacity();
-    check(capacity >= 50, "scratch retains clipped text surface storage");
-
-    rasterizer.rasterize(command, frame_buffer, dirty, 0, 0, &scratch);
-    check(scratch.temporary_surface.pixels.capacity() == capacity,
-          "repeated clipped text paint reuses scratch storage");
-    check(frame_buffer.pixel(20, 5).r == 0, "scratch preserves clipped text output");
-
-    scratch.release();
-    check(scratch.temporary_surface.pixels.empty() && scratch.temporary_surface.pixels.capacity() == 0,
-          "scratch release returns temporary surface storage");
+    check(scratch.temporary_surface.pixels.empty(), "refused text does not allocate clipped scratch storage");
+    check(frame_buffer.pixel(20, 5).r == 255, "refused clipped text leaves the target unchanged");
+    check(has_diagnostic_code(diagnostics, "paint-legacy-text-refused"),
+          "clipped text reports legacy-text refusal");
 }
 
 void rasterizer_bounds_clipped_temporary_surfaces() {
     FrameBuffer frame_buffer(40, 10, Color{255, 255, 255, 255});
     VectorDiagnosticSink diagnostics;
-    SoftwareRasterizer rasterizer(TextPainter{center_pixel_text_painter, nullptr},
-                                  &diagnostics,
+    SoftwareRasterizer rasterizer(&diagnostics,
                                   SoftwareRasterizerOptions{16, nullptr, {}});
     DisplayCommand command;
     command.set_type(DisplayCommandType::Text);
@@ -2002,9 +1905,9 @@ void rasterizer_bounds_clipped_temporary_surfaces() {
 
     rasterizer.rasterize(command, frame_buffer, Rect{20, 0, 5, 10});
 
-    check(frame_buffer.pixel(20, 5).r == 255, "oversized clipped text surface is skipped safely");
-    check(has_diagnostic_code(diagnostics, "paint-transient-surface-budget"),
-          "clipped temporary surface budget rejection is reported");
+    check(frame_buffer.pixel(20, 5).r == 255, "refused oversized clipped text leaves the target unchanged");
+    check(has_diagnostic_code(diagnostics, "paint-legacy-text-refused"),
+          "text refusal precedes clipped temporary-surface processing");
 
     LayerNode root;
     root.type = LayerType::Root;
@@ -2013,11 +1916,11 @@ void rasterizer_bounds_clipped_temporary_surfaces() {
     SoftwareCompositor::Options compositor_options;
     compositor_options.max_offscreen_pixels = 16;
     compositor_options.diagnostics = &diagnostics;
-    SoftwareCompositor compositor(TextPainter{center_pixel_text_painter, nullptr}, compositor_options);
+    SoftwareCompositor compositor(ImagePainter{}, compositor_options);
     const Rect dirty{20, 0, 5, 10};
     compositor.render_into(root, frame_buffer, Color{255, 255, 255, 255}, &dirty, 1);
     check(frame_buffer.pixel(20, 5).r == 255,
-          "compositor propagates the temporary surface budget to clipped paint");
+          "compositor refuses clipped legacy text without writing pixels");
 }
 
 void compositor_scratch_reuses_clipped_command_storage() {
@@ -2036,21 +1939,22 @@ void compositor_scratch_reuses_clipped_command_storage() {
     FrameBuffer frame_buffer(40, 10, Color{255, 255, 255, 255});
     SoftwareCompositor::Scratch scratch;
     const Rect dirty{20, 0, 5, 10};
-    SoftwareCompositor compositor(TextPainter{center_pixel_text_painter, nullptr});
+    VectorDiagnosticSink diagnostics;
+    SoftwareCompositor::Options options;
+    options.diagnostics = &diagnostics;
+    SoftwareCompositor compositor(ImagePainter{}, options);
     compositor.render_into(root, frame_buffer, Color{255, 255, 255, 255}, &dirty, 1, &scratch);
-    const std::size_t capacity = scratch.rasterizer.temporary_surface.pixels.capacity();
-    check(capacity >= 50, "compositor retains clipped command scratch storage");
-
-    compositor.render_into(root, frame_buffer, Color{255, 255, 255, 255}, &dirty, 1, &scratch);
-    check(scratch.rasterizer.temporary_surface.pixels.capacity() == capacity,
-          "compositor reuses clipped command scratch storage");
+    check(scratch.rasterizer.temporary_surface.pixels.empty(), "compositor does not allocate text scratch storage");
+    check(frame_buffer.pixel(20, 5).r == 255, "compositor leaves clipped legacy text unchanged");
+    check(has_diagnostic_code(diagnostics, "paint-legacy-text-refused"),
+          "compositor reports clipped legacy-text refusal");
 }
 
 void rasterizer_scratch_reuses_clipped_image_storage() {
     FrameBuffer frame_buffer(40, 10, Color{255, 255, 255, 255});
     ImagePaintProbe probe;
     probe.expected_handle = 41;
-    SoftwareRasterizer rasterizer({}, ImagePainter{probe_image_painter, &probe});
+    SoftwareRasterizer rasterizer(ImagePainter{probe_image_painter, &probe});
     SoftwareRasterizerScratch scratch;
     DisplayCommand command;
     command.set_type(DisplayCommandType::Image);
@@ -2097,65 +2001,6 @@ void frame_sink_receives_framebuffer_view_and_dirty_rects() {
     check(probe.dirty_count == 1, "frame sink receives dirty count");
 }
 
-void bitmap_font_backend_measures_and_paints() {
-    static constexpr std::uint8_t rows_a[] = {
-        0b01000000,
-        0b10100000,
-        0b11100000,
-        0b10100000,
-        0b10100000,
-    };
-    static constexpr std::uint8_t rows_cjk[] = {
-        0b11111111, 0b10000000,
-        0b00010000, 0b00000000,
-        0b11111111, 0b10000000,
-        0b00010000, 0b00000000,
-        0b11111111, 0b10000000,
-    };
-    static constexpr BitmapFontGlyph glyphs[] = {
-        BitmapFontGlyph{0x41, 3, 5, 4, 1, rows_a},
-        BitmapFontGlyph{0x4e2d, 9, 5, 10, 2, rows_cjk},
-    };
-    static constexpr BitmapFont font{glyphs, 2, 6, 4};
-    BitmapFontContext context{&font, 2};
-
-    TextMetrics metrics;
-    check(bitmap_font_measure_callback("AA", 12, 400, &metrics, &context), "bitmap font measure callback succeeds");
-    check(metrics.width == 16 && metrics.line_height == 12, "bitmap font metrics scale advances");
-    check(bitmap_font_measure_callback("\xe4\xb8\xad?", 12, 400, &metrics, &context),
-          "bitmap font measures utf-8 text");
-    check(metrics.width == 28 && metrics.line_height == 12, "wide utf-8 glyph and fallback advance are stable");
-
-    FrameBuffer frame_buffer(32, 16, Color{255, 255, 255, 255});
-    SoftwareRasterizer rasterizer(TextPainter{bitmap_font_paint_callback, &context});
-    DisplayCommand command;
-    command.set_type(DisplayCommandType::Text);
-    command.rect = Rect{0, 0, 32, 16};
-    command.color = Color{0, 0, 0, 255};
-    command.text = "A";
-    command.text_paint().font_size = 12;
-    command.text_paint().text_align = TextCommandAlign::Center;
-    command.text_paint().text_single_line = true;
-    rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 32, 16});
-
-    check(count_non_background_pixels(frame_buffer, Color{255, 255, 255, 255}) > 0,
-          "bitmap font painter writes pixels");
-    check(frame_buffer.pixel(0, 0).r == 255, "centered bitmap glyph leaves left edge empty");
-
-    FrameBuffer utf8_frame_buffer(40, 16, Color{255, 255, 255, 255});
-    DisplayCommand utf8_command;
-    utf8_command.set_type(DisplayCommandType::Text);
-    utf8_command.rect = Rect{0, 0, 40, 16};
-    utf8_command.color = Color{0, 0, 0, 255};
-    utf8_command.text = "\xe4\xb8\xad?";
-    utf8_command.text_paint().font_size = 12;
-    utf8_command.text_paint().text_single_line = true;
-    rasterizer.rasterize(utf8_command, utf8_frame_buffer, Rect{0, 0, 40, 16});
-
-    check(count_non_background_pixels(utf8_frame_buffer, Color{255, 255, 255, 255}) > 20,
-          "wide utf-8 glyph and missing fallback draw visible pixels");
-}
-
 void bitmap_font_lookup_uses_sorted_codepoints() {
     static constexpr std::uint8_t row[] = {0b10000000};
     static constexpr BitmapFontGlyph glyphs[] = {
@@ -2176,155 +2021,6 @@ void bitmap_font_lookup_uses_sorted_codepoints() {
     check(find_bitmap_glyph(font, 0x42) == nullptr, "bitmap font lookup reports missing glyph");
 }
 
-void bitmap_font_scaling_bold_and_missing_glyphs_are_stable() {
-    static constexpr std::uint8_t rows_a[] = {
-        0b10000000,
-        0b10000000,
-        0b10000000,
-    };
-    static constexpr std::uint8_t rows_wide[] = {
-        0b11111111, 0b10000000,
-        0b10000000, 0b10000000,
-        0b11111111, 0b10000000,
-    };
-    static constexpr BitmapFontGlyph glyphs[] = {
-        BitmapFontGlyph{0x41, 1, 3, 2, 1, rows_a},
-        BitmapFontGlyph{0xff0c, 9, 3, 10, 2, rows_wide},
-    };
-    static constexpr BitmapFont font{glyphs, 2, 4, 3};
-    BitmapFontContext context{&font, 3};
-
-    const TextMetrics metrics = measure_bitmap_text(context, "A\xef\xbc\x8c?", 18, 700);
-    check(metrics.width == 46, "bitmap font metrics include scale, wide punctuation, fallback and bold stroke");
-    check(metrics.line_height == 12, "bitmap font metrics scale line height");
-
-    SoftwareRasterizer rasterizer(TextPainter{bitmap_font_paint_callback, &context});
-    DisplayCommand normal;
-    normal.set_type(DisplayCommandType::Text);
-    normal.rect = Rect{0, 0, 64, 24};
-    normal.color = Color{0, 0, 0, 255};
-    normal.text = "A";
-    normal.text_paint().font_size = 18;
-    normal.text_paint().font_weight = 400;
-    normal.text_paint().text_single_line = true;
-
-    DisplayCommand bold = normal;
-    bold.text_paint().font_weight = 700;
-
-    FrameBuffer normal_frame(64, 24, Color{255, 255, 255, 255});
-    FrameBuffer bold_frame(64, 24, Color{255, 255, 255, 255});
-    rasterizer.rasterize(normal, normal_frame, Rect{0, 0, 64, 24});
-    rasterizer.rasterize(bold, bold_frame, Rect{0, 0, 64, 24});
-
-    const int normal_pixels = count_non_background_pixels(normal_frame, Color{255, 255, 255, 255});
-    const int bold_pixels = count_non_background_pixels(bold_frame, Color{255, 255, 255, 255});
-    check(bold_pixels > normal_pixels, "bitmap font bold approximation paints an extra stroke");
-
-    DisplayCommand missing = normal;
-    missing.text = "\xf0\x9f\x98\x80";
-    FrameBuffer missing_frame(64, 24, Color{255, 255, 255, 255});
-    rasterizer.rasterize(missing, missing_frame, Rect{0, 0, 64, 24});
-    check(count_non_background_pixels(missing_frame, Color{255, 255, 255, 255}) > 8,
-          "missing high-codepoint glyph draws a visible fallback box");
-}
-
-void bitmap_font_bold_metrics_include_extra_stroke() {
-    static constexpr std::uint8_t rows_w[] = {
-        0b10001000,
-        0b10001000,
-        0b10101000,
-        0b10101000,
-        0b01010000,
-    };
-    static constexpr BitmapFontGlyph glyphs[] = {
-        BitmapFontGlyph{0x57, 5, 5, 6, 1, rows_w},
-    };
-    static constexpr BitmapFont font{glyphs, 1, 6, 5};
-    BitmapFontContext context{&font, 1};
-
-    const TextMetrics normal = measure_bitmap_text(context, "W", 12, 400);
-    const TextMetrics bold = measure_bitmap_text(context, "W", 12, 700);
-    check(bold.width == normal.width + 1, "bold bitmap metrics reserve the synthetic stroke");
-
-    SoftwareRasterizer rasterizer(TextPainter{bitmap_font_paint_callback, &context});
-    DisplayCommand command;
-    command.set_type(DisplayCommandType::Text);
-    command.rect = Rect{0, 0, bold.width, 10};
-    command.color = Color{0, 0, 0, 255};
-    command.text = "W";
-    command.text_paint().font_size = 12;
-    command.text_paint().font_weight = 700;
-    command.text_paint().text_single_line = true;
-
-    FrameBuffer frame_buffer(bold.width, 10, Color{255, 255, 255, 255});
-    rasterizer.rasterize(command, frame_buffer, Rect{0, 0, bold.width, 10});
-    check(count_non_background_pixels(frame_buffer, Color{255, 255, 255, 255}) > 0,
-          "bold synthetic stroke paints inside measured text rect");
-}
-
-void bitmap_font_callback_never_writes_outside_text_rect() {
-    static constexpr std::uint8_t rows[] = {
-        0b11100000,
-        0b11100000,
-        0b11100000,
-    };
-    static constexpr BitmapFontGlyph glyphs[] = {
-        BitmapFontGlyph{0x41, 3, 3, 3, 1, rows},
-    };
-    static constexpr BitmapFont font{glyphs, 1, 3, 3};
-    BitmapFontContext context{&font, 1};
-    const Color sentinel{231, 236, 244, 255};
-    const Rect text_rect{2, 2, 3, 2};
-
-    FrameBuffer glyph_frame(8, 7, sentinel);
-    check(bitmap_font_paint_callback(glyph_frame,
-                                     text_rect,
-                                     Color{20, 30, 40, 255},
-                                     "A",
-                                     8,
-                                     700,
-                                     TextCommandAlign::Start,
-                                     true,
-                                     &context),
-          "bold bitmap painter accepts bounded rect");
-    check(count_non_background_pixels(glyph_frame, sentinel) > 0,
-          "bold bitmap painter writes inside text rect");
-    for (int y = 0; y < glyph_frame.height; ++y) {
-        for (int x = 0; x < glyph_frame.width; ++x) {
-            if (x >= text_rect.x && x < safe_edge(text_rect.x, text_rect.width) &&
-                y >= text_rect.y && y < safe_edge(text_rect.y, text_rect.height)) {
-                continue;
-            }
-            const Color pixel = glyph_frame.pixel(x, y);
-            check(pixel.r == sentinel.r && pixel.g == sentinel.g && pixel.b == sentinel.b,
-                  "bold bitmap painter clips synthetic stroke to text rect");
-        }
-    }
-
-    FrameBuffer missing_frame(8, 7, sentinel);
-    check(bitmap_font_paint_callback(missing_frame,
-                                     text_rect,
-                                     Color{20, 30, 40, 255},
-                                     "?",
-                                     8,
-                                     700,
-                                     TextCommandAlign::Start,
-                                     true,
-                                     &context),
-          "missing bitmap glyph accepts bounded rect");
-    for (int y = 0; y < missing_frame.height; ++y) {
-        for (int x = 0; x < missing_frame.width; ++x) {
-            if (x >= text_rect.x && x < safe_edge(text_rect.x, text_rect.width) &&
-                y >= text_rect.y && y < safe_edge(text_rect.y, text_rect.height)) {
-                continue;
-            }
-            const Color pixel = missing_frame.pixel(x, y);
-            check(pixel.r == sentinel.r && pixel.g == sentinel.g && pixel.b == sentinel.b,
-                  "missing bitmap glyph clips fallback box to text rect");
-        }
-    }
-}
-
 void jffont_resource_loads_bitmap_font_view() {
     const std::vector<std::uint8_t> bytes = {
         'J', 'F', 'F', 'O', 'N', 'T', '0', 0,
@@ -2342,23 +2038,8 @@ void jffont_resource_loads_bitmap_font_view() {
     BitmapFontResource resource;
     check(resource.load_jffont(bytes.data(), bytes.size()), "jffont resource loads");
     check(resource.valid(), "jffont resource exposes valid font");
-    BitmapFontContext context{&resource.font(), 1};
-
-    const TextMetrics metrics = measure_bitmap_text(context, "A\xe4\xb8\xad?", 8, 400);
-    check(metrics.width == 22 && metrics.line_height == 8, "jffont metrics reuse bitmap backend");
-
-    FrameBuffer frame_buffer(32, 12, Color{255, 255, 255, 255});
-    SoftwareRasterizer rasterizer(TextPainter{bitmap_font_paint_callback, &context});
-    DisplayCommand command;
-    command.set_type(DisplayCommandType::Text);
-    command.rect = Rect{0, 0, 32, 12};
-    command.color = Color{0, 0, 0, 255};
-    command.text = "A\xe4\xb8\xad";
-    command.text_paint().font_size = 8;
-    command.text_paint().text_single_line = true;
-    rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 32, 12});
-    check(count_non_background_pixels(frame_buffer, Color{255, 255, 255, 255}) > 10,
-          "jffont glyphs paint through bitmap backend");
+    check(find_bitmap_glyph(resource.font(), 0x41) != nullptr,
+          "jffont resource exposes its registered glyph table");
 
     std::vector<std::uint8_t> corrupted = bytes;
     corrupted[0] = 0;
@@ -2394,28 +2075,6 @@ void jffont_v1_coverage_glyphs_antialias_text_edges() {
     BitmapFontResource rejected_resource;
     check(!rejected_resource.load_jffont(corrupted.data(), corrupted.size()), "jffont v1 rejects unknown flags");
 
-    BitmapFontContext context{&resource.font(), 1};
-    FrameBuffer frame_buffer(8, 6, Color{255, 255, 255, 255});
-    SoftwareRasterizer rasterizer(TextPainter{bitmap_font_paint_callback, &context});
-    DisplayCommand command;
-    command.set_type(DisplayCommandType::Text);
-    command.rect = Rect{0, 0, 8, 6};
-    command.color = Color{0, 0, 0, 255};
-    command.text = "A";
-    command.text_paint().font_size = 3;
-    command.text_paint().text_single_line = true;
-    rasterizer.rasterize(command, frame_buffer, Rect{0, 0, 8, 6});
-
-    bool has_gray_edge = false;
-    for (int y = 0; y < frame_buffer.height; ++y) {
-        for (int x = 0; x < frame_buffer.width; ++x) {
-            const Color pixel = frame_buffer.pixel(x, y);
-            if (pixel.r > 0 && pixel.r < 255) {
-                has_gray_edge = true;
-            }
-        }
-    }
-    check(has_gray_edge, "coverage glyph paints intermediate edge pixels");
 }
 
 } // namespace
@@ -2448,7 +2107,7 @@ int main() {
         image_command_falls_back_without_painter();
         compositor_renders_pipeline_non_empty();
         wrapped_text_layout_keeps_descent_padding();
-        layout_uses_injected_text_measurement();
+        layout_uses_core_text_system();
         dirty_render_only_updates_requested_clip();
         dirty_render_preserves_original_rounded_geometry();
         compositor_clips_children_to_rounded_overflow();
@@ -2468,8 +2127,8 @@ int main() {
         compositor_skips_covered_opaque_fill_prefix();
         compositor_keeps_non_fill_prefix_side_effects();
         compositor_keeps_rounded_fill_underpaint();
-        rasterizer_reports_text_fallback();
-        built_in_text_fallback_preserves_clipped_pixel_output();
+        rasterizer_rejects_legacy_text_commands();
+        legacy_text_command_is_refused_without_writing_pixels();
         dirty_text_clip_preserves_original_text_geometry();
         rasterizer_scratch_reuses_clipped_command_storage();
         rasterizer_bounds_clipped_temporary_surfaces();
@@ -2477,7 +2136,7 @@ int main() {
         rasterizer_scratch_reuses_clipped_image_storage();
         compositor_smooths_scaled_layers();
         compositor_applies_opacity_to_radial_gradient_pixels();
-        opacity_fallback_preserves_text_without_copying_command();
+        compositor_opacity_path_refuses_legacy_text_without_writing();
         compositor_degrades_oversized_offscreen_layers_without_crashing();
         compositor_does_not_bypass_rounded_clip_when_offscreen_budget_is_exceeded();
         compositor_keeps_composited_paint_outside_layout_bounds();
@@ -2487,11 +2146,7 @@ int main() {
         compositor_skips_oversized_transformed_layers_instead_of_painting_them_untransformed();
         compositor_rejects_oversized_framebuffer_before_allocation();
         frame_sink_receives_framebuffer_view_and_dirty_rects();
-        bitmap_font_backend_measures_and_paints();
         bitmap_font_lookup_uses_sorted_codepoints();
-        bitmap_font_scaling_bold_and_missing_glyphs_are_stable();
-        bitmap_font_bold_metrics_include_extra_stroke();
-        bitmap_font_callback_never_writes_outside_text_rect();
         jffont_resource_loads_bitmap_font_view();
         jffont_v1_coverage_glyphs_antialias_text_edges();
     } catch (const std::exception& error) {

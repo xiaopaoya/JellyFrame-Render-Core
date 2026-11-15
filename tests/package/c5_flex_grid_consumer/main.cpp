@@ -96,19 +96,6 @@ void require(bool value, const char* message) {
     if (!value) throw std::runtime_error(message);
 }
 
-bool same_font_measure(const std::string& text, int size, int weight,
-                      std::uint32_t family_hash, TextMetrics* output, void* context) {
-    auto& system = *static_cast<TextSystem*>(context);
-    std::uint32_t family = 0;
-    if (family_hash != 0 && !system.resolve_family_hash(family_hash, family)) return false;
-    const TextFontRequest request{&family, 1, size * 1000, static_cast<std::uint16_t>(weight)};
-    TextRunMetrics metrics;
-    if (system.measure(text, request, metrics) != TextSystemStatus::Ok) return false;
-    output->width = (metrics.advance + 999) / 1000;
-    output->line_height = (metrics.primary_font.line_height + 999) / 1000;
-    return true;
-}
-
 struct LayoutResult {
     std::unique_ptr<Node> document;
     LayoutBoxPtr boxes;
@@ -122,14 +109,11 @@ LayoutResult layout(const std::string& html, const std::string& css,
     require(static_cast<bool>(result.document), "HTML fixture parse failed");
     StyleResolver styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}body{margin:0}" + css));
-    TextMeasureProvider provider;
-    provider.measure_family = same_font_measure;
-    provider.context = text_system;
     LayoutEngineOptions options;
     options.text_system = enable_intrinsic ? text_system : nullptr;
     options.intrinsic_query_limits = limits;
     options.intrinsic_query_statistics = statistics;
-    result.boxes = LayoutEngine(styles, provider, options).layout(*result.document, 120, 80);
+    result.boxes = LayoutEngine(styles, options).layout(*result.document, 120, 80);
     return result;
 }
 
@@ -169,21 +153,32 @@ void check_calc_refusal(TextSystem& text_system) {
         "#item{display:block;flex:0 1 0px;min-width:calc(20px + 50%);"
         "font-family:'Core Test';font-size:16px}";
     const auto queried = layout(html, css, &text_system);
-    const auto legacy = layout(html, css, &text_system, false);
+    LayoutIntrinsicQueryLimits no_query_budget;
+    no_query_budget.max_work = 0;
+    const auto legacy = layout(html, css, &text_system, true, no_query_budget);
     const auto* queried_parent = find_box(*queried.boxes, "p");
     const auto* legacy_parent = find_box(*legacy.boxes, "p");
     const auto* queried_item = find_box(*queried.boxes, "item");
     const auto* legacy_item = find_box(*legacy.boxes, "item");
-    require(queried_parent && legacy_parent && queried_item && legacy_item &&
-            queried_parent->rect.x == legacy_parent->rect.x &&
-            queried_parent->rect.y == legacy_parent->rect.y &&
-            queried_parent->rect.width == legacy_parent->rect.width &&
-            queried_parent->rect.height == legacy_parent->rect.height &&
-            queried_item->rect.x == legacy_item->rect.x &&
-            queried_item->rect.y == legacy_item->rect.y &&
-            queried_item->rect.width == legacy_item->rect.width &&
-            queried_item->rect.height == legacy_item->rect.height,
-            "Unsupported computed calc min-width must retain whole Flex legacy geometry");
+    const bool geometry_matches = queried_parent && legacy_parent && queried_item && legacy_item &&
+        queried_parent->rect.x == legacy_parent->rect.x &&
+        queried_parent->rect.y == legacy_parent->rect.y &&
+        queried_parent->rect.width == legacy_parent->rect.width &&
+        queried_parent->rect.height == legacy_parent->rect.height &&
+        queried_item->rect.x == legacy_item->rect.x &&
+        queried_item->rect.y == legacy_item->rect.y &&
+        queried_item->rect.width == legacy_item->rect.width &&
+        queried_item->rect.height == legacy_item->rect.height;
+    require(geometry_matches,
+            (std::string("Unsupported computed calc min-width must retain whole Flex legacy geometry; queried=") +
+                (queried_item ? std::to_string(queried_item->rect.x) + "," +
+                    std::to_string(queried_item->rect.y) + "," +
+                    std::to_string(queried_item->rect.width) + "," +
+                    std::to_string(queried_item->rect.height) : "missing") +
+                " legacy=" + (legacy_item ? std::to_string(legacy_item->rect.x) + "," +
+                    std::to_string(legacy_item->rect.y) + "," +
+                    std::to_string(legacy_item->rect.width) + "," +
+                    std::to_string(legacy_item->rect.height) : "missing")).c_str());
 }
 
 void check_pass_budget(TextSystem& text_system) {
@@ -298,7 +293,7 @@ void check_installed_grid_vertical_refusal() {
         }
         LayoutEngineOptions options;
         options.diagnostics = diagnostics;
-        auto boxes = LayoutEngine(resolver, {}, options).layout(*tree, 320, 240);
+        auto boxes = LayoutEngine(resolver, options).layout(*tree, 320, 240);
         return std::make_pair(std::move(dom), std::move(boxes));
     };
 

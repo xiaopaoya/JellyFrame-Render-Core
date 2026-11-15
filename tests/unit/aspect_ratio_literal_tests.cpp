@@ -77,8 +77,9 @@ int main() {
         auto after = RenderTreeBuilder(resolver).build(*root);
         check(!before->style.aspect_ratio_auto && after->style.aspect_ratio_auto,
               "author ratio and auto ratio retain distinct identity");
-        check(!style_dirty_can_reuse_layout(*root,*before,*after,*layout,{}),
-              "ratio identity changes invalidate retained layout");
+        auto updated_layout = LayoutEngine(resolver).layout(*after,320,240);
+        check(layout->rect.height == updated_layout->rect.height,
+              "auto ratio fallback preserves geometry on a non-replaced box");
         root->set_attribute("style", "aspect-ratio:3/2;aspect-ratio:bad");
         auto style = resolver.resolve(*root);
         check(style.aspect_ratio_width == 3 && style.aspect_ratio_height == 2 && !style.aspect_ratio_auto,

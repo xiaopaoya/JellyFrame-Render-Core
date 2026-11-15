@@ -162,8 +162,12 @@ int main() {
     untouched(geometry);
     request.boxes.border_box.width = 100;
     request.boxes.padding.left = -1;
+    check(resolve_background_gradient_geometry(request,geometry) == BackgroundGradientGeometryStatus::Ready,
+          "unused padding inset does not invalidate selected border and padding areas");
+    request.boxes.origin = BackgroundBoxArea::ContentBox;
+    geometry = sentinel();
     check(resolve_background_gradient_geometry(request,geometry) == BackgroundGradientGeometryStatus::InvalidGeometry,
-          "invalid insets refuse");
+          "invalid selected inset refuses");
     untouched(geometry);
     request.boxes.padding.left = 5;
     request.size_mode = static_cast<BackgroundGradientSizeMode>(99);

@@ -88,18 +88,6 @@ void expect(const LayoutBox& root, const char* id, int x, int y, int width, int 
     require(r.x == x && r.y == y && r.width == width && r.height == height,
             std::string("unexpected geometry for ") + id);
 }
-bool measure_with_core(const std::string& text, int size, int weight,
-                       TextMetrics* metrics, void* context) {
-    TextFontRequest request;
-    request.size_q1000 = size * 1000;
-    request.weight = static_cast<std::uint16_t>(weight);
-    TextRunMetrics run;
-    if (static_cast<TextSystem*>(context)->measure(text, request, run) != TextSystemStatus::Ok)
-        return false;
-    metrics->width = static_cast<int>((run.advance + 999) / 1000);
-    metrics->line_height = static_cast<int>((run.natural_height + 999) / 1000);
-    return true;
-}
 struct Scene {
     std::unique_ptr<Node> document;
     LayoutBoxPtr tree;
@@ -117,10 +105,7 @@ Scene layout(const std::string& items, const std::string& rules, TextSystem& sys
     options.intrinsic_query_limits = limits;
     if (!core) options.intrinsic_query_limits.max_work = 0;
     options.intrinsic_query_statistics = statistics;
-    TextMeasureProvider host;
-    host.measure = measure_with_core;
-    host.context = &system;
-    scene.tree = LayoutEngine(styles, host, options).layout(*scene.document, 200, 300);
+    scene.tree = LayoutEngine(styles, options).layout(*scene.document, 200, 300);
     require(scene.tree != nullptr, "layout returns a tree");
     return scene;
 }

@@ -6,7 +6,6 @@
 #include "render_core/geometry.h"
 #include "render_core/render_tree.h"
 #include "render_core/style.h"
-#include "render_core/text_backend.h"
 #include "render_core/text_system.h"
 
 #include <memory>
@@ -75,7 +74,6 @@ struct TextLayoutCache {
     std::string source_text;
     std::string rendered_text;
     std::vector<std::string> lines;
-    TextMeasureProvider text_measure;
     const TextSystem* text_system = nullptr;
     std::uint64_t text_system_generation = 0;
     std::uint64_t document_mutation_generation = 0;
@@ -222,7 +220,6 @@ struct LayoutEngineOptions {
 class LayoutEngine {
 public:
     explicit LayoutEngine(const StyleResolver& style_resolver,
-                          TextMeasureProvider text_measure = {},
                           LayoutEngineOptions options = {});
 
     LayoutBoxPtr layout(const Node& root, int viewport_width) const;
@@ -236,7 +233,6 @@ public:
 
 private:
     const StyleResolver& style_resolver_;
-    TextMeasureProvider text_measure_;
     LayoutEngineOptions options_;
     detail::IntrinsicSourceQueryLedger* intrinsic_queries_ = nullptr;
     detail::NaturalImageSizingFrame* natural_images_ = nullptr;

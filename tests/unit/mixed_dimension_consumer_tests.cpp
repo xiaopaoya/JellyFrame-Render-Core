@@ -207,7 +207,7 @@ void unsupported_context_refuses_before_geometry() {
     VectorDiagnosticSink diagnostics;
     LayoutEngineOptions options;
     options.diagnostics = &diagnostics;
-    auto layout = LayoutEngine(resolver, {}, options).layout(*tree, 320, 240);
+    auto layout = LayoutEngine(resolver, options).layout(*tree, 320, 240);
     check(find(*layout, "prior")->rect.width == 0 && find(*layout, "mixed")->rect.width == 0,
         "unsupported mixed context refuses before laying out preceding siblings");
     bool refused = false;
@@ -227,7 +227,7 @@ void unsupported_context_refuses_before_geometry() {
     VectorDiagnosticSink table_diagnostics;
     LayoutEngineOptions table_options;
     table_options.diagnostics = &table_diagnostics;
-    auto table_layout = LayoutEngine(table_resolver, {}, table_options).layout(*table_tree, 320, 240);
+    auto table_layout = LayoutEngine(table_resolver, table_options).layout(*table_tree, 320, 240);
     check(find(*table_layout, "cell")->rect.width == 0 && !table_diagnostics.diagnostics().empty(),
           "fixed table refuses mixed dimensions before track or cell geometry changes");
 
@@ -240,7 +240,7 @@ void unsupported_context_refuses_before_geometry() {
     VectorDiagnosticSink basis_diagnostics;
     LayoutEngineOptions basis_options;
     basis_options.diagnostics = &basis_diagnostics;
-    auto basis_layout = LayoutEngine(basis_resolver, {}, basis_options).layout(*basis_tree, 320, 240);
+    auto basis_layout = LayoutEngine(basis_resolver, basis_options).layout(*basis_tree, 320, 240);
     check(find(*basis_layout, "basis")->rect.width == 0 &&
         !basis_diagnostics.diagnostics().empty(),
         "FlexBasis outside a qualified Flex item is explicitly refused");
@@ -310,7 +310,7 @@ void qualified_nowrap_flex_resolves_mixed_basis_and_constraints() {
     VectorDiagnosticSink indefinite_diagnostics;
     LayoutEngineOptions indefinite_options;
     indefinite_options.diagnostics = &indefinite_diagnostics;
-    auto indefinite_layout = LayoutEngine(indefinite_resolver, {}, indefinite_options)
+    auto indefinite_layout = LayoutEngine(indefinite_resolver, indefinite_options)
         .layout(*indefinite_tree, 320, 240);
     const auto* indefinite_result = find(*indefinite_layout, "mixed");
     check(indefinite_result && indefinite_result->rect.height == 0 &&
@@ -344,7 +344,7 @@ void qualified_wrapped_row_flex_resolves_mixed_basis() {
     options.text_system = &text_system;
     VectorDiagnosticSink diagnostics;
     options.diagnostics = &diagnostics;
-    auto layout = LayoutEngine(resolver, {}, options).layout(*tree, 320, 240);
+    auto layout = LayoutEngine(resolver, options).layout(*tree, 320, 240);
     const auto* first_item = find(*layout, "first");
     const auto* second_item = find(*layout, "second");
     SizeKind restored_kind = SizeKind::Pixels;
@@ -378,7 +378,7 @@ void qualified_flex_success_preserves_authored_state() {
     VectorDiagnosticSink diagnostics;
     LayoutEngineOptions options;
     options.diagnostics = &diagnostics;
-    auto layout = LayoutEngine(resolver, {}, options).layout(*tree, 320, 240);
+    auto layout = LayoutEngine(resolver, options).layout(*tree, 320, 240);
     const auto* result = find(*layout, "item");
     check(result && result->rect.width == 50 &&
           result->style.computed_sizes.equals(authored_sizes) &&
@@ -443,7 +443,7 @@ void qualified_grid_item_resolves_mixed_width_constraints() {
         VectorDiagnosticSink vertical_diagnostics;
         LayoutEngineOptions vertical_options;
         vertical_options.diagnostics = &vertical_diagnostics;
-        auto vertical_layout = LayoutEngine(vertical_resolver, {}, vertical_options)
+        auto vertical_layout = LayoutEngine(vertical_resolver, vertical_options)
             .layout(*vertical_tree, 320, 240);
         const auto* grid = find(*vertical_layout, "grid");
         const auto* mixed = find(*vertical_layout, "mixed");
@@ -479,7 +479,7 @@ void mixed_grid_refuses_unresolved_tracks_and_spans_before_geometry() {
         VectorDiagnosticSink diagnostics;
         LayoutEngineOptions options;
         options.diagnostics = &diagnostics;
-        auto layout = LayoutEngine(resolver, {}, options).layout(*tree, 320, 240);
+        auto layout = LayoutEngine(resolver, options).layout(*tree, 320, 240);
         const auto* grid = find(*layout, "grid");
         const auto* item = find(*layout, "mixed");
         check(grid && item && grid->rect.width == 0 && item->rect.width == 0 && item->rect.height == 0,
