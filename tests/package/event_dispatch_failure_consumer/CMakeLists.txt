@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(EventDispatchFailureInstalledConsumer LANGUAGES CXX)
 find_package(JellyFrameRenderCore CONFIG REQUIRED)
 if(NOT JellyFrameRenderCore_ENGINE_ABI STREQUAL "4" OR
-   NOT JellyFrameRenderCore_PACKAGE_VERSION STREQUAL "0.9.0-dev")
+   NOT JellyFrameRenderCore_PACKAGE_VERSION STREQUAL "0.9.0")
   message(FATAL_ERROR "This consumer requires the development ABI4 package")
 endif()
 foreach(identity IN ITEMS SOURCE_HASH PROFILE_ID)
