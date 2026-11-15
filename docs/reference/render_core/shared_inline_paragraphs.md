@@ -89,15 +89,17 @@ and cache types. Consumers rebuild against the exact package source identity.
 The text-system installed consumer exercises cache copying with the incomplete
 private binding type and both packet variants.
 
-JFTP capability version is now 2. Header and record sizes remain 32 and 52
+JFTP capability version is now 3. Header and record sizes remain 32 and 52
 bytes. Version 2 stores a signed Q1000 initial glyph X in header bytes 24 through
 27, with cumulative glyph positions starting at that value. Header bytes 28
 through 31 remain zero. Version 1 retains zero initial X and zero reserved bytes.
-The encoder defaults to version 1 for zero origin. The decoder accepts both
+The cumulative-position encoder defaults to version 1 for zero origin. Version 3
+stores each glyph's explicit signed Q1000 X; Core uses it for letter spacing and
+other explicitly positioned scalar output. The decoder accepts all three
 versions and rejects unknown versions. TextPaint keeps its existing integer
 origin and baseline payload. Fractional owner offsets travel in the packet.
-Runtime consumers with a version-1-only capability gate require the coordinated
-v2 compatibility update before adopting this package.
+Runtime consumers require the coordinated exact capability update before
+adopting this package; a version-1-only or version-2-only gate is insufficient.
 
 ## Resource accounting
 

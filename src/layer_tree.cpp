@@ -833,7 +833,22 @@ std::string native_marker_text(const LayoutBox& box) {
     return {};
 }
 
+bool active_core_ellipsis_owner(const LayoutBox& box, const TextSystem* text_system) {
+    const auto& style = box.style;
+    return text_system && style.text_overflow_ellipsis && !style.overflow.empty() && style.overflow != "visible" &&
+        (style.display == Display::Block || style.display == Display::InlineBlock ||
+         style.display == Display::TableCell || style.display == Display::TableCaption);
+}
+
+bool refused_core_ellipsis_generated_owner(const LayoutBox& box, const TextSystem* text_system) {
+    const auto& style = box.style;
+    return active_core_ellipsis_owner(box, text_system) &&
+        (style.before_content_kind != GeneratedContentKind::None || style.after_content_kind != GeneratedContentKind::None ||
+         (box.node && box.node->tag_name == "li" && style.list_style_type != ListStyleType::None));
+}
+
 void paint_list_marker(const LayoutBox& box, DisplayList& display_list, const TextSystem* text_system) {
+    if (refused_core_ellipsis_generated_owner(box, text_system)) return;
     if (box.node == nullptr || box.node->type != NodeType::Element || box.node->tag_name != "li") {
         return;
     }
@@ -873,6 +888,9 @@ void paint_generated_inline_content(const LayoutBox& box,
                                     DisplayList& display_list,
                                     CssPseudoElement pseudo_element,
                                     const TextSystem* text_system) {
+    // Layout refuses this complete generated-owner context. Do not publish a
+    // legacy pseudo fragment after its ordinary Core text has been refused.
+    if (refused_core_ellipsis_generated_owner(box, text_system)) return;
     if (box.node == nullptr || box.node->type != NodeType::Element || box.node->tag_name == "li") {
         return;
     }
@@ -1515,7 +1533,8 @@ void paint_canonical_background(const LayoutBox& box, DisplayList& display_list,
 }
 
 void paint_box_self(const LayoutBox& box, DisplayList& display_list,
-                    const LayerTreeBuilderOptions& options, std::size_t remaining_commands) {
+                    const LayerTreeBuilderOptions& options, std::size_t remaining_commands,
+                    bool suppress_ellipsis_generated = false) {
     const std::size_t box_command_begin = display_list.size();
     const Rect paint_rect = paint_rect_for(box);
     const int border_radius = resolved_border_radius(box);
@@ -1555,8 +1574,10 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
 
     paint_meter_bar(box, display_list);
     paint_form_control(box, display_list);
-    paint_list_marker(box, display_list, options.text_system);
-    paint_generated_inline_content(box, display_list, CssPseudoElement::Before, options.text_system);
+    if (!suppress_ellipsis_generated) {
+        paint_list_marker(box, display_list, options.text_system);
+        paint_generated_inline_content(box, display_list, CssPseudoElement::Before, options.text_system);
+    }
 
     ResolvedImageResource content_resource;
     const bool emitted_by_shared_inline = box.text_layout_cache.shared_inline &&
@@ -2110,6 +2131,7 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
         LayerNode* layer = nullptr;
         int scroll_y = 0;
         bool exit = false;
+        bool suppress_ellipsis_generated = false;
     };
 
     std::size_t next_source_order = layer.source_order + 1;
@@ -2119,9 +2141,14 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
 
     std::vector<PendingBox> pending;
     pending.reserve(box.children.size());
-    const auto enqueue_children = [&pending](const LayoutBox& parent,
+    const auto enqueue_children = [&pending, this](const LayoutBox& parent,
                                              LayerNode* parent_layer,
-                                             int parent_scroll_y) {
+                                             int parent_scroll_y, bool inherited_suppression = false) {
+        const bool suppress_inline = inherited_suppression || active_core_ellipsis_owner(parent, options_.text_system);
+        const auto enqueue = [&](const LayoutBox* child) {
+            pending.push_back(PendingBox{child, parent_layer, parent_scroll_y, false,
+                suppress_inline && child->style.display == Display::Inline});
+        };
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
         const std::vector<const LayoutBox*> ordered = ordered_flex_paint_children(parent);
 #else
@@ -2129,12 +2156,12 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
 #endif
         if (ordered.empty()) {
             for (auto it = parent.children.rbegin(); it != parent.children.rend(); ++it) {
-                pending.push_back(PendingBox{it->get(), parent_layer, parent_scroll_y, false});
+                enqueue(it->get());
             }
             return;
         }
         for (auto it = ordered.rbegin(); it != ordered.rend(); ++it) {
-            pending.push_back(PendingBox{*it, parent_layer, parent_scroll_y, false});
+            enqueue(*it);
         }
     };
     enqueue_children(box, &layer, layer.scroll_y);
@@ -2147,8 +2174,9 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
         if (current.exit) {
             if (!current_box->style.visibility_hidden) {
                 const std::size_t command_begin = current_layer.display_list.size();
-                paint_generated_inline_content(*current_box, current_layer.display_list,
-                    CssPseudoElement::After, options_.text_system);
+                if (!current.suppress_ellipsis_generated)
+                    paint_generated_inline_content(*current_box, current_layer.display_list,
+                        CssPseudoElement::After, options_.text_system);
                 translate_display_commands(current_layer.display_list, command_begin, 0, -current.scroll_y);
                 trim_display_list(current_layer.display_list,
                                   command_begin,
@@ -2263,7 +2291,8 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
 
         if (!current_box->style.visibility_hidden) {
             const std::size_t command_begin = target_layer->display_list.size();
-            paint_box_self(*current_box, target_layer->display_list, options_, remaining_commands);
+            paint_box_self(*current_box, target_layer->display_list, options_, remaining_commands,
+                current.suppress_ellipsis_generated);
             if (target_layer == &current_layer) {
                 translate_display_commands(target_layer->display_list, command_begin, 0, -current.scroll_y);
             }
@@ -2278,8 +2307,8 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
         const int child_scroll_y = target_layer == &current_layer
             ? safe_add(current.scroll_y, own_scroll_y)
             : own_scroll_y;
-        pending.push_back(PendingBox{current_box, target_layer, child_scroll_y, true});
-        enqueue_children(*current_box, target_layer, child_scroll_y);
+        pending.push_back(PendingBox{current_box, target_layer, child_scroll_y, true, current.suppress_ellipsis_generated});
+        enqueue_children(*current_box, target_layer, child_scroll_y, current.suppress_ellipsis_generated);
     }
 }
 
