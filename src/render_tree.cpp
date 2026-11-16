@@ -132,7 +132,23 @@ ContentsSourceStyle contents_source_style(const Style& style) {
     result.background_color = style.background_color;
     result.text_shadow = style.text_shadow;
     result.before_content_kind = style.before_content_kind;
+    result.before_content_text = style.before_content_text;
+    result.before_counter_name = style.before_counter_name;
+    result.before_counter_suffix = style.before_counter_suffix;
+    result.before_color = style.before_color;
+    result.before_color_specified = style.before_color_specified;
+    result.before_font_weight = style.before_font_weight;
+    result.before_font_weight_specified = style.before_font_weight_specified;
+    result.before_left_specified = style.before_left_specified;
     result.after_content_kind = style.after_content_kind;
+    result.after_content_text = style.after_content_text;
+    result.after_counter_name = style.after_counter_name;
+    result.after_counter_suffix = style.after_counter_suffix;
+    result.after_color = style.after_color;
+    result.after_color_specified = style.after_color_specified;
+    result.after_font_weight = style.after_font_weight;
+    result.after_font_weight_specified = style.after_font_weight_specified;
+    result.after_left_specified = style.after_left_specified;
     result.text_decoration_underline = style.text_decoration_underline;
     result.text_decoration_line_through = style.text_decoration_line_through;
     return result;
@@ -237,14 +253,18 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
     const auto record_source = [&](ContentsSourceRecord record) {
         if (!contents_sources) contents_sources = std::make_shared<ContentsSourceTopology>();
         const auto max_records = std::max<std::size_t>(1, options_.max_contents_source_records);
+        const auto record_bytes = record.text.size() + record.style.before_content_text.size() +
+            record.style.after_content_text.size() + record.style.before_counter_name.size() +
+            record.style.before_counter_suffix.size() + record.style.after_counter_name.size() +
+            record.style.after_counter_suffix.size();
         if (!contents_sources->complete) return;
         if (contents_sources->records.size() >= max_records ||
-            record.text.size() > options_.max_contents_source_bytes -
+            record_bytes > options_.max_contents_source_bytes -
                 std::min(options_.max_contents_source_bytes, contents_sources->source_bytes)) {
             contents_sources->complete = false;
             return;
         }
-        contents_sources->source_bytes += record.text.size();
+        contents_sources->source_bytes += record_bytes;
         contents_sources->records.push_back(std::move(record));
     };
     while (!pending.empty()) {

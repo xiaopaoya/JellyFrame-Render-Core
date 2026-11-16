@@ -12,6 +12,7 @@ int main() {
   try {
     Limits limits;
     Header h{16000, 0, 1, 1};
+    h.binding_identity[0] = 1;
     Cluster c{0, 2, 0, 1};
     Glyph g{42, 0, 0, 0, 16000, 0, 0, -1000};
     std::string packet = "old";
@@ -31,7 +32,8 @@ int main() {
     };
     for (std::size_t n = 0; n < packet.size(); ++n)
       refuse(packet.substr(0, n));
-    for (auto offset : {4, 6, 8, 12, 16, 20, 28, 30, 50, 54, 58, 62, 70, 98}) {
+    for (auto offset : {4, 6, 8, 12, 16, 20, 28, 30, 80, 82, 86, 90,
+                        94, 102, 130}) {
       auto zero_field = [&](std::size_t offset, unsigned width) {
         auto bad = packet;
         for (unsigned j = 0; j < width; ++j)
@@ -40,7 +42,7 @@ int main() {
       };
       zero_field(32, 8);
       zero_field(40, 8);
-      zero_field(66, 4);
+      zero_field(98, 4);
       auto limited = limits;
       limited.glyph_ceiling = 42;
       work = 1000000;
@@ -56,10 +58,10 @@ int main() {
       refuse(b);
     }
     auto b = packet;
-    b[48] = char(0xc0);
+    b[header_bytes] = char(0xc0);
     refuse(b);
     b = packet;
-    b[66] = 0;
+    b[header_bytes + 2 + cluster_bytes] = 0;
     refuse(b);
     work = 0;
     check(decode(packet, limits, work, v) == Status::limit);
@@ -98,6 +100,11 @@ int main() {
     check(encode(h, "ab", &multi, 1, gs, 2, limits, work, packet) ==
           Status::malformed);
     h.resource_id = 1;
+    h.binding_identity = {};
+    work = 1000000;
+    check(encode(h, "ab", &multi, 1, gs, 2, limits, work, packet) ==
+          Status::malformed);
+    h.binding_identity[0] = 1;
     work = 1000000;
     check(encode(h, "", nullptr, 0, nullptr, 0, limits, work, packet) ==
           Status::ok);

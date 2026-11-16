@@ -217,7 +217,8 @@ int main(int argc, char **argv) {
         check(decoded.source() == source && decoded.glyph_count() == outputs,
               name + " raw source and glyph count");
         check(decoded.header().resource_id == binding.resource_id() &&
-              decoded.header().binding_generation == binding.generation(),
+              decoded.header().binding_generation == binding.generation() &&
+              decoded.header().binding_identity == binding.content_identity(),
               name + " packet identity comes from binding");
         auto metadata = catalog.metadata();
         std::int64_t pen_x = 0, pen_y = 0;

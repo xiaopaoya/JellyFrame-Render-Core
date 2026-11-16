@@ -70,7 +70,8 @@ Status paint(const shaped_packet::View &packet,
     return Status::invalid;
   const auto header = packet.header();
   if (header.resource_id != binding.resource_id() ||
-      header.binding_generation != binding.generation())
+      header.binding_generation != binding.generation() ||
+      header.binding_identity != binding.content_identity())
     return Status::identity_mismatch;
   const auto metadata = binding.catalog().metadata();
   if (header.size_q1000 <= 0 || !metadata.raster_pixel_size)

@@ -652,7 +652,7 @@ void propagated_inline_text_decorations() {
     const auto& snapshot = *host.text_layout_cache.shared_inline->snapshot;
     std::size_t decorated_fragments = 0;
     for (const auto& fragment : snapshot.paragraph.fragments) {
-        const auto owner = snapshot.owners[fragment.owner];
+        const auto owner = snapshot.owners[fragment.owner].member;
         const auto& proof = snapshot.members[owner].proof;
         if (proof.text_decoration_underline || proof.text_decoration_line_through)
             ++decorated_fragments;
@@ -879,11 +879,73 @@ void contents_whitespace_joins_shared_paragraph() {
 
     StyleResolver pseudo_styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}main{display:block;width:120px;font-size:16px;line-height:20px}"
-        "span{display:contents}span::before{content:'['}"));
-    auto pseudo_dom = HtmlParser{}.parse("<main id='p'>A<span>B</span>C</main>");
+        "span{display:contents}span::before{content:'A';color:blue;font-weight:400}"
+        "span::after{content:'B';color:red}"));
+    auto pseudo_dom = HtmlParser{}.parse("<main id='p'>A<span id='wrap'>B</span>B</main>");
+    auto pseudo_tree = RenderTreeBuilder(pseudo_styles).build(*pseudo_dom);
+    check(pseudo_tree->contents_sources && pseudo_tree->contents_sources->complete &&
+        pseudo_tree->contents_sources->records.size() == 1 &&
+        pseudo_tree->contents_sources->records[0].style.before_content_text == "A" &&
+        pseudo_tree->contents_sources->records[0].style.after_content_text == "B",
+        "render-tree contents topology retains wrapper pseudo text and style proof");
     auto pseudo_layout = LayoutEngine(pseudo_styles, fixture.options).layout(*pseudo_dom, 140, 80);
-    check(!find(*pseudo_layout, "p").text_layout_cache.shared_inline,
-          "generated contents-wrapper source refuses shared publication atomically");
+    const auto& pseudo_host = find(*pseudo_layout, "p");
+    check(pseudo_host.text_layout_cache.shared_inline != nullptr,
+          "text-only generated contents-wrapper sources publish with a complete paragraph");
+    const auto& pseudo_snapshot = *pseudo_host.text_layout_cache.shared_inline->snapshot;
+    check(pseudo_snapshot.paragraph.normalized == "AABBB",
+          "contents wrapper before and after text retain DOM order around child text");
+    const Node* wrapper_node = &find_node(*pseudo_dom, "wrap");
+    bool wrapper_before = false, wrapper_after = false;
+    const auto layers = LayerTreeBuilder(fixture.layers).build(*pseudo_layout);
+    for (const auto& fragment : pseudo_snapshot.paragraph.fragments) {
+        const auto& owner = pseudo_snapshot.owners[fragment.owner];
+        if (owner.source_node != wrapper_node || owner.contents_source_index == static_cast<std::size_t>(-1)) continue;
+        const auto& line = pseudo_snapshot.paragraph.lines[fragment.line];
+        PreparedTextView packet;
+        check(decode_prepared_text(fragment.packet, packet), "contents pseudo packet decodes");
+        std::uint32_t cp = 0;
+        for (std::size_t i = 0; i < packet.size(); ++i) {
+            PreparedTextGlyph glyph;
+            check(packet.read(i, glyph), "contents pseudo glyph reads");
+            cp = glyph.source_codepoint;
+            const Rect rect{static_cast<int>(glyph.x / 1000), line.top,
+                std::max(1, static_cast<int>(glyph.geometry.advance / 1000)), line.height};
+            const int x = pseudo_host.rect.x + pseudo_snapshot.content_offset_x + rect.x + rect.width / 2;
+            const int y = pseudo_host.rect.y + pseudo_snapshot.content_offset_y + rect.y + rect.height / 2;
+            const auto hit = HitTester{}.hit_test(*layers, x, y);
+            if (cp == 'A') {
+                wrapper_before = true;
+                const auto color = pseudo_snapshot.owner_paints[fragment.owner].color;
+                const auto expected = pseudo_snapshot.contents_sources->records[
+                    owner.contents_source_index].style.before_color;
+                check(color.r == expected.r && color.g == expected.g && color.b == expected.b,
+                      "generated before color remains attached to its paint owner");
+                check(hit && hit.node == wrapper_node,
+                      "generated before fragment hit attribution resolves to its contents wrapper");
+            } else if (cp == 'B') {
+                wrapper_after = true;
+                const auto color = pseudo_snapshot.owner_paints[fragment.owner].color;
+                const auto expected = pseudo_snapshot.contents_sources->records[
+                    owner.contents_source_index].style.after_color;
+                check(color.r == expected.r && color.g == expected.g && color.b == expected.b,
+                      "generated after color remains attached to its paint owner");
+                check(hit && hit.node == wrapper_node,
+                      "generated after fragment hit attribution resolves to its contents wrapper");
+            }
+        }
+    }
+    check(wrapper_before && wrapper_after, "both wrapper pseudo sources have independently owned fragments");
+    check(detail::shared_inline_current(*pseudo_host.text_layout_cache.shared_inline, &fixture.system),
+          "wrapper pseudo source style and DOM membership remain in the live proof");
+
+    StyleResolver counter_styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}main{display:block;width:120px;font-size:16px;line-height:20px}"
+        "span{display:contents}span::before{content:counter(list-num)}"));
+    auto counter_dom = HtmlParser{}.parse("<main id='p'>A<span>B</span>C</main>");
+    auto counter_layout = LayoutEngine(counter_styles, fixture.options).layout(*counter_dom, 140, 80);
+    check(!find(*counter_layout, "p").text_layout_cache.shared_inline,
+          "counter generated contents-wrapper source remains fail-closed");
 
     auto complete_tree = RenderTreeBuilder(styles).build(*dom);
     RenderTreeOptions truncated_options;

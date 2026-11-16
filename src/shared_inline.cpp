@@ -190,7 +190,23 @@ ContentsSourceStyle contents_source_style(const Style& style) {
     result.background_color = style.background_color;
     result.text_shadow = style.text_shadow;
     result.before_content_kind = style.before_content_kind;
+    result.before_content_text = style.before_content_text;
+    result.before_counter_name = style.before_counter_name;
+    result.before_counter_suffix = style.before_counter_suffix;
+    result.before_color = style.before_color;
+    result.before_color_specified = style.before_color_specified;
+    result.before_font_weight = style.before_font_weight;
+    result.before_font_weight_specified = style.before_font_weight_specified;
+    result.before_left_specified = style.before_left_specified;
     result.after_content_kind = style.after_content_kind;
+    result.after_content_text = style.after_content_text;
+    result.after_counter_name = style.after_counter_name;
+    result.after_counter_suffix = style.after_counter_suffix;
+    result.after_color = style.after_color;
+    result.after_color_specified = style.after_color_specified;
+    result.after_font_weight = style.after_font_weight;
+    result.after_font_weight_specified = style.after_font_weight_specified;
+    result.after_left_specified = style.after_left_specified;
     result.text_decoration_underline = style.text_decoration_underline;
     result.text_decoration_line_through = style.text_decoration_line_through;
     return result;
@@ -318,7 +334,11 @@ struct Collector {
     std::int64_t containing_width_units = 0;
     std::vector<CoreTextAtomicGeometry> atomic_geometry;
     void append_text(LayoutBox& box, std::size_t member, std::string_view source,
-        const LayoutTextFont& font, int line_height, Color color, int font_size) {
+        const LayoutTextFont& font, int line_height, Color color, int font_size,
+        const Node* source_node = nullptr,
+        std::size_t contents_source_index = static_cast<std::size_t>(-1),
+        const TextShadowStyle* text_shadow = nullptr,
+        bool underline = false, bool line_through = false) {
         if (source.size() > max_source - bytes) throw BudgetRefusal{};
         bytes += source.size();
         budget.statistics.source_bytes += source.size();
@@ -327,13 +347,14 @@ struct Collector {
         span.font = font;
         span.line_height = line_height;
         spans.push_back(span);
-        snapshot.owners.push_back(member);
+        snapshot.owners.push_back({member, source_node ? source_node : snapshot.members[member].proof.node,
+            contents_source_index});
         SharedInlineSnapshot::OwnerPaint paint;
         paint.color = color;
         paint.font_size = font_size;
-        paint.text_shadow = box.style.text_shadow;
-        paint.text_decoration_underline = box.style.text_decoration_underline;
-        paint.text_decoration_line_through = box.style.text_decoration_line_through;
+        paint.text_shadow = text_shadow ? *text_shadow : box.style.text_shadow;
+        paint.text_decoration_underline = text_shadow ? underline : box.style.text_decoration_underline;
+        paint.text_decoration_line_through = text_shadow ? line_through : box.style.text_decoration_line_through;
         snapshot.owner_paints.push_back(paint);
     }
     bool append_generated(LayoutBox& box, std::size_t member, bool after) {
@@ -375,6 +396,10 @@ struct Collector {
             if (source.owner == owner && source.node == &node && source.kind == kind) return &source;
         }
         return nullptr;
+    }
+    std::size_t source_record_index(const ContentsSourceRecord* record) const {
+        if (!record || !snapshot.contents_sources) return static_cast<std::size_t>(-1);
+        return static_cast<std::size_t>(record - snapshot.contents_sources->records.data());
     }
     bool append_omitted(const Node& node, const ContentsSourceStyle& inherited_style,
         std::size_t member, std::size_t dom_index) {
@@ -419,7 +444,7 @@ struct Collector {
         }
         if (!snapshot.system->resolve_family_hash(source_font.family, source_font.family)) return false;
         spans.push_back({node.text, source_font, style.line_height, CoreTextParagraphSpanKind::Text});
-        snapshot.owners.push_back(member);
+        snapshot.owners.push_back({member, &node, static_cast<std::size_t>(-1)});
         SharedInlineSnapshot::OwnerPaint paint;
         paint.color = style.color;
         paint.font_size = style.font_size;
@@ -442,6 +467,36 @@ struct Collector {
         }
         return false;
     }
+    bool append_contents_generated(const ContentsSourceRecord& wrapper, std::size_t source_index,
+        std::size_t member, bool after) {
+        const auto& style = wrapper.style;
+        const auto kind = after ? style.after_content_kind : style.before_content_kind;
+        if (kind == GeneratedContentKind::None) return true;
+        if (kind != GeneratedContentKind::Text || wrapper.node == nullptr ||
+            wrapper.node->type != NodeType::Element || style.letter_spacing != 0 ||
+            style.text_transform != TextTransform::None || style.visibility_hidden ||
+            style.white_space_nowrap != snapshot.members[0].proof.nowrap ||
+            style.overflow_wrap_anywhere != snapshot.members[0].proof.anywhere ||
+            (after ? style.after_left_specified : style.before_left_specified)) return false;
+        const auto& source = after ? style.after_content_text : style.before_content_text;
+        const bool weight_specified = after ? style.after_font_weight_specified : style.before_font_weight_specified;
+        const int weight = after ? style.after_font_weight : style.before_font_weight;
+        if (source.empty() || source.size() > max_source - bytes || style.font_size < 0 ||
+            style.font_size > std::numeric_limits<int>::max() / 1000 ||
+            style.font_weight < 1 || style.font_weight > 1000 || (weight_specified && (weight < 1 || weight > 1000)))
+            return false;
+        LayoutTextFont font;
+        font.family = style.font_family_hash;
+        font.size = style.font_size * 1000;
+        font.weight = static_cast<std::uint16_t>(weight_specified ? weight : style.font_weight);
+        if (!snapshot.system->resolve_family_hash(font.family, font.family)) return false;
+        append_text(*const_cast<LayoutBox*>(snapshot.members[member].proof.box), member, source, font,
+            style.line_height, after ? (style.after_color_specified ? style.after_color : style.color)
+                : (style.before_color_specified ? style.before_color : style.color), style.font_size,
+            wrapper.node, source_index, &style.text_shadow, style.text_decoration_underline,
+            style.text_decoration_line_through);
+        return true;
+    }
     bool collect_dom_children(const Node& parent_node, const ContentsSourceStyle& parent_style,
         std::size_t member, std::size_t depth, const std::vector<LayoutBoxPtr>& boxes,
         std::size_t& rendered) {
@@ -456,11 +511,12 @@ struct Collector {
             if (const auto* wrapper = source_record(snapshot.members[member].proof.node,
                     node, ContentsSourceKind::Wrapper)) {
                 if (wrapper->dom_parent != &parent_node || wrapper->dom_index != i ||
-                    wrapper->style.before_content_kind != GeneratedContentKind::None ||
-                    wrapper->style.after_content_kind != GeneratedContentKind::None ||
                     depth >= max_depth) return false;
                 budget.work(1);
+                const auto source_index = source_record_index(wrapper);
+                if (!append_contents_generated(*wrapper, source_index, member, false)) return false;
                 if (!collect_dom_children(node, wrapper->style, member, depth+1, boxes, rendered)) return false;
+                if (!append_contents_generated(*wrapper, source_index, member, true)) return false;
                 continue;
             }
             if (node.type == NodeType::Text &&
@@ -486,7 +542,7 @@ struct Collector {
         if (image ? !eligible_inline_image(*box.node, box.style, containing_width_units,
                 image_width_units, image_height, natural_images, &image_intrinsic) :
                 (!neutral(box.style, depth == 0, false, true, depth != 0, true) ||
-                 !generated_source_eligible(box.style, depth == 0))) return false;
+                !generated_source_eligible(box.style, depth == 0))) return false;
         if (text && !accept_whitespace_mode(*box.node)) return false;
         if (depth && !text && !marker && !image && box.node->tag_name != "span") return false;
         if (box.node->text.size() > max_source-bytes) return false;
@@ -533,7 +589,8 @@ struct Collector {
             if (marker) span.kind = box.node->tag_name == "br"
                 ? CoreTextParagraphSpanKind::ForcedBreak : CoreTextParagraphSpanKind::Opportunity;
             spans.push_back(span);
-            snapshot.owners.push_back(member);
+            snapshot.owners.push_back({member, snapshot.members[member].proof.node,
+                static_cast<std::size_t>(-1)});
             SharedInlineSnapshot::OwnerPaint paint;
             paint.color = box.style.color;
             paint.font_size = box.style.font_size;
@@ -550,7 +607,8 @@ struct Collector {
             span.line_height = box.style.line_height;
             span.kind = CoreTextParagraphSpanKind::Atomic;
             spans.push_back(span);
-            snapshot.owners.push_back(member);
+            snapshot.owners.push_back({member, snapshot.members[member].proof.node,
+                static_cast<std::size_t>(-1)});
             SharedInlineSnapshot::OwnerPaint paint;
             paint.color = box.style.color;
             paint.font_size = box.style.font_size;
@@ -654,7 +712,7 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         std::size_t member_count = 0, owner_count = 0;
         if (!preflight(*host.node, 0, member_count, owner_count, budget) || member_count <= 2 || owner_count == 0) return false;
         budget.capacity(sizeof(SharedInlineSnapshot)+member_count*(sizeof(SharedInlineMember)+sizeof(SharedInlineOmittedSource))+
-            owner_count*(sizeof(std::size_t)+sizeof(CoreTextParagraphSpan)+sizeof(SharedInlineSnapshot::OwnerPaint)));
+            owner_count*(sizeof(SharedInlineOwner)+sizeof(CoreTextParagraphSpan)+sizeof(SharedInlineSnapshot::OwnerPaint)));
         auto snapshot = std::make_shared<SharedInlineSnapshot>();
         snapshot->system = options.text_system;
         snapshot->generation = options.text_system->generation();
@@ -683,7 +741,7 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         collector.atomic_geometry.reserve(owner_count);
         budget.capacity((snapshot->members.capacity()-member_count)*sizeof(SharedInlineMember)+
             (snapshot->omitted.capacity()-member_count)*sizeof(SharedInlineOmittedSource)+
-            (snapshot->owners.capacity()-owner_count)*sizeof(std::size_t)+
+            (snapshot->owners.capacity()-owner_count)*sizeof(SharedInlineOwner)+
             (snapshot->owner_paints.capacity()-owner_count)*sizeof(SharedInlineSnapshot::OwnerPaint)+
             (collector.spans.capacity()-owner_count)*sizeof(CoreTextParagraphSpan)+
             collector.atomic_geometry.capacity()*sizeof(CoreTextAtomicGeometry));
@@ -797,7 +855,7 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
             budget.work((fragment.end-fragment.begin)*2+max_depth);
             const auto bounds = fragment_bounds(fragment, snapshot->paragraph.lines[fragment.line]);
             auto ink = fragment_ink(fragment, snapshot->paragraph.lines[fragment.line]);
-            auto member = snapshot->owners[fragment.owner];
+            auto member = snapshot->owners[fragment.owner].member;
             const auto& owner_paint = snapshot->owner_paints[fragment.owner];
             const auto& owner_shadow = owner_paint.text_shadow;
             Rect shadow_ink = ink;
@@ -824,7 +882,7 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         }
         for (const auto& placement : snapshot->atomic_placements) {
             budget.work(max_depth+1);
-            const auto member_index = snapshot->owners[placement.owner];
+            const auto member_index = snapshot->owners[placement.owner].member;
             auto& image = snapshot->members[member_index];
             image.proof.image_placement = placement;
             const auto left = floor_pixel(placement.x);
@@ -845,7 +903,7 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         bindings.reserve(snapshot->members.size());
         budget.capacity((bindings.capacity()-snapshot->members.size())*sizeof(bindings[0]));
         snapshot->retained_bytes = sizeof(SharedInlineSnapshot)+snapshot->members.capacity()*sizeof(SharedInlineMember)+
-            snapshot->owners.capacity()*sizeof(std::size_t)+snapshot->owner_paints.capacity()*sizeof(SharedInlineSnapshot::OwnerPaint)+
+            snapshot->owners.capacity()*sizeof(SharedInlineOwner)+snapshot->owner_paints.capacity()*sizeof(SharedInlineSnapshot::OwnerPaint)+
             snapshot->omitted.capacity()*sizeof(SharedInlineOmittedSource)+
             snapshot->atomic_placements.capacity()*sizeof(CoreTextAtomicPlacement)+snapshot->usage.capacity;
         for (std::size_t i = 0; i < snapshot->members.size(); ++i) {
@@ -1026,6 +1084,17 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
             source.node->type != NodeType::Text || !source.node->children.empty() ||
             source.node->text != source.source) return false;
     }
+    for (const auto& owner : snapshot.owners) {
+        if (owner.member >= snapshot.members.size() || !owner.source_node) return false;
+        if (owner.contents_source_index == static_cast<std::size_t>(-1)) continue;
+        if (!snapshot.contents_sources || owner.contents_source_index >= snapshot.contents_sources->records.size()) return false;
+        const auto& source = snapshot.contents_sources->records[owner.contents_source_index];
+        if (source.kind != ContentsSourceKind::Wrapper || source.node != owner.source_node ||
+            source.owner != snapshot.members[owner.member].proof.node || !source.node ||
+            source.node->parent != source.dom_parent || !source.dom_parent ||
+            source.dom_index >= source.dom_parent->children.size() ||
+            source.dom_parent->children[source.dom_index].get() != source.node) return false;
+    }
     return true;
 }
 
@@ -1051,6 +1120,25 @@ bool shared_inline_contains(const LayoutBox& box, int x, int y) noexcept {
         if (contains(rect, x, y)) return true;
     }
     return false;
+}
+
+const Node* shared_inline_generated_hit_node(const LayoutBox& box, int x, int y) noexcept {
+    if (!box.text_layout_cache.shared_inline) return nullptr;
+    const auto& binding = *box.text_layout_cache.shared_inline;
+    if (binding.member != 0 || !shared_inline_current(binding, binding.snapshot->system)) return nullptr;
+    const auto& snapshot = *binding.snapshot;
+    const int origin_x = safe_add(box.rect.x, snapshot.content_offset_x);
+    const int origin_y = safe_add(box.rect.y, snapshot.content_offset_y);
+    for (const auto& fragment : snapshot.paragraph.fragments) {
+        if (fragment.owner >= snapshot.owners.size() || fragment.line >= snapshot.paragraph.lines.size()) continue;
+        const auto& owner = snapshot.owners[fragment.owner];
+        if (owner.contents_source_index == static_cast<std::size_t>(-1) || !owner.source_node) continue;
+        auto rect = fragment_bounds(fragment, snapshot.paragraph.lines[fragment.line]);
+        rect.x = safe_add(rect.x, origin_x);
+        rect.y = safe_add(rect.y, origin_y);
+        if (contains(rect, x, y)) return owner.source_node;
+    }
+    return nullptr;
 }
 
 Rect shared_inline_damage_bounds(const LayoutBox& box) noexcept {
@@ -1085,7 +1173,7 @@ std::size_t shared_inline_command_count(const SharedInlineBinding& binding,
     }
     for (const auto& fragment : snapshot.paragraph.fragments) {
         if (fragment.owner >= snapshot.owners.size()) return 0;
-        const auto member = snapshot.owners[fragment.owner];
+        const auto member = snapshot.owners[fragment.owner].member;
         if (member >= snapshot.members.size()) return 0;
         if (snapshot.owner_paints[fragment.owner].text_shadow.enabled) {
             if (count == max_count) return 0;
@@ -1164,7 +1252,7 @@ bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
             if (emit_atomic) {
                 const auto& placement = snapshot.atomic_placements[atomic_index++];
                 if (placement.owner >= snapshot.owners.size()) return false;
-                const auto member_index = snapshot.owners[placement.owner];
+                const auto member_index = snapshot.owners[placement.owner].member;
                 if (member_index >= snapshot.members.size()) return false;
                 const auto* image_box = snapshot.members[member_index].proof.box;
                 if (!image_box || !snapshot.members[member_index].proof.atomic_image ||

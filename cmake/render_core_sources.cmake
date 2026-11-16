@@ -114,6 +114,16 @@ endif()
 if(NOT DEFINED JELLYFRAME_ENABLE_ADVANCED_FORMS)
     set(JELLYFRAME_ENABLE_ADVANCED_FORMS ON)
 endif()
+option(JELLYFRAME_ENABLE_TEXT_SHAPING
+    "Compile the opt-in installed shaped-text binding API" OFF)
+if(JELLYFRAME_ENABLE_TEXT_SHAPING)
+    # This optional install API does not activate the experimental service or
+    # painter in any existing product path.
+    set(JELLYFRAME_RENDER_CORE_TEXT_SHAPING_ENABLED 1)
+    list(APPEND JELLYFRAME_RENDER_CORE_BASE_SOURCES src/shaped_text_binding.cpp)
+else()
+    set(JELLYFRAME_RENDER_CORE_TEXT_SHAPING_ENABLED 0)
+endif()
 if(JELLYFRAME_ENABLE_FLEX_GRID)
     set(JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED 1)
 else()

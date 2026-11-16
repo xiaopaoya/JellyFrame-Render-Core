@@ -61,15 +61,16 @@ struct Fixture {
   jellyframe::shaping_binding::Snapshot binding;
   std::uint32_t gid = 0;
   std::uint32_t scalar = 0;
-  explicit Fixture(const std::string &root) {
-    catalog_bytes = load(root + "/shaping_executor_catalog/regular.jfcat1");
-    companion = load(root + "/shaping_resource/regular.jfshr2");
+  explicit Fixture(const std::string &root, const std::string &face = "regular",
+                   std::uint16_t weight = 400) {
+    catalog_bytes = load(root + "/shaping_executor_catalog/" + face + ".jfcat1");
+    companion = load(root + "/shaping_resource/" + face + ".jfshr2");
     table_bytes = load(root + "/shaping_normalization/unicode14.bin");
-    eligibility_bytes = load(root + "/shaping_normalization/regular.eligibility");
+    eligibility_bytes = load(root + "/shaping_normalization/" + face + ".eligibility");
     shaping_catalog::Identity id;
     std::memcpy(id.shaping.source, catalog_bytes.data() + 16, 32);
     std::memcpy(id.shaping.profile, catalog_bytes.data() + 48, 32);
-    id.shaping.glyph_count = 30900; id.weight = 400;
+    id.shaping.glyph_count = 30900; id.weight = weight;
     id.trusted_companion = companion;
     id.companion_sha256 = shaping_catalog::sha256(companion);
     id.catalog_sha256 = shaping_catalog::sha256(catalog_bytes);
@@ -95,10 +96,12 @@ struct Fixture {
     check(binding_status == jellyframe::shaping_binding::Status::ok, "snapshot");
   }
 };
-std::string packet_for(std::uint64_t id, std::uint64_t generation, std::uint32_t gid,
+std::string packet_for(const shaping_binding::Snapshot &binding,
+                       std::uint64_t id, std::uint64_t generation, std::uint32_t gid,
                        std::int32_t x = 0, std::int32_t offset_x = 0,
                        std::int32_t advance_x = 0) {
   shaped_packet::Header h{16000, 0, id, generation};
+  h.binding_identity = binding.content_identity();
   shaped_packet::Cluster c{0, 1, 0, 1};
   shaped_packet::Glyph g{gid, 0, x, 0, advance_x, 0, offset_x, 0};
   std::string bytes; std::uint64_t work = 1000000;
@@ -120,7 +123,12 @@ int main(int argc, char **argv) {
   try {
     check(argc == 2, "fixture root"); Fixture f(argv[1]);
     const Color clear{13, 17, 19, 255}, ink{240, 30, 20, 255};
-    auto bytes = packet_for(73, 1, f.gid);
+    Fixture alternate(argv[1], "bold", 700);
+    check(alternate.binding.resource_id() == f.binding.resource_id() &&
+          alternate.binding.generation() == f.binding.generation() &&
+          alternate.binding.content_identity() != f.binding.content_identity(),
+          "fixture identity collision");
+    auto bytes = packet_for(f.binding, 73, 1, f.gid);
     auto v = decode(bytes);
     FrameBuffer base(64, 48, clear), target = base;
     std::uint64_t work = 1000000;
@@ -133,12 +141,13 @@ int main(int argc, char **argv) {
       auto result = shaped_painter::paint(packet, binding, target, 8 * 1000, 20 * 1000, clip, ink, budget);
       check(result == expected && same_pixels(target.pixels, before), "refusal writes framebuffer");
     };
-    auto wrong_resource_bytes = packet_for(74, 1, f.gid);
-    auto wrong_generation_bytes = packet_for(73, 2, f.gid);
-    auto missing_gid_bytes = packet_for(73, 1, 65535);
+    auto wrong_resource_bytes = packet_for(f.binding, 74, 1, f.gid);
+    auto wrong_generation_bytes = packet_for(f.binding, 73, 2, f.gid);
+    auto missing_gid_bytes = packet_for(f.binding, 73, 1, 65535);
     refuses_without_writes(decode(wrong_resource_bytes), f.binding, {0, 0, 64, 48}, 1000000, shaped_painter::Status::identity_mismatch);
     refuses_without_writes(decode(wrong_generation_bytes), f.binding, {0, 0, 64, 48}, 1000000, shaped_painter::Status::identity_mismatch);
     refuses_without_writes(decode(missing_gid_bytes), f.binding, {0, 0, 64, 48}, 1000000, shaped_painter::Status::missing_glyph);
+    refuses_without_writes(v, alternate.binding, {0, 0, 64, 48}, 1000000, shaped_painter::Status::identity_mismatch);
     refuses_without_writes(v, f.binding, {0, 0, 64, 48}, 0, shaped_painter::Status::limit);
     // A valid packet can be wholly clipped with no writes and no raster cost.
     target.pixels = base.pixels; work = 1000000;
@@ -149,13 +158,13 @@ int main(int argc, char **argv) {
       if (x < 10 || x >= 13 || y < 16 || y >= 20)
         check(target.pixel(x, y).r == clear.r && target.pixel(x, y).g == clear.g && target.pixel(x, y).b == clear.b, "clip bounds");
     // Explicit offset moves the bitmap; advance is metadata and does not recur.
-    auto advance_bytes = packet_for(73, 1, f.gid, 0, 0, 30000);
+    auto advance_bytes = packet_for(f.binding, 73, 1, f.gid, 0, 0, 30000);
     auto advance_only = decode(advance_bytes);
     target = base; work = 1000000;
     auto advance_status = shaped_painter::paint(advance_only, f.binding, target, 8 * 1000, 20 * 1000, {0, 0, 64, 48}, ink, work);
     check(advance_status == shaped_painter::Status::ok, "advance paint status=" + std::to_string(static_cast<int>(advance_status)));
     check(same_pixels(target.pixels, saved), "advance does not alter explicit pen position");
-    auto shifted_bytes = packet_for(73, 1, f.gid, 0, 6000, 30000);
+    auto shifted_bytes = packet_for(f.binding, 73, 1, f.gid, 0, 6000, 30000);
     auto shifted = decode(shifted_bytes);
     target = base; work = 1000000;
     check(shaped_painter::paint(shifted, f.binding, target, 8 * 1000, 20 * 1000, {0, 0, 64, 48}, ink, work) == shaped_painter::Status::ok, "offset paint");

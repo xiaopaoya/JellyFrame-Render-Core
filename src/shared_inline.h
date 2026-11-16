@@ -68,6 +68,11 @@ struct SharedInlineMember {
     Rect ink_bounds;
     std::vector<Rect> fragments;
 };
+struct SharedInlineOwner {
+    std::size_t member = 0;
+    const Node* source_node = nullptr;
+    std::size_t contents_source_index = static_cast<std::size_t>(-1);
+};
 struct SharedInlineOmittedSource {
     SharedInlineOmittedSource() : source(0, '\0') {}
     const Node* node = nullptr;
@@ -100,7 +105,7 @@ struct SharedInlineSnapshot {
     ComputedSizeStorage host_computed_sizes;
     CoreTextParagraph paragraph;
     std::vector<SharedInlineMember> members;
-    std::vector<std::size_t> owners;
+    std::vector<SharedInlineOwner> owners;
     struct OwnerPaint {
         Color color;
         int font_size = 14;
@@ -132,6 +137,7 @@ int shared_list_marker_width(std::string_view text, int font_size) noexcept;
 void retire_shared_inline(LayoutBox&) noexcept;
 bool shared_inline_current(const SharedInlineBinding&, const TextSystem*) noexcept;
 bool shared_inline_contains(const LayoutBox&, int x, int y) noexcept;
+const Node* shared_inline_generated_hit_node(const LayoutBox&, int x, int y) noexcept;
 Rect shared_inline_damage_bounds(const LayoutBox&) noexcept;
 std::size_t shared_inline_command_count(const SharedInlineBinding&, const TextSystem*) noexcept;
 bool emit_shared_inline(const LayoutBox&, DisplayList&,

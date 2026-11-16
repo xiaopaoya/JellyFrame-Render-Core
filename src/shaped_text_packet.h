@@ -1,15 +1,19 @@
 #pragma once
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
 namespace jellyframe {
 namespace shaped_packet {
-constexpr std::size_t header_bytes = 48, cluster_bytes = 16, glyph_bytes = 36;
+constexpr std::size_t header_bytes = 80, cluster_bytes = 16, glyph_bytes = 36;
+constexpr std::size_t binding_identity_offset = 48;
+constexpr std::uint16_t packet_version = 2;
 struct Header {
   std::int32_t size_q1000 = 0;
   std::uint16_t selection = 0;
   std::uint64_t resource_id = 0, binding_generation = 0;
+  std::array<unsigned char, 32> binding_identity{};
 };
 struct Cluster {
   std::uint32_t source_begin = 0, source_end = 0, glyph_begin = 0,
