@@ -1,0 +1,47 @@
+{
+  "unicode": "14.0.0",
+  "normalizationTestSHA256": "7cb30cc2abe6c29c292b99095865d379ce1213045c78c4ff59c7e9391bbe2331",
+  "normalizationTestURL": "https://www.unicode.org/Public/14.0.0/ucd/NormalizationTest.txt",
+  "tableSHA256": "ca3dc9d15422fbdcb9ab5c168dd351209db98cf444be479bc448712a1cd3d000",
+  "tableBytes": 50334,
+  "generatorSHA256": "22d90593867d2360d2c60c77717e222a70d85ed8f9786239c26f60e62d395b16",
+  "propertiesSHA256": "e3eddd7d469cd1b0feed7528defad1a1cc7c6a9ceb0ae4446a6d10921ed2e7bc",
+  "propertiesURL": "https://www.unicode.org/Public/14.0.0/ucd/DerivedCoreProperties.txt",
+  "faces": {
+    "Regular": {
+      "sourceSHA256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "eligibilitySHA256": "a7f41b404d87492de0c4bc1d5b6ae2a2fb10cc303bf0d01f2b2910bb1dba0021",
+      "bytes": 198
+    },
+    "Medium": {
+      "sourceSHA256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "eligibilitySHA256": "7f9f439d7db3d6af4280e0e9fff2e150c29be1cb9c4e0fc2b35393f6d68e6a04",
+      "bytes": 198
+    },
+    "Bold": {
+      "sourceSHA256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "eligibilitySHA256": "bee817e730d9a4eb1b6eb3bada1ab5fbd0c0359069d5cc199d99eca846065802",
+      "bytes": 198
+    }
+  },
+  "synthetic": {
+    "sourceSHA256": "ebb7541e9dd20918a8fef78369389da5f6120527a72d13daa51a0f00020217ad",
+    "purpose": "Unicode14 algorithm tests only; artificial complete test map/composition eligibility; not real font raster evidence",
+    "synthetic.jfcat1": {
+      "sha256": "5706c0ae63e0d2fa190d06792bd3c80819baacced12b117a2722baa1b0e8cdce",
+      "bytes": 882995
+    },
+    "synthetic.jfshr2": {
+      "sha256": "c2dd6e3a03163da64e65a89f0a44687f080fd345090650d2745c987591468e8e",
+      "bytes": 41598
+    },
+    "synthetic.eligibility": {
+      "sha256": "8d9c00d1fafa9cf42ee2ab0bc155d70b1bee6df5c5f8a5cc0d22c2c7733e593c",
+      "bytes": 198
+    },
+    "oracle.txt": {
+      "sha256": "188650dcff3f6604c7354ad643cfe45ad6203daed53a45cc037c2c09bc732d6f",
+      "bytes": 154
+    }
+  }
+}
