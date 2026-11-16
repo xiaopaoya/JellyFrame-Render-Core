@@ -34,6 +34,7 @@ set(JELLYFRAME_RENDER_CORE_CORE_DOCUMENT_SOURCES
     src/shaping_lookup_executor.cpp
     src/shaping_catalog.cpp
     src/shaping_catalog_sha256.cpp
+    src/shaping_normalization.cpp
     src/text_system.cpp
 )
 
