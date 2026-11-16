@@ -1,14 +1,14 @@
 #pragma once
 #include "shaped_text_packet.h"
+#include "shaping_binding.h"
 #include "shaping_lookup_executor.h"
 #include "shaping_normalization.h"
 namespace jellyframe {
 namespace shaped_service {
 struct Request {
-  const shaping_catalog::View *catalog = nullptr;
-  const shaping_normalization::Tables *tables = nullptr;
-  const shaping_normalization::Eligibility *eligibility = nullptr;
-  shaped_packet::Header packet;
+  const shaping_binding::Snapshot *binding = nullptr;
+  std::int32_t size_q1000 = 16000;
+  std::uint16_t selection = 0;
 };
 // Every span is scratch and may change on refusal. All spans must be disjoint.
 struct Buffers {

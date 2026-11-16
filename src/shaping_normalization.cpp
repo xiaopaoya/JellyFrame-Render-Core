@@ -199,8 +199,16 @@ Status validate_eligibility(std::string_view b, const Hash &expected,
     return Status::malformed;
   Eligibility v;
   v.bytes_ = b;
+  v.tables_identity_ = t.identity();
+  v.catalog_identity_ = shaping_catalog::sha256(cat.bytes());
   out = v;
   return Status::ok;
+}
+bool Eligibility::matches(const Tables &tables,
+                          const shaping_catalog::View &catalog) const noexcept {
+  return !bytes_.empty() && !tables.bytes().empty() && !catalog.bytes().empty() &&
+         tables.identity() == tables_identity_ &&
+         shaping_catalog::sha256(catalog.bytes()) == catalog_identity_;
 }
 Status normalize(const Tables &tables, const Eligibility &e,
                  const shaping_catalog::View &cat, std::string_view src,

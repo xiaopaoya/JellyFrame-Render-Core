@@ -8,6 +8,39 @@
 #include <vector>
 using namespace jellyframe;
 namespace {
+using FontBytes = std::vector<std::uint8_t>;
+void put16(FontBytes &b, std::size_t at, unsigned v) {
+  b[at] = static_cast<std::uint8_t>(v);
+  b[at + 1] = static_cast<std::uint8_t>(v >> 8);
+}
+void put32(FontBytes &b, std::size_t at, std::uint32_t v) {
+  for (unsigned i = 0; i < 4; ++i)
+    b[at + i] = static_cast<std::uint8_t>(v >> (i * 8));
+}
+FontBytes font_resource(const shaping_catalog::Metrics &m) {
+  FontBytes b(168, 0);
+  const char magic[] = "JFFONT2";
+  std::memcpy(b.data(), magic, 8);
+  put16(b, 8, 2); put16(b, 10, 128); put16(b, 12, 40); put16(b, 14, 1);
+  put32(b, 16, static_cast<std::uint32_t>(b.size()));
+  put32(b, 20, 1); put32(b, 24, 128); put32(b, 28, 168); put32(b, 32, 0);
+  put16(b, 36, m.units_per_em); put16(b, 38, m.raster_pixel_size);
+  put16(b, 40, m.weight); b[42] = m.coverage_bits;
+  put32(b, 44, static_cast<std::uint32_t>(m.ascent));
+  put32(b, 48, static_cast<std::uint32_t>(m.descent));
+  put32(b, 52, static_cast<std::uint32_t>(m.line_gap));
+  std::memcpy(b.data() + 64, m.source_sha256.data(), 32);
+  put32(b, 100, 1); put16(b, 104, 1);
+  put32(b, 128, 32); put32(b, 132, 1); put32(b, 136, 250);
+  std::uint32_t crc = 0xffffffffU;
+  for (auto value : b) {
+    crc ^= value;
+    for (unsigned bit = 0; bit < 8; ++bit)
+      crc = (crc >> 1) ^ (0xedb88320U & (0U - (crc & 1U)));
+  }
+  put32(b, 96, ~crc);
+  return b;
+}
 void check(bool value, const std::string &message) {
   if (!value) throw std::runtime_error(message);
 }
@@ -67,6 +100,66 @@ int main(int argc, char **argv) {
       check(shaping_normalization::validate_eligibility(eligibility_bytes,
           shaping_catalog::sha256(eligibility_bytes), tables, catalog, work,
           eligibility) == shaping_normalization::Status::ok, name + " eligibility");
+      auto font_bytes = font_resource(catalog.metadata());
+      FontResource font;
+      check(font.load(font_bytes.data(), font_bytes.size()) ==
+          FontResourceStatus::Loaded, name + " font resource");
+      shaping_binding::BindingState binding_state;
+      shaping_binding::Snapshot binding;
+      check(binding_state.bind(catalog, font, tables, eligibility, 42, binding) ==
+          shaping_binding::Status::ok && binding.valid() &&
+          binding.resource_id() == 42 && binding.generation() == 1,
+          name + " binding");
+      auto bad_font_metadata = catalog.metadata();
+      ++bad_font_metadata.weight;
+      auto bad_font_bytes = font_resource(bad_font_metadata);
+      FontResource bad_font;
+      check(bad_font.load(bad_font_bytes.data(), bad_font_bytes.size()) ==
+          FontResourceStatus::Loaded, name + " mismatched font setup");
+      shaping_binding::Snapshot mismatched_font;
+      check(binding_state.bind(catalog, bad_font, tables, eligibility, 45,
+                               mismatched_font) == shaping_binding::Status::invalid &&
+          binding_state.generation() == 1 && !mismatched_font.valid(),
+          name + " reject mismatched font metadata");
+      auto retained_binding = binding;
+      shaping_binding::Snapshot refused_binding;
+      check(binding_state.bind(catalog, font, tables, eligibility, 0,
+                               refused_binding) == shaping_binding::Status::invalid &&
+          binding_state.generation() == 1 && binding.generation() == 1 &&
+          !refused_binding.valid(), name + " binding refusal rollback");
+      shaping_binding::Snapshot replacement_binding;
+      check(binding_state.bind(catalog, font, tables, eligibility, 43,
+                               replacement_binding) == shaping_binding::Status::ok &&
+          replacement_binding.generation() == 2 &&
+          retained_binding.generation() == 1 &&
+          retained_binding.resource_id() == 42,
+          name + " immutable retained binding");
+      if (face == "regular") {
+        auto other_bytes = load(root + "/shaping_executor_catalog/bold.jfcat1");
+        auto other_companion = load(root + "/shaping_resource/bold.jfshr2");
+        shaping_catalog::Identity other_identity;
+        std::memcpy(other_identity.shaping.source, other_bytes.data() + 16, 32);
+        std::memcpy(other_identity.shaping.profile, other_bytes.data() + 48, 32);
+        other_identity.shaping.glyph_count = 30900;
+        other_identity.weight = 700;
+        other_identity.trusted_companion = other_companion;
+        other_identity.companion_sha256 = shaping_catalog::sha256(other_companion);
+        other_identity.catalog_sha256 = shaping_catalog::sha256(other_bytes);
+        shaping_catalog::View other_catalog;
+        work = 100000000;
+        check(shaping_catalog::bind(other_bytes, other_identity, {}, work,
+                                    other_catalog) == shaping_catalog::Status::ok,
+              "alternate catalog setup");
+        auto other_font_bytes = font_resource(other_catalog.metadata());
+        FontResource other_font;
+        check(other_font.load(other_font_bytes.data(), other_font_bytes.size()) ==
+              FontResourceStatus::Loaded, "alternate font setup");
+        shaping_binding::Snapshot mismatched;
+        check(binding_state.bind(other_catalog, other_font, tables, eligibility, 44,
+                                 mismatched) == shaping_binding::Status::invalid &&
+              !mismatched.valid() && binding_state.generation() == 2,
+              "reject eligibility from another catalog");
+      }
       std::ifstream oracle(root + "/shaping_executor/" + name);
       unsigned selection, inputs, outputs;
       oracle >> selection >> inputs >> outputs;
@@ -83,10 +176,10 @@ int main(int argc, char **argv) {
       shaped_service::Buffers buffers{ns.data(), normalized.data(), ns.size(),
           normalized.size(), input.data(), scratch.data(), positioned.data(),
           input.size(), glyphs.data(), clusters.data(), clusters.size()};
-      shaped_service::Request request{&catalog, &tables, &eligibility,
-          {16000, static_cast<std::uint16_t>(selection), 42, 7}};
+      shaped_service::Request request{&binding, 16000,
+          static_cast<std::uint16_t>(selection)};
       for (int pixels : {16000, 20000, 24000, 17750}) {
-        request.packet.size_q1000 = pixels;
+        request.size_q1000 = pixels;
         std::string packet = "previous packet";
         shaped_service::Metrics metrics;
         work = 100000000;
@@ -99,6 +192,9 @@ int main(int argc, char **argv) {
             shaped_packet::Status::ok, name + " decode");
         check(decoded.source() == source && decoded.glyph_count() == outputs,
               name + " raw source and glyph count");
+        check(decoded.header().resource_id == binding.resource_id() &&
+              decoded.header().binding_generation == binding.generation(),
+              name + " packet identity comes from binding");
         auto metadata = catalog.metadata();
         std::int64_t pen_x = 0, pen_y = 0;
         for (unsigned i = 0; i < outputs; ++i) {
