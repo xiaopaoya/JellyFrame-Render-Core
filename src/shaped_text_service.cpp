@@ -41,10 +41,12 @@ bool span(const void *p, std::size_t n, std::size_t width, Span &s) {
 Status prepare(const Request &r, std::string_view source, const Buffers &b,
                const Limits &limits, std::uint64_t &work, std::string &packet,
                Metrics &metrics) noexcept {
-  if (!r.catalog || !r.tables || !r.eligibility || r.catalog->bytes().empty() ||
-      r.packet.size_q1000 <= 0 || !r.packet.resource_id ||
-      !r.packet.binding_generation || r.packet.selection > 4)
+  if (!r.binding || !r.binding->valid() || r.size_q1000 <= 0 ||
+      r.selection > 4)
     return Status::invalid;
+  const auto &catalog = r.binding->catalog();
+  const auto &tables = r.binding->tables();
+  const auto &eligibility = r.binding->eligibility();
   Span spans[10];
   if (!span(b.normalization_scratch, b.normalization_capacity,
             sizeof(*b.normalization_scratch), spans[0]) ||
@@ -60,16 +62,17 @@ Status prepare(const Request &r, std::string_view source, const Buffers &b,
       !span(&packet, 1, sizeof(packet), spans[9]))
     return Status::capacity;
   std::string_view reads[] = {source,
-                              r.catalog->bytes(),
-                              r.catalog->companion_bytes(),
-                              r.tables->bytes(),
-                              r.eligibility->bytes(),
+                              catalog.bytes(),
+                              catalog.companion_bytes(),
+                              tables.bytes(),
+                              eligibility.bytes(),
                               {reinterpret_cast<const char *>(&r), sizeof(r)},
                               {reinterpret_cast<const char *>(&b), sizeof(b)},
                               {reinterpret_cast<const char *>(&limits), sizeof(limits)},
-                              {reinterpret_cast<const char *>(r.catalog), sizeof(*r.catalog)},
-                              {reinterpret_cast<const char *>(r.tables), sizeof(*r.tables)},
-                              {reinterpret_cast<const char *>(r.eligibility), sizeof(*r.eligibility)}};
+                              {reinterpret_cast<const char *>(r.binding), sizeof(*r.binding)},
+                              {reinterpret_cast<const char *>(&catalog), sizeof(catalog)},
+                              {reinterpret_cast<const char *>(&tables), sizeof(tables)},
+                              {reinterpret_cast<const char *>(&eligibility), sizeof(eligibility)}};
   for (unsigned i = 0; i < 10; ++i) {
     for (unsigned j = 0; j < i; ++j)
       if (spans[i].begin < spans[j].end && spans[j].begin < spans[i].end)
@@ -91,7 +94,7 @@ Status prepare(const Request &r, std::string_view source, const Buffers &b,
   }
   std::size_t count = 0;
   auto norm = shaping_normalization::normalize(
-      *r.tables, *r.eligibility, *r.catalog, source, b.normalization_scratch,
+      tables, eligibility, catalog, source, b.normalization_scratch,
       b.normalization_capacity, b.normalized, b.normalized_capacity, count,
       limits.normalization, work);
   if (norm != shaping_normalization::Status::ok)
@@ -109,7 +112,7 @@ Status prepare(const Request &r, std::string_view source, const Buffers &b,
   shaping_lookup::Ledger ledger{work, std::uint64_t(limits.packet.glyphs) * 2};
   std::size_t substituted = 0;
   auto status = shaping_lookup::substitute(
-      *r.catalog, r.packet.selection, b.input, count, b.scratch,
+      catalog, r.selection, b.input, count, b.scratch,
       b.glyph_capacity, b.positioned, b.glyph_capacity, substituted, ledger);
   work = ledger.work;
   if (status != shaping_lookup::Status::ok)
@@ -118,21 +121,21 @@ Status prepare(const Request &r, std::string_view source, const Buffers &b,
     if (!take(work, 17))
       return Status::limit;
     FontGlyphView glyph;
-    if (!r.catalog->find_gid(b.positioned[i].gid, glyph))
+    if (!catalog.find_gid(b.positioned[i].gid, glyph))
       return Status::invalid;
     b.positioned[i].advance_x = glyph.advance;
   }
   ledger.work = work;
   count = 0;
   status = shaping_lookup::position(
-      *r.catalog, r.packet.selection, b.positioned, substituted, b.scratch,
+      catalog, r.selection, b.positioned, substituted, b.scratch,
       b.glyph_capacity, b.input, b.glyph_capacity, count, ledger);
   work = ledger.work;
   if (status != shaping_lookup::Status::ok)
     return Status::lookup;
   Metrics draft;
-  auto m = r.catalog->metadata();
-  auto size = r.packet.size_q1000;
+  auto m = catalog.metadata();
+  auto size = r.size_q1000;
   if (!scale(m.ascent, size, m.units_per_em, draft.ascent) ||
       !scale(m.descent, size, m.units_per_em, draft.descent) ||
       !scale(m.line_gap, size, m.units_per_em, draft.line_gap))
@@ -169,7 +172,7 @@ Status prepare(const Request &r, std::string_view source, const Buffers &b,
     if (!take(work, 17))
       return Status::limit;
     FontGlyphView raster;
-    if (!r.catalog->find_gid(g.gid, raster))
+    if (!catalog.find_gid(g.gid, raster))
       return Status::invalid;
     std::int32_t bx, by, width, height;
     if (!scale(raster.bearing_x, size, m.raster_pixel_size, bx) ||
@@ -206,9 +209,12 @@ Status prepare(const Request &r, std::string_view source, const Buffers &b,
     return Status::overflow;
   draft.glyph_count = count;
   draft.cluster_count = clusters;
-  auto encoded =
-      shaped_packet::encode(r.packet, source, b.clusters, clusters, b.glyphs,
-                            count, limits.packet, work, packet);
+  shaped_packet::Header header{r.size_q1000, r.selection,
+                               r.binding->resource_id(),
+                               r.binding->generation()};
+  auto encoded = shaped_packet::encode(header, source, b.clusters, clusters,
+                                       b.glyphs, count, limits.packet, work,
+                                       packet);
   if (encoded != shaped_packet::Status::ok)
     return Status::packet;
   metrics = draft;

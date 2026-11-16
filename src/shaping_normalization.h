@@ -30,9 +30,13 @@ private:
 class Eligibility {
 public:
   std::string_view bytes() const noexcept { return bytes_; }
+  bool matches(const Tables &tables,
+               const shaping_catalog::View &catalog) const noexcept;
 
 private:
   std::string_view bytes_;
+  Hash tables_identity_{};
+  Hash catalog_identity_{};
   friend Status validate_eligibility(std::string_view, const Hash &,
                                      const Tables &,
                                      const shaping_catalog::View &,

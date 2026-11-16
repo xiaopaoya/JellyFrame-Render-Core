@@ -77,6 +77,7 @@ set(JELLYFRAME_RENDER_CORE_CORE_PAINT_SOURCES
 # sources directly to this list.
 set(JELLYFRAME_RENDER_CORE_BASE_SOURCES
     src/shaped_text_service.cpp
+    src/shaping_binding.cpp
     src/shaped_text_packet.cpp
     ${JELLYFRAME_RENDER_CORE_CORE_DOCUMENT_SOURCES}
     ${JELLYFRAME_RENDER_CORE_CORE_PAINT_SOURCES}
