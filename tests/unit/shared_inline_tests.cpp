@@ -815,6 +815,84 @@ void preserved_whitespace_shared_paragraph() {
     check(marker_host.text_layout_cache.shared_inline != nullptr,
           "wbr does not conflict with preserved text mode");
 }
+void contents_whitespace_joins_shared_paragraph() {
+    Fixture fixture;
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}main{display:block;width:120px;font-size:16px;line-height:20px}"
+        "span{display:contents}#inner{color:#0000ff;font-size:20px}"));
+    auto dom = HtmlParser{}.parse(
+        "<main id='p'>A<span id='outer'><span id='inner'> \t </span></span>B</main>");
+    auto layout = LayoutEngine(styles, fixture.options).layout(*dom, 140, 80);
+    const auto& host = find(*layout, "p");
+    check(host.text_layout_cache.shared_inline != nullptr,
+          "nested display:contents whitespace uses the shared paragraph path");
+    const auto& snapshot = *host.text_layout_cache.shared_inline->snapshot;
+    check(snapshot.paragraph.normalized == "A B",
+          "collapsible whitespace across nested transparent wrappers is retained once");
+    check(snapshot.omitted.size() == 1 && snapshot.omitted.front().node->parent ==
+              &find_node(*dom, "inner"),
+          "restored whitespace keeps its original DOM text-node identity");
+    check(host.text_layout_cache.contents_sources &&
+              host.text_layout_cache.contents_sources->records.back().style.color.b == 255 &&
+              host.text_layout_cache.contents_sources->records.back().style.font_size == 20,
+          "render-tree topology records nested inherited text style");
+    check(snapshot.owner_paints.size() == 3,
+          "nested whitespace contributes its own source paint record");
+    check(snapshot.owner_paints[1].color.b == 255 && snapshot.owner_paints[1].font_size == 20,
+          "omitted source uses its contents ancestor's computed text style");
+    check(detail::shared_inline_current(*host.text_layout_cache.shared_inline, &fixture.system),
+          "transparent-wrapper source membership is part of the live binding proof");
+
+    auto stale = host.text_layout_cache.shared_inline;
+    find_node(*dom, "inner").children.front()->set_text("  ");
+    check(!detail::shared_inline_current(*stale, &fixture.system),
+          "mutating nested source invalidates the retained paragraph snapshot");
+    auto changed = LayoutEngine(styles, fixture.options).layout(*dom, 140, 80);
+    check(find(*changed, "p").text_layout_cache.shared_inline &&
+              find(*changed, "p").text_layout_cache.shared_inline->snapshot->paragraph.normalized == "A B",
+          "rebuilding after nested whitespace mutation republishes the complete source");
+
+    RenderTreeOptions limited_options;
+    limited_options.max_contents_source_records = 1;
+    auto limited_tree = RenderTreeBuilder(styles, limited_options).build(*dom);
+    auto limited_layout = LayoutEngine(styles, fixture.options).layout(*limited_tree, 140, 80);
+    check(!find(*limited_layout, "p").text_layout_cache.shared_inline,
+          "incomplete contents topology refuses shared publication atomically");
+
+    StyleResolver nowrap_styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}main{display:block;width:120px;font-size:16px;line-height:20px}"
+        "span{display:contents}#inner{white-space:nowrap}"));
+    auto nowrap_dom = HtmlParser{}.parse(
+        "<main id='p'>A<span><span id='inner'> </span></span>B</main>");
+    auto nowrap_layout = LayoutEngine(nowrap_styles, fixture.options).layout(*nowrap_dom, 140, 80);
+    check(!find(*nowrap_layout, "p").text_layout_cache.shared_inline,
+          "mismatched white-space policy on an omitted contents source refuses whole publication");
+
+    StyleResolver spacing_styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}main{display:block;width:120px;font-size:16px;line-height:20px}"
+        "span{display:contents}#inner{letter-spacing:1px}"));
+    auto spacing_dom = HtmlParser{}.parse(
+        "<main id='p'>A<span><span id='inner'> </span></span>B</main>");
+    auto spacing_layout = LayoutEngine(spacing_styles, fixture.options).layout(*spacing_dom, 140, 80);
+    check(!find(*spacing_layout, "p").text_layout_cache.shared_inline,
+          "unsupported inherited letter spacing on an omitted source refuses whole publication");
+
+    StyleResolver pseudo_styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0}main{display:block;width:120px;font-size:16px;line-height:20px}"
+        "span{display:contents}span::before{content:'['}"));
+    auto pseudo_dom = HtmlParser{}.parse("<main id='p'>A<span>B</span>C</main>");
+    auto pseudo_layout = LayoutEngine(pseudo_styles, fixture.options).layout(*pseudo_dom, 140, 80);
+    check(!find(*pseudo_layout, "p").text_layout_cache.shared_inline,
+          "generated contents-wrapper source refuses shared publication atomically");
+
+    auto complete_tree = RenderTreeBuilder(styles).build(*dom);
+    RenderTreeOptions truncated_options;
+    truncated_options.max_render_objects = count_render_objects(*complete_tree) - 1;
+    auto truncated_tree = RenderTreeBuilder(styles, truncated_options).build(*dom);
+    auto truncated_layout = LayoutEngine(styles, fixture.options).layout(*truncated_tree, 140, 80);
+    check(!find(*truncated_layout, "p").text_layout_cache.shared_inline,
+          "render-object budget truncation cannot publish a partial paragraph");
+}
 void partition_and_live_proof() {
     Fixture fixture;
     for (const char* align : {"start", "center", "end"}) {
@@ -1854,6 +1932,7 @@ int main() {
         propagated_inline_text_decorations();
         shared_mixed_font_and_line_height_owners();
         preserved_whitespace_shared_paragraph();
+        contents_whitespace_joins_shared_paragraph();
         partition_and_live_proof();
         refusal_and_rollback();
         mutation_damage_and_tiling();

@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace jellyframe {
@@ -27,11 +28,49 @@ enum class RenderObjectType {
     Text,
 };
 
+enum class ContentsSourceKind { Wrapper, OmittedWhitespace };
+
+struct ContentsSourceStyle {
+    std::uint32_t font_family_hash = 0;
+    int font_size = 14;
+    int font_weight = 400;
+    int line_height = -1;
+    std::int16_t letter_spacing = 0;
+    TextTransform text_transform = TextTransform::None;
+    bool white_space_nowrap = false;
+    bool overflow_wrap_anywhere = false;
+    bool visibility_hidden = false;
+    Color color{0, 0, 0, 255};
+    Color background_color{0, 0, 0, 0};
+    TextShadowStyle text_shadow;
+    GeneratedContentKind before_content_kind = GeneratedContentKind::None;
+    GeneratedContentKind after_content_kind = GeneratedContentKind::None;
+    bool text_decoration_underline = false;
+    bool text_decoration_line_through = false;
+};
+
+struct ContentsSourceRecord {
+    ContentsSourceKind kind = ContentsSourceKind::Wrapper;
+    const Node* owner = nullptr;
+    const Node* node = nullptr;
+    const Node* dom_parent = nullptr;
+    std::size_t dom_index = 0;
+    ContentsSourceStyle style;
+    std::string text;
+};
+
+struct ContentsSourceTopology {
+    bool complete = true;
+    std::size_t source_bytes = 0;
+    std::vector<ContentsSourceRecord> records;
+};
+
 struct RenderObject {
     RenderObjectType type = RenderObjectType::Block;
     const Node* node = nullptr;
     Style style;
     std::vector<RenderObjectPtr> children;
+    std::shared_ptr<const ContentsSourceTopology> contents_sources;
 };
 
 struct RenderTreeOptions {
@@ -40,6 +79,8 @@ struct RenderTreeOptions {
     const std::vector<StyleOverride>* style_overrides = nullptr;
     int viewport_width = 360;
     int viewport_height = 240;
+    std::size_t max_contents_source_records = 512;
+    std::size_t max_contents_source_bytes = 8192;
 };
 
 class RenderTreeBuilder {
