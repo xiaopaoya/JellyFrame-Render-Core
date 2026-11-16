@@ -31,6 +31,7 @@ set(JELLYFRAME_RENDER_CORE_CORE_DOCUMENT_SOURCES
     src/intrinsic_source_query.cpp
     src/intrinsic_source_query_height.cpp
     src/shaping_resource.cpp
+    src/shaping_lookup_executor.cpp
     src/shaping_catalog.cpp
     src/shaping_catalog_sha256.cpp
     src/text_system.cpp

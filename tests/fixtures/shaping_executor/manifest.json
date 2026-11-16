@@ -1,0 +1,266 @@
+{
+  "fontTools": "4.60.1",
+  "uharfbuzz": "0.57.0",
+  "cases": [
+    {
+      "file": "regular-combining-compose.txt",
+      "sourceSha256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "input": "A\u0301",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "d02dd1814dcd6d53daf67bdd4bf0c9d15e84536df5a185cf8f3bf15c26f91186"
+    },
+    {
+      "file": "regular-common-ligature.txt",
+      "sourceSha256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "input": "office",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "0388dcd493eccb1e8997709325970f60daaaf25c117b53a862c889005c62a202"
+    },
+    {
+      "file": "regular-regional-locl-en-control.txt",
+      "sourceSha256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "input": "\u2014",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "98922b328b19207054926693e4f6620f77b1491358adfd2d7bb1c6519847c97b"
+    },
+    {
+      "file": "regular-regional-locl.txt",
+      "sourceSha256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "input": "\u2014",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "69f7cbd9b57f7e2e6f94a8f09992c6ea04018ec64e4e5791335b47e5e948a58c"
+    },
+    {
+      "file": "regular-chinese-punctuation.txt",
+      "sourceSha256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "input": "\u4e2d\u6587\uff0c\u3002\uff01\uff1f",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "46531b1dc185d59be1feacfb2dbad5ad59aca2b56ad9b6f6647cc884ea2ce2a0"
+    },
+    {
+      "file": "regular-latin-kerning.txt",
+      "sourceSha256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "input": "AVATAR To Wa",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "9db997bcd5235eb6c0c7f85ca6a2312880f3361cb638e19021035787949448df"
+    },
+    {
+      "file": "regular-mark-attachment.txt",
+      "sourceSha256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "input": "\u3113\u0300",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "6f6309e720653e33791f790031bc9bb7ca52eaa1e84a4537cace29ad8b88309b"
+    },
+    {
+      "file": "regular-mark-attachment-double.txt",
+      "sourceSha256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "input": "\u3113\u0300\u0301",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "313fc42d3c57a7ae8f92ede5f09b9f5a5e0ec0150dd7ab98201da1fdadc5594f"
+    },
+    {
+      "file": "regular-mark-attachment-cross-lookup.txt",
+      "sourceSha256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "input": "\u3113\u0307\u0300",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "b4200d14fa6485639e5fa608a75b46a97b31d7818883fd8a71db69dfaad1436d"
+    },
+    {
+      "file": "regular-mark-chain.txt",
+      "sourceSha256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "input": "A\u0307\u0301",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "d0ac203ef0887c1e29483f266d61326f65df0e9c037524aa108de650e15027ff"
+    },
+    {
+      "file": "medium-combining-compose.txt",
+      "sourceSha256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "input": "A\u0301",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "2ce7204bd02c684ad52390c86dbd09c7550dfccb2c3fa4e4e89f1ea042c59634"
+    },
+    {
+      "file": "medium-common-ligature.txt",
+      "sourceSha256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "input": "office",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "925e6b2b987a004b1371a6683060c65fd950922a74ea050f8ac9e9b2de67da47"
+    },
+    {
+      "file": "medium-regional-locl-en-control.txt",
+      "sourceSha256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "input": "\u2014",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "ae1eddb2e13f14eea03ce3285c3e0ec75325fdf907d166f662a237df81e82102"
+    },
+    {
+      "file": "medium-regional-locl.txt",
+      "sourceSha256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "input": "\u2014",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "69f7cbd9b57f7e2e6f94a8f09992c6ea04018ec64e4e5791335b47e5e948a58c"
+    },
+    {
+      "file": "medium-chinese-punctuation.txt",
+      "sourceSha256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "input": "\u4e2d\u6587\uff0c\u3002\uff01\uff1f",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "46531b1dc185d59be1feacfb2dbad5ad59aca2b56ad9b6f6647cc884ea2ce2a0"
+    },
+    {
+      "file": "medium-latin-kerning.txt",
+      "sourceSha256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "input": "AVATAR To Wa",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "5d99da90e1caca00ace1f03d9dd6e03a8d3e20d60d5df498bdac13c9afbeca13"
+    },
+    {
+      "file": "medium-mark-attachment.txt",
+      "sourceSha256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "input": "\u3113\u0300",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "6f6309e720653e33791f790031bc9bb7ca52eaa1e84a4537cace29ad8b88309b"
+    },
+    {
+      "file": "medium-mark-attachment-double.txt",
+      "sourceSha256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "input": "\u3113\u0300\u0301",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "313fc42d3c57a7ae8f92ede5f09b9f5a5e0ec0150dd7ab98201da1fdadc5594f"
+    },
+    {
+      "file": "medium-mark-attachment-cross-lookup.txt",
+      "sourceSha256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "input": "\u3113\u0307\u0300",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "b4200d14fa6485639e5fa608a75b46a97b31d7818883fd8a71db69dfaad1436d"
+    },
+    {
+      "file": "medium-mark-chain.txt",
+      "sourceSha256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "input": "A\u0307\u0301",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "e1ca93aac23c8e23cbc950fb6a9b10af72282785adf2afb5fd2e256b9fe7eecf"
+    },
+    {
+      "file": "bold-combining-compose.txt",
+      "sourceSha256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "input": "A\u0301",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "9dd12321c7a7be4aa925028c0efd7e8def0f20c4d888ebb950c88548486e13ff"
+    },
+    {
+      "file": "bold-common-ligature.txt",
+      "sourceSha256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "input": "office",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "a016791ead94b2aa2c3e5004e78b5f1cd54216ac9f444fb4ef3a78fd75eb6bf4"
+    },
+    {
+      "file": "bold-regional-locl-en-control.txt",
+      "sourceSha256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "input": "\u2014",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "34eafbcf35d742ea9ccfc801e4ad978908f461825b7a9c1368d43447570f9db4"
+    },
+    {
+      "file": "bold-regional-locl.txt",
+      "sourceSha256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "input": "\u2014",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "69f7cbd9b57f7e2e6f94a8f09992c6ea04018ec64e4e5791335b47e5e948a58c"
+    },
+    {
+      "file": "bold-chinese-punctuation.txt",
+      "sourceSha256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "input": "\u4e2d\u6587\uff0c\u3002\uff01\uff1f",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "46531b1dc185d59be1feacfb2dbad5ad59aca2b56ad9b6f6647cc884ea2ce2a0"
+    },
+    {
+      "file": "bold-latin-kerning.txt",
+      "sourceSha256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "input": "AVATAR To Wa",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "ea13da0b28335d8bb3a91c947ddf71787486eda3ae23f7ed063886b3b05dfa68"
+    },
+    {
+      "file": "bold-mark-attachment.txt",
+      "sourceSha256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "input": "\u3113\u0300",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "6f6309e720653e33791f790031bc9bb7ca52eaa1e84a4537cace29ad8b88309b"
+    },
+    {
+      "file": "bold-mark-attachment-double.txt",
+      "sourceSha256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "input": "\u3113\u0300\u0301",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "313fc42d3c57a7ae8f92ede5f09b9f5a5e0ec0150dd7ab98201da1fdadc5594f"
+    },
+    {
+      "file": "bold-mark-attachment-cross-lookup.txt",
+      "sourceSha256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "input": "\u3113\u0307\u0300",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "b4200d14fa6485639e5fa608a75b46a97b31d7818883fd8a71db69dfaad1436d"
+    },
+    {
+      "file": "bold-mark-chain.txt",
+      "sourceSha256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "input": "A\u0307\u0301",
+      "normalization": "offline canonical scalars from closure prototype",
+      "oracle": "HarfBuzz pinned source original units",
+      "sha256": "437f68d386765b406584991f8c87e50dd838ecf5e48742db7336e9368646d318"
+    }
+  ],
+  "advances": [
+    {
+      "file": "regular-advances.txt",
+      "sourceSha256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "records": 24,
+      "sha256": "2e38c18846651e773e669e4a904e8c52c9739cb80f8b4718dabf85a1ca6cab1b"
+    },
+    {
+      "file": "medium-advances.txt",
+      "sourceSha256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "records": 24,
+      "sha256": "23bd44df0e19fc279309aa8eebd51b777ecc6ce1192876ad13a3b876360ab73b"
+    },
+    {
+      "file": "bold-advances.txt",
+      "sourceSha256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "records": 24,
+      "sha256": "02bc85fdcce3374357dadfcbc55d7f5dc0faafa0b1533c717e780ef2fe666674"
+    }
+  ]
+}
