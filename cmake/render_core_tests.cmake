@@ -1,3 +1,6 @@
+add_executable(jellyframe_shaping_catalog_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shaping_catalog_tests.cpp")
+target_link_libraries(jellyframe_shaping_catalog_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_shaping_catalog_tests COMMAND jellyframe_shaping_catalog_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/fixtures/shaping_catalog" "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/fixtures/shaping_resource")
 
 add_executable(jellyframe_shaping_resource_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shaping_resource_tests.cpp")
 target_link_libraries(jellyframe_shaping_resource_tests PRIVATE jellyframe_render_core)
