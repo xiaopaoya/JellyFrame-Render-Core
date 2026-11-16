@@ -1,0 +1,27 @@
+{
+  "profileDescriptor": "JFSHR2/NotoSC-2.002/LTR/latn-default,latn-ZHS,hani-default,hani-ZHS,bopo-ZHT/ccmp,locl,liga,kern,mark/flags-zero/v1",
+  "profileSha256": "7efac7babdc2da34475ffcb8ca985e5fb1e7da6544c7e58c401fed3679d58aa7",
+  "faces": {
+    "Regular": {
+      "sourceSha256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "glyphCount": 30900,
+      "fixtureSha256": "5bca22c387a57898dcc3e3c3c3ce90b90f85f3fe5ff479a204df2d5993a83c1d",
+      "bytes": 41598,
+      "spikeSha256": "c1875284c7cace297543977533d44b67c3fd594206f9e6d0a3d63ba6a7b2c982"
+    },
+    "Medium": {
+      "sourceSha256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "glyphCount": 30900,
+      "fixtureSha256": "8e47c9a11b16393b908aee025587502d03f19f5e50b8b5db1f10b5f4d8cd1b68",
+      "bytes": 41582,
+      "spikeSha256": "42821582bd43a59ffe6f5f507071b9e482ef39b9bdd03e489afbd8ef48ff4aed"
+    },
+    "Bold": {
+      "sourceSha256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "glyphCount": 30900,
+      "fixtureSha256": "75976af3768925a653263f14e53e077f6eb967ea1742277a111b13d182139253",
+      "bytes": 41600,
+      "spikeSha256": "e086d723d481b9d8e90a3760df6ea90d979cc9eeaf4f8bbea444cb3c321e3031"
+    }
+  }
+}

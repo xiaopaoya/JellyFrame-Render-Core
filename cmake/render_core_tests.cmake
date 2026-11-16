@@ -1,3 +1,8 @@
+
+add_executable(jellyframe_shaping_resource_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shaping_resource_tests.cpp")
+target_link_libraries(jellyframe_shaping_resource_tests PRIVATE jellyframe_render_core)
+add_test(NAME jellyframe_shaping_resource_tests COMMAND jellyframe_shaping_resource_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/fixtures/shaping_resource")
+
 # Only executables registered by this module receive the test CRT bootstrap.
 if(WIN32)
     get_property(_jellyframe_targets_before_tests DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
