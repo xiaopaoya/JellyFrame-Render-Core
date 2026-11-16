@@ -124,6 +124,14 @@ FontGlyphView FontResource::glyph_at(std::size_t index) const noexcept {
     return g;
 }
 
+FontGlyphView FontResource::glyph_at_with_coverage(std::size_t index) const noexcept {
+    if (!valid() || index >= glyph_count_) return {};
+    auto g = glyph_at(index);
+    const auto offset = u32(data_ + header_bytes + index * glyph_bytes + 28);
+    g.coverage = g.coverage_bytes ? data_ + bitmap_offset_ + offset : nullptr;
+    return g;
+}
+
 bool FontResource::find_glyph(std::uint32_t codepoint, FontGlyphView& out) const noexcept {
     out = {};
     if (!valid() || !scalar(codepoint)) return false;

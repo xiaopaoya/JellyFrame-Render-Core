@@ -61,6 +61,25 @@ bool View::map_scalar(std::uint32_t scalar, bool raw,
   gid = static_cast<std::uint16_t>(read(bytes_, p + 4, 2));
   return true;
 }
+bool View::map_scalar_declared(std::uint32_t scalar,
+                               std::uint16_t &gid) const noexcept {
+  std::size_t lo = 0, hi = mappings_;
+  while (lo < hi) {
+    auto mid = lo + (hi - lo) / 2;
+    auto p = 172 + mid * 8;
+    if (read(bytes_, p, 4) < scalar)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  if (lo == mappings_)
+    return false;
+  auto p = 172 + lo * 8;
+  if (read(bytes_, p, 4) != scalar)
+    return false;
+  gid = static_cast<std::uint16_t>(read(bytes_, p + 4, 2));
+  return true;
+}
 bool View::find_gid(std::uint16_t gid, FontGlyphView &output) const noexcept {
   std::size_t lo = 0, hi = rasters_, base = 172 + std::size_t(mappings_) * 8;
   while (lo < hi) {

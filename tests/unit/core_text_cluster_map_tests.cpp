@@ -1,4 +1,5 @@
 #include "../../src/core_text_cluster_map.h"
+#include "../../src/core_text_shaped_wrap.h"
 
 #include <stdexcept>
 #include <string>
@@ -168,6 +169,70 @@ void omitted_only_run_and_limits_are_bounded() {
         CoreTextClusterMapStatus::CapacityLimit && result.clusters.data() == prior,
         "capacity limit is transactional");
 }
+
+void shaped_wrap_candidates_stay_on_cluster_edges_and_measure_final_slices() {
+    using namespace jellyframe::detail;
+    const std::string text = "a\xc3\xa9" "bc";
+    const CoreTextShapedWrapCluster clusters[] = {
+        {0, 1}, {1, 3}, {3, 4}, {4, 5},
+    };
+    const CoreTextShapedWrapBoundary boundaries[] = {
+        {3, true, false}, {4, false, true},
+    };
+    CoreTextShapedWrapResult result;
+    std::vector<std::string> measured;
+    auto measure = [&](std::string_view run, std::int32_t& advance) {
+        measured.emplace_back(run);
+        advance = static_cast<std::int32_t>(run.size() * 1000);
+        return true;
+    };
+    check(plan_core_text_shaped_wrap(text, clusters, 4, boundaries, 2,
+        3000, measure, result) == CoreTextShapedWrapStatus::Complete,
+        "shaped wrap plan completes");
+    check(result.lines.size() == 2 && result.lines[0].begin == 0 &&
+        result.lines[0].end == 3 && result.lines[0].advance == 3000 &&
+        result.lines[0].soft && result.lines[1].begin == 3 &&
+        result.lines[1].end == 5 && result.lines[1].advance == 2000 &&
+        !result.lines[1].soft, "widest fitting source-cluster candidate selected");
+    check(!measured.empty() && measured.front() == text.substr(0, 3),
+        "candidate callback receives the exact UTF-8 line source");
+
+    const CoreTextShapedWrapBoundary inside_cluster[] = {{2, true, false}};
+    const auto* prior = result.lines.data();
+    check(plan_core_text_shaped_wrap(text, clusters, 4, inside_cluster, 1,
+        3000, measure, result) == CoreTextShapedWrapStatus::UnsupportedBoundary &&
+        result.lines.data() == prior, "cluster interior is rejected transactionally");
+}
+
+void shaped_wrap_enforces_progress_and_resource_bounds() {
+    using namespace jellyframe::detail;
+    const std::string text = "ab";
+    const CoreTextShapedWrapCluster clusters[] = {{0, 1}, {1, 2}};
+    CoreTextShapedWrapResult result;
+    auto measure = [](std::string_view run, std::int32_t& advance) {
+        advance = static_cast<std::int32_t>(run.size() * 2000);
+        return true;
+    };
+    const CoreTextShapedWrapBoundary emergency[] = {{1, false, true}};
+    check(plan_core_text_shaped_wrap(text, clusters, 2, emergency, 1,
+        1000, measure, result) == CoreTextShapedWrapStatus::Complete &&
+        result.lines.size() == 2 && result.lines[0].end == 1 &&
+        result.lines[0].advance == 2000, "over-wide first cluster guarantees progress");
+
+    check(plan_core_text_shaped_wrap(text, clusters, 2, nullptr, 0,
+        1000, measure, result) == CoreTextShapedWrapStatus::Complete &&
+        result.lines.size() == 1 && result.lines[0].end == 2 &&
+        result.lines[0].advance == 4000,
+        "ordinary break fallback does not invent an emergency split");
+
+    CoreTextShapedWrapLimits limits;
+    limits.max_shape_calls = 1;
+    const auto* prior = result.lines.data();
+    check(plan_core_text_shaped_wrap(text, clusters, 2, nullptr, 0,
+        1000, measure, result, nullptr, limits) ==
+        CoreTextShapedWrapStatus::ShapeCallLimit && result.lines.data() == prior,
+        "shape call cap preserves published output");
+}
 } // namespace
 
 int main() {
@@ -177,4 +242,6 @@ int main() {
     rejects_invalid_utf8_and_non_scalar_boundaries_transactionally();
     rejects_gaps_overlaps_and_bad_token_partitions();
     omitted_only_run_and_limits_are_bounded();
+    shaped_wrap_candidates_stay_on_cluster_edges_and_measure_final_slices();
+    shaped_wrap_enforces_progress_and_resource_bounds();
 }

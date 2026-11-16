@@ -3,6 +3,7 @@
 #include "shaping_resource.h"
 #include <array>
 namespace jellyframe {
+namespace shaping_binding { class BindingState; }
 namespace shaping_catalog {
 struct Identity {
   shaping_resource::Identity shaping{};
@@ -40,6 +41,9 @@ public:
   std::string_view companion_bytes() const noexcept { return companion_; }
 
 private:
+  friend class shaping_binding::BindingState;
+  bool map_scalar_declared(std::uint32_t scalar,
+                           std::uint16_t &gid) const noexcept;
   friend Status bind(std::string_view, const Identity &, const Limits &,
                      std::uint64_t &, View &) noexcept;
   std::string_view bytes_;

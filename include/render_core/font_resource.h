@@ -5,6 +5,7 @@
 #include <cstdint>
 
 namespace jellyframe {
+namespace shaping_binding { class BindingState; }
 
 // Canonical prepared-font profile. No kerning, ligatures, bidi or contextual
 // shaping is implied by a scalar bitmap asset.
@@ -68,7 +69,9 @@ public:
                                 FontScaledGlyphMetrics& metrics) const noexcept;
 
 private:
+    friend class shaping_binding::BindingState;
     FontGlyphView glyph_at(std::size_t index) const noexcept;
+    FontGlyphView glyph_at_with_coverage(std::size_t index) const noexcept;
     const std::uint8_t* data_ = nullptr;
     std::size_t glyph_count_ = 0, bitmap_offset_ = 0;
     FontFaceMetadata metadata_{};

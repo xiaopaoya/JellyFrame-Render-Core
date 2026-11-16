@@ -1,5 +1,6 @@
 #include "../../src/shaped_text_service.h"
 #include "../../src/shaping_catalog_sha256.h"
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -17,13 +18,15 @@ void put32(FontBytes &b, std::size_t at, std::uint32_t v) {
   for (unsigned i = 0; i < 4; ++i)
     b[at + i] = static_cast<std::uint8_t>(v >> (i * 8));
 }
-FontBytes font_resource(const shaping_catalog::Metrics &m) {
-  FontBytes b(168, 0);
+FontBytes font_resource(const shaping_catalog::Metrics &m, std::uint32_t scalar,
+                        const FontGlyphView &glyph) {
+  FontBytes b(168 + glyph.coverage_bytes, 0);
   const char magic[] = "JFFONT2";
   std::memcpy(b.data(), magic, 8);
   put16(b, 8, 2); put16(b, 10, 128); put16(b, 12, 40); put16(b, 14, 1);
   put32(b, 16, static_cast<std::uint32_t>(b.size()));
-  put32(b, 20, 1); put32(b, 24, 128); put32(b, 28, 168); put32(b, 32, 0);
+  put32(b, 20, 1); put32(b, 24, 128); put32(b, 28, 168);
+  put32(b, 32, static_cast<std::uint32_t>(glyph.coverage_bytes));
   put16(b, 36, m.units_per_em); put16(b, 38, m.raster_pixel_size);
   put16(b, 40, m.weight); b[42] = m.coverage_bits;
   put32(b, 44, static_cast<std::uint32_t>(m.ascent));
@@ -31,7 +34,14 @@ FontBytes font_resource(const shaping_catalog::Metrics &m) {
   put32(b, 52, static_cast<std::uint32_t>(m.line_gap));
   std::memcpy(b.data() + 64, m.source_sha256.data(), 32);
   put32(b, 100, 1); put16(b, 104, 1);
-  put32(b, 128, 32); put32(b, 132, 1); put32(b, 136, 250);
+  put32(b, 128, scalar); put32(b, 132, glyph.glyph_id);
+  put32(b, 136, static_cast<std::uint32_t>(glyph.advance));
+  put32(b, 140, static_cast<std::uint32_t>(glyph.bearing_x));
+  put32(b, 144, static_cast<std::uint32_t>(glyph.bearing_y));
+  put16(b, 148, glyph.width); put16(b, 150, glyph.height);
+  put32(b, 152, glyph.row_stride); put32(b, 160, static_cast<std::uint32_t>(glyph.coverage_bytes));
+  if (glyph.coverage_bytes)
+    std::memcpy(b.data() + 168, glyph.coverage, glyph.coverage_bytes);
   std::uint32_t crc = 0xffffffffU;
   for (auto value : b) {
     crc ^= value;
@@ -100,7 +110,11 @@ int main(int argc, char **argv) {
       check(shaping_normalization::validate_eligibility(eligibility_bytes,
           shaping_catalog::sha256(eligibility_bytes), tables, catalog, work,
           eligibility) == shaping_normalization::Status::ok, name + " eligibility");
-      auto font_bytes = font_resource(catalog.metadata());
+      std::uint16_t font_gid = 0;
+      check(catalog.map_scalar('A', true, font_gid), name + " A mapping");
+      FontGlyphView font_glyph;
+      check(catalog.find_gid(font_gid, font_glyph), name + " A raster");
+      auto font_bytes = font_resource(catalog.metadata(), 'A', font_glyph);
       FontResource font;
       check(font.load(font_bytes.data(), font_bytes.size()) ==
           FontResourceStatus::Loaded, name + " font resource");
@@ -110,9 +124,11 @@ int main(int argc, char **argv) {
           shaping_binding::Status::ok && binding.valid() &&
           binding.resource_id() == 42 && binding.generation() == 1,
           name + " binding");
+      check(binding.content_identity() != std::array<unsigned char, 32>{},
+          name + " nonempty content identity");
       auto bad_font_metadata = catalog.metadata();
       ++bad_font_metadata.weight;
-      auto bad_font_bytes = font_resource(bad_font_metadata);
+      auto bad_font_bytes = font_resource(bad_font_metadata, 'A', font_glyph);
       FontResource bad_font;
       check(bad_font.load(bad_font_bytes.data(), bad_font_bytes.size()) ==
           FontResourceStatus::Loaded, name + " mismatched font setup");
@@ -132,7 +148,8 @@ int main(int argc, char **argv) {
                                replacement_binding) == shaping_binding::Status::ok &&
           replacement_binding.generation() == 2 &&
           retained_binding.generation() == 1 &&
-          retained_binding.resource_id() == 42,
+          retained_binding.resource_id() == 42 &&
+          retained_binding.content_identity() == binding.content_identity(),
           name + " immutable retained binding");
       if (face == "regular") {
         auto other_bytes = load(root + "/shaping_executor_catalog/bold.jfcat1");
@@ -150,7 +167,14 @@ int main(int argc, char **argv) {
         check(shaping_catalog::bind(other_bytes, other_identity, {}, work,
                                     other_catalog) == shaping_catalog::Status::ok,
               "alternate catalog setup");
-        auto other_font_bytes = font_resource(other_catalog.metadata());
+        std::uint16_t other_gid = 0;
+        check(other_catalog.map_scalar('A', true, other_gid),
+              "alternate A mapping");
+        FontGlyphView other_glyph;
+        check(other_catalog.find_gid(other_gid, other_glyph),
+              "alternate A raster");
+        auto other_font_bytes = font_resource(other_catalog.metadata(), 'A',
+                                              other_glyph);
         FontResource other_font;
         check(other_font.load(other_font_bytes.data(), other_font_bytes.size()) ==
               FontResourceStatus::Loaded, "alternate font setup");
