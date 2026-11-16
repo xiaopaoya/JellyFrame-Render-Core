@@ -1,6 +1,6 @@
-#include <algorithm>
 #include "../../src/shaping_binding.h"
 #include "../../src/shaping_catalog_sha256.h"
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iostream>

@@ -1,4 +1,5 @@
 #include "shaped_text_packet.h"
+#include <algorithm>
 #include <limits>
 #include <new>
 #include <stdexcept>
@@ -72,8 +73,13 @@ bool sum(std::int32_t a, std::int32_t b) noexcept {
 Header View::header() const noexcept {
   if (!valid())
     return {};
-  return {signed32(bytes_, 24), static_cast<std::uint16_t>(read(bytes_, 28, 2)),
-          read(bytes_, 32, 8), read(bytes_, 40, 8)};
+  Header result{signed32(bytes_, 24),
+                static_cast<std::uint16_t>(read(bytes_, 28, 2)),
+                read(bytes_, 32, 8), read(bytes_, 40, 8)};
+  std::copy_n(reinterpret_cast<const unsigned char *>(
+                  bytes_.data() + binding_identity_offset),
+               result.binding_identity.size(), result.binding_identity.begin());
+  return result;
 }
 std::size_t View::cluster_count() const noexcept {
   return valid() ? read(bytes_, 16, 4) : 0;
@@ -82,12 +88,13 @@ std::size_t View::glyph_count() const noexcept {
   return valid() ? read(bytes_, 12, 4) : 0;
 }
 std::string_view View::source() const noexcept {
-  return valid() ? bytes_.substr(48, read(bytes_, 20, 4)) : std::string_view{};
+  return valid() ? bytes_.substr(header_bytes, read(bytes_, 20, 4))
+                 : std::string_view{};
 }
 bool View::cluster(std::size_t i, Cluster &out) const noexcept {
   if (i >= cluster_count())
     return false;
-  auto p = 48 + source().size() + i * 16;
+  auto p = header_bytes + source().size() + i * cluster_bytes;
   out = {static_cast<std::uint32_t>(read(bytes_, p, 4)),
          static_cast<std::uint32_t>(read(bytes_, p + 4, 4)),
          static_cast<std::uint32_t>(read(bytes_, p + 8, 4)),
@@ -97,7 +104,8 @@ bool View::cluster(std::size_t i, Cluster &out) const noexcept {
 bool View::glyph(std::size_t i, Glyph &out) const noexcept {
   if (i >= glyph_count())
     return false;
-  auto p = 48 + source().size() + cluster_count() * 16 + i * 36;
+  auto p = header_bytes + source().size() +
+           cluster_count() * cluster_bytes + i * glyph_bytes;
   out = {static_cast<std::uint32_t>(read(bytes_, p, 4)),
          static_cast<std::uint32_t>(read(bytes_, p + 4, 4)),
          signed32(bytes_, p + 8),
@@ -112,19 +120,23 @@ Status decode(std::string_view b, const Limits &l, std::uint64_t &work,
               View &out) noexcept {
   if (b.size() > l.bytes || !take(work, b.size()))
     return Status::limit;
-  if (b.size() < 48 || b.substr(0, 4) != "JFSP" || read(b, 4, 2) != 1 ||
-      read(b, 6, 2) != 48 || read(b, 8, 4) != b.size() || read(b, 30, 2))
+  if (b.size() < header_bytes || b.substr(0, 4) != "JFSP" ||
+      read(b, 4, 2) != packet_version || read(b, 6, 2) != header_bytes ||
+      read(b, 8, 4) != b.size() || read(b, 30, 2))
     return Status::malformed;
   auto ng = read(b, 12, 4), nc = read(b, 16, 4), ns = read(b, 20, 4);
   if (ng > l.glyphs || nc > l.clusters || ns > l.source_bytes)
     return Status::limit;
-  if (48 + ns + nc * 16 + ng * 36 != b.size())
+  if (header_bytes + ns + nc * cluster_bytes + ng * glyph_bytes != b.size())
     return Status::malformed;
   View v;
   v.bytes_ = b;
   auto h = v.header();
   if (h.size_q1000 <= 0 || h.selection > 4 || !h.resource_id ||
-      !h.binding_generation || !l.glyph_ceiling || l.glyph_ceiling > 65536)
+      !h.binding_generation ||
+      std::all_of(h.binding_identity.begin(), h.binding_identity.end(),
+                  [](unsigned char value) { return value == 0; }) ||
+      !l.glyph_ceiling || l.glyph_ceiling > 65536)
     return Status::malformed;
   auto s = v.source();
   if (!utf8(s))
@@ -146,7 +158,8 @@ Status decode(std::string_view b, const Limits &l, std::uint64_t &work,
         return Status::limit;
       Glyph g;
       v.glyph(j, g);
-      auto p = 48 + ns + nc * 16 + std::uint64_t(j) * 36;
+      auto p = header_bytes + ns + nc * cluster_bytes +
+               std::uint64_t(j) * glyph_bytes;
       if (!g.gid || g.gid >= l.glyph_ceiling || g.cluster != i ||
           read(b, p + 32, 4) || !sum(g.x, g.offset_x) ||
           !sum(g.y, g.offset_y) || !sum(g.x, g.advance_x) ||
@@ -166,18 +179,22 @@ Status encode(const Header &h, std::string_view s, const Cluster *c,
               std::uint64_t &work, std::string &out) noexcept {
   if ((nc && !c) || (ng && !g))
     return Status::malformed;
+  if (std::all_of(h.binding_identity.begin(), h.binding_identity.end(),
+                  [](unsigned char value) { return value == 0; }))
+    return Status::malformed;
   if (s.size() > l.source_bytes || nc > l.clusters || ng > l.glyphs ||
       s.size() > UINT32_MAX || nc > UINT32_MAX || ng > UINT32_MAX)
     return Status::limit;
-  auto total =
-      48ULL + s.size() + std::uint64_t(nc) * 16 + std::uint64_t(ng) * 36;
+  auto total = header_bytes + s.size() +
+               std::uint64_t(nc) * cluster_bytes +
+               std::uint64_t(ng) * glyph_bytes;
   if (total > l.bytes || total > UINT32_MAX || !take(work, total))
     return Status::limit;
   try {
     std::string b(static_cast<std::size_t>(total), '\0');
     b.replace(0, 4, "JFSP");
-    put(b, 4, 1, 2);
-    put(b, 6, 48, 2);
+    put(b, 4, packet_version, 2);
+    put(b, 6, header_bytes, 2);
     put(b, 8, total);
     put(b, 12, ng);
     put(b, 16, nc);
@@ -186,15 +203,18 @@ Status encode(const Header &h, std::string_view s, const Cluster *c,
     put(b, 28, h.selection, 2);
     put(b, 32, h.resource_id, 8);
     put(b, 40, h.binding_generation, 8);
-    b.replace(48, s.size(), s);
-    auto p = 48 + s.size();
+    std::copy(h.binding_identity.begin(), h.binding_identity.end(),
+              reinterpret_cast<unsigned char *>(
+                  b.data() + binding_identity_offset));
+    b.replace(header_bytes, s.size(), s);
+    auto p = header_bytes + s.size();
     for (std::size_t i = 0; i < nc; ++i, p += 16) {
       put(b, p, c[i].source_begin);
       put(b, p + 4, c[i].source_end);
       put(b, p + 8, c[i].glyph_begin);
       put(b, p + 12, c[i].glyph_end);
     }
-    for (std::size_t i = 0; i < ng; ++i, p += 36) {
+    for (std::size_t i = 0; i < ng; ++i, p += glyph_bytes) {
       put(b, p, g[i].gid);
       put(b, p + 4, g[i].cluster);
       put(b, p + 8, g[i].x);

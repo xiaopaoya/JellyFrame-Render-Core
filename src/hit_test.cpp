@@ -110,7 +110,10 @@ HitTestResult HitTester::hit_test_box(const LayoutBox& box, int x, int y,
     if (box.style.visibility_hidden) {
         return {};
     }
-    return make_result(box, x, y);
+    auto result = make_result(box, x, y);
+    if (const auto* generated_node = detail::shared_inline_generated_hit_node(box, x, y))
+        result.node = event_target_for(generated_node);
+    return result;
 }
 
 HitTestResult HitTester::hit_test_layer(const LayerNode& layer,

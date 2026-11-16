@@ -212,6 +212,7 @@ Status prepare(const Request &r, std::string_view source, const Buffers &b,
   shaped_packet::Header header{r.size_q1000, r.selection,
                                r.binding->resource_id(),
                                r.binding->generation()};
+  header.binding_identity = r.binding->content_identity();
   auto encoded = shaped_packet::encode(header, source, b.clusters, clusters,
                                        b.glyphs, count, limits.packet, work,
                                        packet);

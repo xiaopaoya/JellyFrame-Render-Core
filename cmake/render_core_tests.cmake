@@ -19,6 +19,22 @@ add_test(NAME jellyframe_shaped_text_service_tests COMMAND jellyframe_shaped_tex
 add_executable(jellyframe_shaping_binding_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shaping_binding_tests.cpp")
 target_link_libraries(jellyframe_shaping_binding_tests PRIVATE jellyframe_render_core)
 add_test(NAME jellyframe_shaping_binding_tests COMMAND jellyframe_shaping_binding_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/fixtures")
+if(JELLYFRAME_ENABLE_TEXT_SHAPING)
+    add_executable(jellyframe_shaped_text_binding_api_tests
+        "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shaped_text_binding_api_tests.cpp")
+    target_link_libraries(jellyframe_shaped_text_binding_api_tests PRIVATE jellyframe_render_core)
+    target_include_directories(jellyframe_shaped_text_binding_api_tests PRIVATE
+        "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/src")
+    add_test(NAME jellyframe_shaped_text_binding_api_tests
+        COMMAND jellyframe_shaped_text_binding_api_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/fixtures")
+    add_test(NAME jellyframe_installed_shaped_text_binding_consumer
+        COMMAND ${CMAKE_COMMAND}
+            "-DCORE_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+            "-DCORE_SOURCE_ROOT=${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}"
+            "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+            "-DTEST_CONFIGURATION=${CMAKE_BUILD_TYPE}"
+            -P "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/package/shaped_text_binding_consumer/run_installed.cmake")
+endif()
 add_executable(jellyframe_shaped_text_packet_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shaped_text_packet_tests.cpp")
 target_link_libraries(jellyframe_shaped_text_packet_tests PRIVATE jellyframe_render_core)
 add_test(NAME jellyframe_shaped_text_packet_tests COMMAND jellyframe_shaped_text_packet_tests)

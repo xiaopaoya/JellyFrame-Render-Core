@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.20)
+project(ShapedTextBindingConsumer LANGUAGES CXX)
+
+find_package(JellyFrameRenderCore CONFIG REQUIRED)
+add_executable(shaped_text_binding_consumer main.cpp)
+target_link_libraries(shaped_text_binding_consumer PRIVATE JellyFrame::jellyframe_render_core)
+target_compile_features(shaped_text_binding_consumer PRIVATE cxx_std_17)
+
+enable_testing()
+add_test(NAME installed_shaped_text_binding_contract COMMAND shaped_text_binding_consumer)
