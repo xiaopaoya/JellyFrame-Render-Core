@@ -30,6 +30,7 @@ set(JELLYFRAME_RENDER_CORE_CORE_DOCUMENT_SOURCES
     src/text_scan.cpp
     src/intrinsic_source_query.cpp
     src/intrinsic_source_query_height.cpp
+    src/shaping_resource.cpp
     src/text_system.cpp
 )
 
