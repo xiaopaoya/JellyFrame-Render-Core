@@ -1389,11 +1389,20 @@ void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box,
     bool budget_reported = false;
     std::vector<PendingObject> pending;
     pending.push_back(PendingObject{&object, &box, true, false, false, 1});
+    const auto source_topology = object.contents_sources;
+    const auto topology_has_owner = [&](const Node* node) {
+        if (!source_topology || !node) return false;
+        return std::any_of(source_topology->records.begin(), source_topology->records.end(),
+            [&](const ContentsSourceRecord& source) { return source.owner == node; });
+    };
     while (!pending.empty()) {
         const PendingObject current = pending.back();
         pending.pop_back();
         const RenderObject& render_object = *current.object;
         LayoutBox& layout_box = *current.box;
+        if (topology_has_owner(render_object.node) ||
+            (source_topology && !source_topology->complete))
+            layout_box.text_layout_cache.contents_sources = source_topology;
         const bool block_path = current.parent_block_path && render_object.style.display == Display::Block &&
             render_object.style.position_type == PositionType::Static && render_object.node &&
             render_object.node->type != NodeType::Text && !is_form_control(*render_object.node);

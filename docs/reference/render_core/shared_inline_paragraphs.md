@@ -152,9 +152,10 @@ decorated images or arbitrary image styling.
 
 1. Extend complete source binding for generated/boxless contexts beyond plain
    text `::before`/`::after` and `counter(list-num)` on ordinary block/inline
-   members. Other counter names, positioned pseudo-elements and
-   `display:contents` source mapping remain outside the shared paragraph path.
-   Mixed registered
+   members. Nested `display:contents` wrappers and their omitted collapsible
+   whitespace now join the shared paragraph through a bounded source topology;
+   wrapper pseudo-elements, other counter names and positioned pseudo-elements
+   remain outside that path. Mixed registered
    font requests, per-owner line heights, bounded preserved whitespace and the
    plain generated-text subset are integrated.
 2. Define and adapt a Core-owned shaping/resource contract before integrating
