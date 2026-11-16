@@ -70,6 +70,7 @@ struct TextLayoutCache {
     // Sparse immutable shared-paragraph binding. Empty on ordinary boxes.
     // Geometry/packets survive live DOM invalidation for retained-frame damage.
     std::shared_ptr<const detail::SharedInlineBinding> shared_inline;
+    std::shared_ptr<const ContentsSourceTopology> contents_sources;
     bool valid = false;
     std::string source_text;
     std::string rendered_text;

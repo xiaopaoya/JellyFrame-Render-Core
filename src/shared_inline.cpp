@@ -175,6 +175,26 @@ bool same_font(const LayoutTextFont& a, const LayoutTextFont& b) {
 bool same_color(Color a, Color b) {
     return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
 }
+ContentsSourceStyle contents_source_style(const Style& style) {
+    ContentsSourceStyle result;
+    result.font_family_hash = style.font_family_hash;
+    result.font_size = style.font_size;
+    result.font_weight = style.font_weight;
+    result.line_height = style.line_height;
+    result.letter_spacing = style.letter_spacing;
+    result.text_transform = style.text_transform;
+    result.white_space_nowrap = style.white_space_nowrap;
+    result.overflow_wrap_anywhere = style.overflow_wrap_anywhere;
+    result.visibility_hidden = style.visibility_hidden;
+    result.color = style.color;
+    result.background_color = style.background_color;
+    result.text_shadow = style.text_shadow;
+    result.before_content_kind = style.before_content_kind;
+    result.after_content_kind = style.after_content_kind;
+    result.text_decoration_underline = style.text_decoration_underline;
+    result.text_decoration_line_through = style.text_decoration_line_through;
+    return result;
+}
 SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     SharedInlineProof result;
     result.box = &box;
@@ -183,6 +203,7 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     result.parent_member = parent;
     result.children = box.children.size();
     result.dom_children = box.node->children.size();
+    result.parent_dom_children = box.node->parent ? box.node->parent->children.size() : 0;
     result.source = box.node->text;
     result.tag = box.node->tag_name;
     layout_text_font(box.style, result.font);
@@ -347,6 +368,110 @@ struct Collector {
         }
         return snapshot.preserves_whitespace == preserves;
     }
+    const ContentsSourceRecord* source_record(const Node* owner, const Node& node,
+        ContentsSourceKind kind) const {
+        if (!snapshot.contents_sources || !snapshot.contents_sources->complete) return nullptr;
+        for (const auto& source : snapshot.contents_sources->records) {
+            if (source.owner == owner && source.node == &node && source.kind == kind) return &source;
+        }
+        return nullptr;
+    }
+    bool append_omitted(const Node& node, const ContentsSourceStyle& inherited_style,
+        std::size_t member, std::size_t dom_index) {
+        const ContentsSourceRecord* record = nullptr;
+        if (node.parent != snapshot.members[member].proof.node)
+            record = source_record(snapshot.members[member].proof.node, node,
+                ContentsSourceKind::OmittedWhitespace);
+        const ContentsSourceStyle& style = record ? record->style : inherited_style;
+        if (record && (record->dom_parent != node.parent || record->dom_index != dom_index ||
+            record->text != node.text)) return false;
+        if (record && (style.white_space_nowrap != snapshot.members[0].proof.nowrap ||
+            style.overflow_wrap_anywhere != snapshot.members[0].proof.anywhere)) return false;
+        if (record && (style.letter_spacing != 0 || style.text_transform != TextTransform::None ||
+            style.visibility_hidden)) return false;
+        if (node.type != NodeType::Text || !node.children.empty() ||
+            (!node.text.empty() && !is_collapsible_whitespace_text(node)) ||
+            node.text.size() > max_source-bytes || !accept_whitespace_mode(node)) return false;
+        budget.work(1);
+        bytes += node.text.size();
+        budget.statistics.source_bytes += node.text.size();
+        budget.capacity(std::max<std::size_t>(15,node.text.size())+1);
+        snapshot.omitted.emplace_back();
+        auto& omitted = snapshot.omitted.back();
+        omitted.node = &node;
+        omitted.dom_parent = node.parent;
+        omitted.parent_dom_children = node.parent ? node.parent->children.size() : 0;
+        omitted.parent_member = member;
+        omitted.dom_index = dom_index;
+        omitted.source = node.text;
+        LayoutTextFont source_font;
+        if (record) {
+            if (record->style.font_size < 0 || record->style.font_weight < 1 ||
+                record->style.font_weight > 1000) return false;
+            source_font.family = record->style.font_family_hash;
+            source_font.size = record->style.font_size * 1000;
+            source_font.weight = static_cast<std::uint16_t>(record->style.font_weight);
+        } else {
+            source_font.family = style.font_family_hash;
+            if (style.font_size < 0 || style.font_weight < 1 || style.font_weight > 1000) return false;
+            source_font.size = style.font_size * 1000;
+            source_font.weight = static_cast<std::uint16_t>(style.font_weight);
+        }
+        if (!snapshot.system->resolve_family_hash(source_font.family, source_font.family)) return false;
+        spans.push_back({node.text, source_font, style.line_height, CoreTextParagraphSpanKind::Text});
+        snapshot.owners.push_back(member);
+        SharedInlineSnapshot::OwnerPaint paint;
+        paint.color = style.color;
+        paint.font_size = style.font_size;
+        paint.text_shadow = style.text_shadow;
+        paint.text_decoration_underline = style.text_decoration_underline;
+        paint.text_decoration_line_through = style.text_decoration_line_through;
+        snapshot.owner_paints.push_back(paint);
+        return true;
+    }
+    bool has_rendered_descendant(const Node& node, const std::vector<LayoutBoxPtr>& boxes,
+        std::size_t rendered) {
+        for (std::size_t i = rendered; i < boxes.size(); ++i) {
+            budget.work(1);
+            const Node* candidate = boxes[i]->node;
+            while (candidate && candidate != &node) {
+                budget.work(1);
+                candidate = candidate->parent;
+            }
+            if (candidate == &node) return true;
+        }
+        return false;
+    }
+    bool collect_dom_children(const Node& parent_node, const ContentsSourceStyle& parent_style,
+        std::size_t member, std::size_t depth, const std::vector<LayoutBoxPtr>& boxes,
+        std::size_t& rendered) {
+        for (std::size_t i = 0; i < parent_node.children.size(); ++i) {
+            const auto& node = *parent_node.children[i];
+            if (node.parent != &parent_node) return false;
+            if (rendered < boxes.size() && boxes[rendered]->node == &node) {
+                if (!collect(*boxes[rendered], member, depth+1, i, rendered)) return false;
+                ++rendered;
+                continue;
+            }
+            if (const auto* wrapper = source_record(snapshot.members[member].proof.node,
+                    node, ContentsSourceKind::Wrapper)) {
+                if (wrapper->dom_parent != &parent_node || wrapper->dom_index != i ||
+                    wrapper->style.before_content_kind != GeneratedContentKind::None ||
+                    wrapper->style.after_content_kind != GeneratedContentKind::None ||
+                    depth >= max_depth) return false;
+                budget.work(1);
+                if (!collect_dom_children(node, wrapper->style, member, depth+1, boxes, rendered)) return false;
+                continue;
+            }
+            if (node.type == NodeType::Text &&
+                (node.text.empty() || is_collapsible_whitespace_text(node))) {
+                if (!append_omitted(node, parent_style, member, i)) return false;
+                continue;
+            }
+            if (has_rendered_descendant(node, boxes, rendered)) return false;
+        }
+        return true;
+    }
     bool collect(LayoutBox& box, std::size_t parent, std::size_t depth, std::size_t dom_index = 0, std::size_t render_index = 0) {
         budget.work(1);
         if (!box.node || depth > max_depth || snapshot.members.size() >= max_members) return false;
@@ -437,41 +562,8 @@ struct Collector {
             atomic_geometry.push_back({span_owner, image_proof.image_width_units, image_proof.image_height});
         }
         std::size_t rendered = 0;
-        for (std::size_t i = 0; i < box.node->children.size(); ++i) {
-            const auto& node = *box.node->children[i];
-            if (node.parent != box.node) return false;
-            if (rendered < box.children.size() && box.children[rendered]->node == &node) {
-                if (!collect(*box.children[rendered], member, depth+1, i, rendered)) return false;
-                ++rendered;
-                continue;
-            }
-            // RenderTree intentionally omits collapsible whitespace-only text.
-            // Preserve its source-order participation and exact membership here.
-            if (node.type != NodeType::Text || !node.children.empty() ||
-                (!node.text.empty() && !is_collapsible_whitespace_text(node)) ||
-                node.text.size() > max_source-bytes || !accept_whitespace_mode(node)) return false;
-            budget.work(1);
-            bytes += node.text.size();
-            budget.statistics.source_bytes += node.text.size();
-            budget.capacity(std::max<std::size_t>(15,node.text.size())+1);
-            snapshot.omitted.emplace_back();
-            auto& omitted = snapshot.omitted.back();
-            omitted.node = &node;
-            omitted.parent_member = member;
-            omitted.dom_index = i;
-            omitted.source = node.text;
-            auto source_font = font;
-            if (!snapshot.system->resolve_family_hash(source_font.family, source_font.family)) return false;
-            spans.push_back({node.text, source_font, box.style.line_height, CoreTextParagraphSpanKind::Text});
-            snapshot.owners.push_back(member);
-            SharedInlineSnapshot::OwnerPaint paint;
-            paint.color = box.style.color;
-            paint.font_size = box.style.font_size;
-            paint.text_shadow = box.style.text_shadow;
-            paint.text_decoration_underline = box.style.text_decoration_underline;
-            paint.text_decoration_line_through = box.style.text_decoration_line_through;
-            snapshot.owner_paints.push_back(paint);
-        }
+        if (!collect_dom_children(*box.node, contents_source_style(box.style), member, depth,
+                box.children, rendered)) return false;
         if (rendered != box.children.size() || !append_generated(box, member, true)) return false;
         return true;
     }
@@ -548,6 +640,7 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         (host.style.list_style_type == ListStyleType::Decimal || host.style.list_style_type == ListStyleType::Disc);
     if (!host.node || !options.text_system ||
         !options.text_system->ready() || host.children.empty() ||
+        (host.text_layout_cache.contents_sources && !host.text_layout_cache.contents_sources->complete) ||
         !neutral(host.style, true, false, true, false, true) ||
         !generated_source_eligible(host.style, true) ||
         (list_item && (!native_list_marker || host.style.text_align != TextAlign::Start ||
@@ -566,6 +659,7 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         snapshot->system = options.text_system;
         snapshot->generation = options.text_system->generation();
         snapshot->dom_root = host.node;
+        snapshot->contents_sources = host.text_layout_cache.contents_sources;
         std::size_t ancestors = 0;
         while (snapshot->dom_root && snapshot->dom_root->parent) {
             if (++ancestors > 128) return false;
@@ -831,6 +925,8 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
     }
     if (root != snapshot.dom_root || root->mutation_generation != snapshot.dom_generation) return false;
     const auto& host = *snapshot.members[0].proof.box;
+    if (host.text_layout_cache.contents_sources != snapshot.contents_sources ||
+        (snapshot.contents_sources && !snapshot.contents_sources->complete)) return false;
     if ((host.content_geometry.width >= 0 && host.content_geometry.width != snapshot.width_units) ||
         host_geometry(host.style) != snapshot.host_geometry ||
         !host.style.computed_sizes.equals(snapshot.host_computed_sizes)) return false;
@@ -840,11 +936,9 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
         const auto& p = snapshot.members[i].proof;
         // Validate membership against the still-owned layout tree before any
         // descendant Node dereference. Detached/destroyed child pointers fail.
-        if (i && (p.parent_member >= i ||
-            snapshot.members[p.parent_member].proof.node->children.size() !=
-            snapshot.members[p.parent_member].proof.dom_children ||
-            p.dom_index >= snapshot.members[p.parent_member].proof.dom_children ||
-            snapshot.members[p.parent_member].proof.node->children[p.dom_index].get() != p.node)) return false;
+        if (i && (!p.parent || p.parent->children.size() != p.parent_dom_children ||
+            p.dom_index >= p.parent_dom_children ||
+            p.parent->children[p.dom_index].get() != p.node)) return false;
         if (i) {
             const auto& parent_box = *snapshot.members[p.parent_member].proof.box;
             if (p.render_index >= parent_box.children.size() ||
@@ -925,8 +1019,9 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
             box.style.white_space_nowrap != p.nowrap || box.style.overflow_wrap_anywhere != p.anywhere) return false;
     }
     for (const auto& source : snapshot.omitted) {
-        const auto* parent = snapshot.members[source.parent_member].proof.node;
-        if (source.dom_index >= parent->children.size() ||
+        const auto* parent = source.dom_parent;
+        if (!parent || parent->children.size() != source.parent_dom_children ||
+            source.dom_index >= source.parent_dom_children ||
             parent->children[source.dom_index].get() != source.node || source.node->parent != parent ||
             source.node->type != NodeType::Text || !source.node->children.empty() ||
             source.node->text != source.source) return false;

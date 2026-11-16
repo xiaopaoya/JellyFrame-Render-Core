@@ -1,5 +1,6 @@
 #pragma once
 #include "core_text_paragraph.h"
+#include <memory>
 #include <string_view>
 namespace jellyframe::detail {
 
@@ -12,6 +13,7 @@ struct SharedInlineProof {
     std::size_t parent_member = 0;
     std::size_t children = 0;
     std::size_t dom_children = 0;
+    std::size_t parent_dom_children = 0;
     std::size_t dom_index = 0;
     std::size_t render_index = 0;
     std::string source;
@@ -69,6 +71,8 @@ struct SharedInlineMember {
 struct SharedInlineOmittedSource {
     SharedInlineOmittedSource() : source(0, '\0') {}
     const Node* node = nullptr;
+    const Node* dom_parent = nullptr;
+    std::size_t parent_dom_children = 0;
     std::size_t parent_member = 0;
     std::size_t dom_index = 0;
     std::string source;
@@ -88,6 +92,7 @@ struct SharedInlineSnapshot {
     bool whitespace_mode_set = false;
     bool preserves_whitespace = false;
     const Node* dom_root = nullptr;
+    std::shared_ptr<const ContentsSourceTopology> contents_sources;
     int content_offset_x = 0;
     int content_offset_y = 0;
     std::int64_t width_units = 0;

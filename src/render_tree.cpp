@@ -117,6 +117,27 @@ bool display_contents_computes_to_none(const Node& node) {
         node.tag_name == "embed";
 }
 
+ContentsSourceStyle contents_source_style(const Style& style) {
+    ContentsSourceStyle result;
+    result.font_family_hash = style.font_family_hash;
+    result.font_size = style.font_size;
+    result.font_weight = style.font_weight;
+    result.line_height = style.line_height;
+    result.letter_spacing = style.letter_spacing;
+    result.text_transform = style.text_transform;
+    result.white_space_nowrap = style.white_space_nowrap;
+    result.overflow_wrap_anywhere = style.overflow_wrap_anywhere;
+    result.visibility_hidden = style.visibility_hidden;
+    result.color = style.color;
+    result.background_color = style.background_color;
+    result.text_shadow = style.text_shadow;
+    result.before_content_kind = style.before_content_kind;
+    result.after_content_kind = style.after_content_kind;
+    result.text_decoration_underline = style.text_decoration_underline;
+    result.text_decoration_line_through = style.text_decoration_line_through;
+    return result;
+}
+
 bool is_first_summary_child(const Node& parent, const Node& child) {
     for (const auto& sibling : parent.children) {
         if (sibling->type == NodeType::Element && sibling->tag_name == "summary") {
@@ -185,6 +206,8 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         const Node* node = nullptr;
         RenderObject* parent = nullptr;
         const Style* parent_style = nullptr;
+        bool under_contents = false;
+        std::size_t dom_index = 0;
     };
 
     StyleResolveContext style_context;
@@ -204,11 +227,26 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
 
     std::vector<PendingNode> pending;
     pending.reserve(document.children.size());
-    for (auto it = document.children.rbegin(); it != document.children.rend(); ++it) {
-        pending.push_back(PendingNode{it->get(), view_raw, &view_raw->style});
+    for (std::size_t i = document.children.size(); i > 0; --i) {
+        pending.push_back(PendingNode{document.children[i - 1].get(), view_raw,
+            &view_raw->style, false, i - 1});
     }
     std::deque<Style> contents_styles;
-
+    std::shared_ptr<ContentsSourceTopology> contents_sources;
+    bool has_contents = false;
+    const auto record_source = [&](ContentsSourceRecord record) {
+        if (!contents_sources) contents_sources = std::make_shared<ContentsSourceTopology>();
+        const auto max_records = std::max<std::size_t>(1, options_.max_contents_source_records);
+        if (!contents_sources->complete) return;
+        if (contents_sources->records.size() >= max_records ||
+            record.text.size() > options_.max_contents_source_bytes -
+                std::min(options_.max_contents_source_bytes, contents_sources->source_bytes)) {
+            contents_sources->complete = false;
+            return;
+        }
+        contents_sources->source_bytes += record.text.size();
+        contents_sources->records.push_back(std::move(record));
+    };
     while (!pending.empty()) {
         const PendingNode pending_node = pending.back();
         pending.pop_back();
@@ -232,7 +270,7 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         // Keep overrides on the established path and preserve budget diagnostics.
         if (node.type == NodeType::Text &&
             (options_.style_overrides == nullptr || options_.style_overrides->empty()) &&
-            (node.text.empty() || is_collapsible_whitespace_text(node))) {
+            (node.text.empty() || (!pending_node.under_contents && is_collapsible_whitespace_text(node)))) {
             continue;
         }
 
@@ -253,13 +291,24 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         }
 
         if (style.display == Display::Contents) {
+            has_contents = true;
+            record_source(ContentsSourceRecord{ContentsSourceKind::Wrapper, parent.node, &node,
+                node.parent, pending_node.dom_index, contents_source_style(style), {}});
             contents_styles.push_back(style);
             const Style* inherited_style = &contents_styles.back();
-            for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
-                if (should_descend_into_child(node, *it->get())) {
-                    pending.push_back(PendingNode{it->get(), &parent, inherited_style});
+            for (std::size_t i = node.children.size(); i > 0; --i) {
+                if (should_descend_into_child(node, *node.children[i - 1])) {
+                    pending.push_back(PendingNode{node.children[i - 1].get(), &parent,
+                        inherited_style, true, i - 1});
                 }
             }
+            continue;
+        }
+
+        if (pending_node.under_contents && node.type == NodeType::Text &&
+            !node.text.empty() && is_collapsible_whitespace_text(node)) {
+            record_source(ContentsSourceRecord{ContentsSourceKind::OmittedWhitespace, parent.node, &node,
+                node.parent, pending_node.dom_index, contents_source_style(style), node.text});
             continue;
         }
 
@@ -276,13 +325,20 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         parent.children.push_back(std::move(object));
 
         if (!is_replaced_control(node)) {
-            for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
-                if (should_descend_into_child(node, *it->get())) {
-                    pending.push_back(PendingNode{it->get(), object_raw, &object_raw->style});
+            for (std::size_t i = node.children.size(); i > 0; --i) {
+                if (should_descend_into_child(node, *node.children[i - 1])) {
+                    pending.push_back(PendingNode{node.children[i - 1].get(), object_raw,
+                        &object_raw->style, false, i - 1});
                 }
             }
         }
     }
+
+    if (budget_reported) {
+        if (!contents_sources) contents_sources = std::make_shared<ContentsSourceTopology>();
+        contents_sources->complete = false;
+    }
+    if (has_contents || budget_reported) view->contents_sources = std::move(contents_sources);
 
     return view;
 }
