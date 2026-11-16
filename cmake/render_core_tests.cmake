@@ -266,6 +266,13 @@ foreach(query intrinsic_source_query intrinsic_source_query_height wrapped_row_f
     add_test(NAME jellyframe_${query}_tests COMMAND jellyframe_${query}_tests)
 endforeach()
 
+add_executable(shaping_lookup_executor_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shaping_lookup_executor_tests.cpp")
+target_link_libraries(shaping_lookup_executor_tests PRIVATE jellyframe_render_core)
+add_test(NAME shaping_lookup_executor_tests COMMAND shaping_lookup_executor_tests
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/fixtures/shaping_resource"
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/fixtures/shaping_executor"
+    "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/fixtures/shaping_executor_catalog")
+
 # Keep failed CTest processes noninteractive on MSVC, with diagnostics on stderr.
 # This source belongs to test executables only, never the product library.
 if(WIN32)

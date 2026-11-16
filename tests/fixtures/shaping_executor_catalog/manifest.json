@@ -1,0 +1,32 @@
+{
+  "format": "JFCAT1",
+  "faces": {
+    "Regular": {
+      "bytes": 733641,
+      "sha256": "af3cf6539b3bfc1ffbf671e556ebeb05a4993bea57e7b32a527a6d12cca2a027",
+      "sourceSha256": "a2b93e6c2db05d6bbbf6f27d413ec73269735b7b679019c8a5aa9670ff0ffbf2",
+      "companionSha256": "5bca22c387a57898dcc3e3c3c3ce90b90f85f3fe5ff479a204df2d5993a83c1d",
+      "profileSha256": "7efac7babdc2da34475ffcb8ca985e5fb1e7da6544c7e58c401fed3679d58aa7",
+      "unicodeMappings": 4695,
+      "rasterGids": 4686
+    },
+    "Medium": {
+      "bytes": 735023,
+      "sha256": "7e691e412326dcd81db7b2519c0b7260793fc1261accd12ee633edc2cd69b805",
+      "sourceSha256": "9c62ceb174d7529ae4a7f2071f6531991cfadbc2f1897910b48ba951a580ac57",
+      "companionSha256": "8e47c9a11b16393b908aee025587502d03f19f5e50b8b5db1f10b5f4d8cd1b68",
+      "profileSha256": "7efac7babdc2da34475ffcb8ca985e5fb1e7da6544c7e58c401fed3679d58aa7",
+      "unicodeMappings": 4695,
+      "rasterGids": 4686
+    },
+    "Bold": {
+      "bytes": 744445,
+      "sha256": "cd40566e0da4079a967e9dadb3245271c45cfd5adf0cd8fed2b76b06a17832e2",
+      "sourceSha256": "d1961be1161ea1be08496c920862d06ea5c23a757628f4fd69368de1d9f51bed",
+      "companionSha256": "75976af3768925a653263f14e53e077f6eb967ea1742277a111b13d182139253",
+      "profileSha256": "7efac7babdc2da34475ffcb8ca985e5fb1e7da6544c7e58c401fed3679d58aa7",
+      "unicodeMappings": 4695,
+      "rasterGids": 4686
+    }
+  }
+}
