@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 
 #include "render_core/font_resource.h"
 #include "shaping_catalog.h"
@@ -15,6 +16,9 @@ public:
   bool valid() const noexcept { return resource_id_ != 0 && generation_ != 0; }
   std::uint64_t resource_id() const noexcept { return resource_id_; }
   std::uint64_t generation() const noexcept { return generation_; }
+  const std::array<unsigned char, 32> &content_identity() const noexcept {
+    return content_identity_;
+  }
   const shaping_catalog::View &catalog() const noexcept { return catalog_; }
   const FontResource &font() const noexcept { return font_; }
   const shaping_normalization::Tables &tables() const noexcept { return tables_; }
@@ -29,6 +33,7 @@ private:
   shaping_normalization::Tables tables_;
   shaping_normalization::Eligibility eligibility_;
   std::uint64_t resource_id_ = 0, generation_ = 0;
+  std::array<unsigned char, 32> content_identity_{};
 };
 
 // Refusal preserves both output and the current generation.
