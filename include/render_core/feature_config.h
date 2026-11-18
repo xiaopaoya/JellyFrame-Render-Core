@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+#define JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED 0
+#endif
+
 // Source-level defaults keep direct standalone compilation compatible with the
 // default product profile. CMake overrides these values for a selected build.
 #ifndef JELLYFRAME_RENDER_CORE_CANVAS2D_ENABLED
