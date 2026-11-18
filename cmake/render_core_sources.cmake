@@ -125,6 +125,13 @@ if(JELLYFRAME_ENABLE_CONTEXTUAL_TEXT)
 else()
     set(JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED 0)
 endif()
+option(JELLYFRAME_ENABLE_SHAPED_PACKET_V2
+    "Expose the opt-in standalone JFSP v2 packet codec" OFF)
+if(JELLYFRAME_ENABLE_SHAPED_PACKET_V2)
+    set(JELLYFRAME_RENDER_CORE_SHAPED_PACKET_V2_ENABLED 1)
+else()
+    set(JELLYFRAME_RENDER_CORE_SHAPED_PACKET_V2_ENABLED 0)
+endif()
 if(JELLYFRAME_ENABLE_TEXT_SHAPING)
     # This optional install API does not activate the experimental service or
     # painter in any existing product path.

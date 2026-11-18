@@ -30,6 +30,7 @@ target_compile_definitions(jellyframe_render_core PUBLIC
     JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED=${JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED}
     JELLYFRAME_RENDER_CORE_TEXT_SHAPING_ENABLED=${JELLYFRAME_RENDER_CORE_TEXT_SHAPING_ENABLED}
     JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED=${JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED}
+    JELLYFRAME_RENDER_CORE_SHAPED_PACKET_V2_ENABLED=${JELLYFRAME_RENDER_CORE_SHAPED_PACKET_V2_ENABLED}
 )
 if(JELLYFRAME_ENABLE_IMAGE_FILE_IO)
     target_compile_definitions(jellyframe_render_core PUBLIC JELLYFRAME_ENABLE_IMAGE_FILE_IO=1)
@@ -72,11 +73,16 @@ if(JELLYFRAME_INSTALL_RENDER_CORE)
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/render_core"
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
         PATTERN "contextual_text.h" EXCLUDE
-        PATTERN "contextual_text_paragraph.h" EXCLUDE)
+        PATTERN "contextual_text_paragraph.h" EXCLUDE
+        PATTERN "shaped_packet_v2.h" EXCLUDE)
     if(JELLYFRAME_ENABLE_CONTEXTUAL_TEXT)
         install(FILES
             "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/include/render_core/contextual_text.h"
             "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/include/render_core/contextual_text_paragraph.h"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/render_core")
+    endif()
+    if(JELLYFRAME_ENABLE_SHAPED_PACKET_V2)
+        install(FILES "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/include/render_core/shaped_packet_v2.h"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/render_core")
     endif()
     install(EXPORT JellyFrameRenderCoreTargets

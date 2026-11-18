@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.16)
+project(ShapedPacketV2Consumer LANGUAGES CXX)
+
+find_package(JellyFrameRenderCore CONFIG REQUIRED)
+add_executable(shaped_packet_v2_consumer main.cpp)
+target_link_libraries(shaped_packet_v2_consumer PRIVATE JellyFrame::jellyframe_render_core)
+target_compile_definitions(shaped_packet_v2_consumer PRIVATE EXPECT_CODEC=${EXPECT_CODEC})
+
+enable_testing()
+add_test(NAME installed_shaped_packet_v2_contract COMMAND shaped_packet_v2_consumer)
