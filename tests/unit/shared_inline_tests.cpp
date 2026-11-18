@@ -1906,6 +1906,35 @@ void fractional_alignment() {
     }
 }
 
+void fractional_flex_allocations_preserve_text_wrap() {
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    Fixture f;
+    // The fixture's two A glyphs, space and final A advance by 28px.
+    for (const bool nested : {false, true}) {
+        for (const char* alignment : {"start", "center", "end"}) {
+            auto dom = HtmlParser{}.parse(std::string("<div id='flex'><div id='one'>") +
+                (nested ? "<div>AA A</div>" : "AA A") + "</div><div>AA A</div></div>");
+            StyleResolver styles(CssParser{}.parse(std::string(
+                "*{margin:0;padding:0;border:0;font-size:16px;line-height:20px}"
+                "#flex{display:flex;width:55.2px;align-items:start}"
+                "#flex>div{min-width:0;flex:1 1 0;text-align:") + alignment + "}"));
+            auto layout = LayoutEngine(styles, f.options).layout(*dom, 100, 100);
+            const auto& first = find(*layout, "one");
+            check(first.content_geometry.width == 27600 && first.rect.height == 40,
+                "fractional row Flex must wrap a 28px phrase in a 27.6px allocation");
+            auto layer = LayerTreeBuilder(f.layers).build(*layout);
+            const auto values = glyphs(*layer);
+            const auto spare = 27600 - 16000;
+            const auto expected = *alignment == 's' ? 0 : *alignment == 'c' ? spare / 2 : spare;
+            check(values.size() == 6 && std::get<1>(values[0]) == expected &&
+                    std::get<2>(values[0]) == std::get<2>(values[1]) &&
+                    std::get<2>(values[2]) == std::get<2>(values[0]) + 20,
+                "prepared text must retain exact alignment and the second Flex line");
+        }
+    }
+#endif
+}
+
 void cumulative_scratch_acquisitions() {
     Fixture fixture;
     using namespace jellyframe::detail;
@@ -2009,6 +2038,7 @@ int main() {
         layout_topology_replacement();
         flex_override_and_budget_fallback();
         fractional_alignment();
+        fractional_flex_allocations_preserve_text_wrap();
         partition_matrix_and_events();
         scrolling_topology_and_packet_refusal();
         std::cout << "sizeof_LayoutBox=" << sizeof(LayoutBox) << " sizeof_TextLayoutCache=" << sizeof(TextLayoutCache) << '\n';

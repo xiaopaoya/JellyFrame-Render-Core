@@ -709,8 +709,14 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
     ++statistics.attempts;
     ContextBudget budget{options.shared_inline, statistics, {}, 0, false};
     try {
+        // The ordinary single-source path accepts only integer widths. Keep
+        // the shared planner for a plain text child at a fractional allocation.
+        const bool precise_single_text = precise_width_units >= 0 &&
+            precise_width_units % 1000 != 0 && host.children.size() == 1 &&
+            host.children.front()->node && host.children.front()->node->type == NodeType::Text;
         std::size_t member_count = 0, owner_count = 0;
-        if (!preflight(*host.node, 0, member_count, owner_count, budget) || member_count <= 2 || owner_count == 0) return false;
+        if (!preflight(*host.node, 0, member_count, owner_count, budget) ||
+            (member_count <= 2 && !precise_single_text) || owner_count == 0) return false;
         budget.capacity(sizeof(SharedInlineSnapshot)+member_count*(sizeof(SharedInlineMember)+sizeof(SharedInlineOmittedSource))+
             owner_count*(sizeof(SharedInlineOwner)+sizeof(CoreTextParagraphSpan)+sizeof(SharedInlineSnapshot::OwnerPaint)));
         auto snapshot = std::make_shared<SharedInlineSnapshot>();
@@ -787,7 +793,7 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
             snapshot->marker.color = host.style.color;
         }
         if (!collector.collect(host, 0, 0) ||
-            collector.spans.empty() || snapshot->members.size() <= 2) return false;
+            collector.spans.empty() || (snapshot->members.size() <= 2 && !precise_single_text)) return false;
         paragraph_options.strut = snapshot->members[0].proof.font;
         if (!snapshot->system->resolve_family_hash(paragraph_options.strut.family, paragraph_options.strut.family)) return false;
         snapshot->host_geometry = host_geometry(host.style);
