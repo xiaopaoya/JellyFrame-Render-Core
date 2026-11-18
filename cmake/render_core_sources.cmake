@@ -116,6 +116,15 @@ if(NOT DEFINED JELLYFRAME_ENABLE_ADVANCED_FORMS)
 endif()
 option(JELLYFRAME_ENABLE_TEXT_SHAPING
     "Compile the opt-in installed shaped-text binding API" OFF)
+option(JELLYFRAME_ENABLE_CONTEXTUAL_TEXT
+    "Compile the opt-in contextual shaping, paragraph planning and paint API" OFF)
+if(JELLYFRAME_ENABLE_CONTEXTUAL_TEXT)
+    set(JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED 1)
+    list(APPEND JELLYFRAME_RENDER_CORE_BASE_SOURCES
+        src/contextual_text.cpp src/contextual_text_painter.cpp src/contextual_text_paragraph.cpp)
+else()
+    set(JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED 0)
+endif()
 if(JELLYFRAME_ENABLE_TEXT_SHAPING)
     # This optional install API does not activate the experimental service or
     # painter in any existing product path.

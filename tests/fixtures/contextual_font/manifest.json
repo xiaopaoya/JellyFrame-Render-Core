@@ -1,0 +1,20 @@
+{
+  "origin": "Complete Runtime Core-system Noto prepared16 resources; no truncation",
+  "resources": [
+    {
+      "file": "regular.jffont2",
+      "bytes": 716274,
+      "sha256": "7454e5a35c99e1bfbeb0cf226c0e9c128c1d9520b40ec9037a293a2a6c43a320"
+    },
+    {
+      "file": "medium.jffont2",
+      "bytes": 717419,
+      "sha256": "032ddf64d6ec6d0694f564850c5668bc8b7f43fb099dcde522568a340eae5593"
+    },
+    {
+      "file": "bold.jffont2",
+      "bytes": 726078,
+      "sha256": "0d8083b975afda901d70998991c3cda1ba70d0c29f151d13d4bf44bd3a821301"
+    }
+  ]
+}
