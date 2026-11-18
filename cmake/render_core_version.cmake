@@ -2,9 +2,24 @@
 # Keep this file in the Render Core source checkout so a Runtime source override
 # carries its own package identity instead of inheriting the Runtime version.
 
-set(JELLYFRAME_RENDER_CORE_PACKAGE_VERSION "0.9.0" CACHE STRING
-    "Render Core package version")
-set(JELLYFRAME_RENDER_CORE_CMAKE_VERSION "0.9.0" CACHE STRING
-    "Numeric CMake project version for the Render Core package")
-set(JELLYFRAME_RENDER_CORE_ENGINE_ABI "4" CACHE STRING
-    "Render Core public engine ABI version")
+# Identity describes the source, not a configurable build profile. Keep these
+# literal declarations readable by the standalone source archive tooling.
+function(_jellyframe_load_core_source_identity)
+    set(fields JELLYFRAME_RENDER_CORE_PACKAGE_VERSION
+        JELLYFRAME_RENDER_CORE_CMAKE_VERSION JELLYFRAME_RENDER_CORE_ENGINE_ABI)
+    foreach(field IN LISTS fields)
+        if(DEFINED ${field})
+            set(previous_${field} "${${field}}")
+        endif()
+    endforeach()
+    set(JELLYFRAME_RENDER_CORE_PACKAGE_VERSION "0.10.0")
+    set(JELLYFRAME_RENDER_CORE_CMAKE_VERSION "0.10.0")
+    set(JELLYFRAME_RENDER_CORE_ENGINE_ABI "9")
+    foreach(field IN LISTS fields)
+        if(DEFINED previous_${field} AND NOT "${previous_${field}}" STREQUAL "${${field}}")
+            message(FATAL_ERROR "${field} must match the Core source identity (${${field}}); use a fresh build directory")
+        endif()
+        set(${field} "${${field}}" PARENT_SCOPE)
+    endforeach()
+endfunction()
+_jellyframe_load_core_source_identity()

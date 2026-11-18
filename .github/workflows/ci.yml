@@ -31,6 +31,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: c858f171930e24fd44f8ed6ce19aae69a7e8e94a
 
       - name: Configure ABI4 Core
         run: >-
@@ -38,7 +40,6 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DJELLYFRAME_BUILD_TESTS=OFF
           -DJELLYFRAME_INSTALL_RENDER_CORE=ON
-          -DJELLYFRAME_RENDER_CORE_ENGINE_ABI=4
           ${{ matrix.options }}
 
       - name: Build and install ABI4 Core
@@ -162,6 +163,41 @@ jobs:
             cmake --build "build/r3-$consumer-${{ matrix.profile }}" --parallel
             ctest --test-dir "build/r3-$consumer-${{ matrix.profile }}" --output-on-failure
           done
+
+  abi9-installed:
+    name: ABI9 Core (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: full
+            options: >-
+              -DJELLYFRAME_ENABLE_SHAPED_PACKET_V2=ON
+              -DJELLYFRAME_ENABLE_CONTEXTUAL_TEXT=ON
+              -DJELLYFRAME_ENABLE_CONTEXTUAL_LAYOUT=ON
+          - profile: cropped
+            options: >-
+              -DJELLYFRAME_ENABLE_SHAPED_PACKET_V2=ON
+              -DJELLYFRAME_ENABLE_CONTEXTUAL_TEXT=ON
+              -DJELLYFRAME_ENABLE_CONTEXTUAL_LAYOUT=ON
+              -DJELLYFRAME_ENABLE_CANVAS2D=OFF
+              -DJELLYFRAME_ENABLE_MODERN_PAINT=OFF
+              -DJELLYFRAME_ENABLE_FLEX_GRID=OFF
+              -DJELLYFRAME_ENABLE_ADVANCED_FORMS=OFF
+          - profile: codec-only
+            options: -DJELLYFRAME_ENABLE_SHAPED_PACKET_V2=ON
+    steps:
+      - uses: actions/checkout@v5
+      - name: Configure
+        run: >-
+          cmake -S . -B build/abi9 -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DJELLYFRAME_BUILD_TESTS=ON -DJELLYFRAME_INSTALL_RENDER_CORE=ON
+          ${{ matrix.options }}
+      - name: Build and test
+        run: |
+          cmake --build build/abi9 --parallel
+          ctest --test-dir build/abi9 --output-on-failure --no-tests=error
 
   standalone:
     name: Standalone Build And Archive

@@ -3,8 +3,7 @@
 # resource and is not loaded by the renderer at runtime.
 
 if(NOT DEFINED JELLYFRAME_RENDER_CORE_ENGINE_ABI)
-    set(JELLYFRAME_RENDER_CORE_ENGINE_ABI "3" CACHE STRING
-        "Render Core public engine ABI version")
+    message(FATAL_ERROR "Core source identity must be loaded before generating a profile")
 endif()
 
 include("${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/cmake/render_core_feature_registry.cmake")
@@ -15,7 +14,8 @@ foreach(_jellyframe_render_core_feature IN LISTS JELLYFRAME_RENDER_CORE_FEATURE_
     jellyframe_render_core_feature_metadata("${_jellyframe_render_core_feature}" OPTION _jellyframe_render_core_option)
     jellyframe_render_core_feature_metadata("${_jellyframe_render_core_feature}" SUFFIX _jellyframe_render_core_suffix)
     jellyframe_render_core_feature_metadata("${_jellyframe_render_core_feature}" ORDER _jellyframe_render_core_order)
-    if(NOT _jellyframe_render_core_option STREQUAL "" AND NOT ${_jellyframe_render_core_option})
+    if(NOT _jellyframe_render_core_suffix STREQUAL "" AND
+       NOT _jellyframe_render_core_option STREQUAL "" AND NOT ${_jellyframe_render_core_option})
         list(APPEND _jellyframe_render_core_disabled_profile_entries
             "${_jellyframe_render_core_order}|${_jellyframe_render_core_suffix}")
     endif()
