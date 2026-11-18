@@ -379,11 +379,13 @@ void nested_dirty_nodes_use_one_conservative_subtree_bound() {
 
     check(region.mode == DirtyRegionMode::DirtyRects,
           "nested dirty nodes remain incremental");
-    check(region.rects.size() == 3,
-          "nested local dirty nodes preserve one subtree bound plus local paint bounds");
+    check(region.rects.size() == 1,
+          "nested local paint bounds do not duplicate the ancestor damage");
     check(region.rects.front().x == 0 && region.rects.front().y == 0 &&
               region.rects.front().width == 180 && region.rects.front().height == 120,
           "nested dirty region uses the complete ancestor subtree bound first");
+    check(dirty_region_should_repaint_incrementally(region, Rect{0, 0, 240, 200}, 50),
+          "overlapping nested bounds do not cause a false full repaint");
 }
 
 void clean_document_reports_clean_region() {
