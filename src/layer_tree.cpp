@@ -11,6 +11,9 @@
 #include "background_image_geometry.h"
 #include "background_gradient_geometry.h"
 #include "background_repeat_geometry.h"
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+#include "contextual_text_layout_internal.h"
+#endif
 
 #include <algorithm>
 #include <cerrno>
@@ -20,6 +23,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+#include <stdexcept>
+#endif
 #include <utility>
 
 namespace jellyframe {
@@ -1474,6 +1480,16 @@ void paint_background_image(const LayoutBox& box, const BackgroundImageStyleValu
     }
 }
 
+bool canonical_background_color_area(const LayoutBox& box, BackgroundBox clip,
+                                     Rect& area, int& radius, int& radius_y) {
+    if (background_color_clip(box, clip, area, radius, radius_y)) return true;
+    if (clip != BackgroundBox::BorderBox) return false;
+    area = paint_rect_for(box);
+    radius = resolved_border_radius(box);
+    radius_y = resolved_border_radius_y(box);
+    return area.width > 0 && area.height > 0;
+}
+
 void paint_canonical_background(const LayoutBox& box, DisplayList& display_list,
                                 const LayerTreeBuilderOptions& options,
                                 std::size_t remaining_commands, std::size_t box_command_begin) {
@@ -1489,14 +1505,7 @@ void paint_canonical_background(const LayoutBox& box, DisplayList& display_list,
     Rect color_area;
     int color_radius = 0;
     int color_radius_y = 0;
-    bool color_clip_ready = background_color_clip(box, color_style.clip, color_area, color_radius, color_radius_y);
-    if (!color_clip_ready && color_style.clip == BackgroundBox::BorderBox) {
-        color_area = paint_rect_for(box);
-        color_radius = resolved_border_radius(box);
-        color_radius_y = resolved_border_radius_y(box);
-        color_clip_ready = color_area.width > 0 && color_area.height > 0;
-    }
-    if (color_clip_ready) {
+    if (canonical_background_color_area(box, color_style.clip, color_area, color_radius, color_radius_y)) {
         push_fill_rect(display_list, color_area, box.style.background_color, color_radius, color_radius_y);
     } else if (box.style.background_color.a != 0) {
         const EdgeSizes& border = box.style.border_width;
@@ -2004,6 +2013,94 @@ void LayerNodeDeleter::operator()(LayerNode* layer) const {
 LayerTreeBuilder::LayerTreeBuilder(LayerTreeBuilderOptions options)
     : options_(options) {}
 
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+const LayerNode* contextual_text::LayerCapture::layer_tree() const noexcept {
+    return state_ ? state_->layer_tree.get() : nullptr;
+}
+
+const contextual_text::LayoutResult& contextual_text::LayerCapture::layout() const noexcept {
+    static const LayoutResult empty;
+    return state_ ? state_->layout : empty;
+}
+
+const std::vector<std::uint32_t>& contextual_text::LayerCapture::after_command_counts() const noexcept {
+    static const std::vector<std::uint32_t> empty;
+    return state_ ? state_->after_command_counts : empty;
+}
+
+bool LayerTreeBuilder::build_contextual(const contextual_text::LayoutResult& layout,
+                                        contextual_text::LayerCapture& output) const noexcept {
+    if (!layout.valid() || !layout.tree() || !options_.max_layers) return false;
+    const auto source_is_current = [&]() {
+        const auto* node = layout.tree()->node;
+        for (std::size_t depth = 0; node && node->parent; ++depth) {
+            if (depth == 4096) return false;
+            node = node->parent;
+        }
+        return node && node == layout.state_->source_root &&
+               node->mutation_generation == layout.source_generation();
+    };
+    if (!source_is_current()) return false;
+    try {
+        std::size_t remaining = options_.max_display_commands;
+        for (const auto& paragraph : layout.paragraphs()) {
+            for (const auto& line : paragraph.paragraph.lines()) {
+                if (!line.metrics.has_ink) continue;
+                if (!remaining) return false;
+                --remaining;
+            }
+        }
+
+        auto draft = std::make_shared<contextual_text::LayerCapture::State>();
+        draft->layout = layout;
+        draft->layer_tree = make_layer_node(nullptr);
+        auto& root = *draft->layer_tree;
+        root.type = LayerType::Root;
+        root.reasons = LayerReasonRoot;
+        root.bounds = layout.tree()->rect;
+        root.clip_rect = root.bounds;
+        draft->after_command_counts.reserve(layout.paragraphs().size());
+
+        // The admitted tree has only solid backgrounds and shaped text. Use
+        // canonical background geometry without consulting host resources.
+        std::vector<const LayoutBox*> pending{layout.tree()};
+        std::size_t next_paragraph = 0;
+        while (!pending.empty()) {
+            const auto* box = pending.back();
+            pending.pop_back();
+            if (!box || !box->node || !detail::is_contextual_layout_box(*box)) return false;
+            if (box->node->type == NodeType::Text) {
+                if (next_paragraph >= layout.paragraphs().size() ||
+                    layout.paragraphs()[next_paragraph].owner != box ||
+                    root.display_list.size() > std::numeric_limits<std::uint32_t>::max()) return false;
+                draft->after_command_counts.push_back(static_cast<std::uint32_t>(root.display_list.size()));
+                ++next_paragraph;
+            } else if (box->style.background_color.a) {
+                Rect area;
+                int radius = 0, radius_y = 0;
+                if (canonical_background_color_area(*box, box->style.background_layers[0].image.clip,
+                                                    area, radius, radius_y) &&
+                    area.width > 0 && area.height > 0) {
+                    if (!remaining) return false;
+                    push_fill_rect(root.display_list, area, box->style.background_color, radius, radius_y);
+                    --remaining;
+                }
+            }
+            for (auto it = box->children.rbegin(); it != box->children.rend(); ++it) {
+                pending.push_back(it->get());
+            }
+        }
+        if (next_paragraph != layout.paragraphs().size() || !source_is_current()) return false;
+        output.state_ = std::move(draft);
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    } catch (const std::length_error&) {
+        return false;
+    }
+}
+#endif
+
 LayerNodePtr LayerTreeBuilder::build(const LayoutBox& root) const {
     return build_with_arena(root, nullptr);
 }
@@ -2013,6 +2110,9 @@ LayerNodePtr LayerTreeBuilder::build(const LayoutBox& root, MonotonicArena& aren
 }
 
 LayerNodePtr LayerTreeBuilder::build_with_arena(const LayoutBox& root, MonotonicArena* arena) const {
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    if (detail::is_contextual_layout_box(root)) return {};
+#endif
     ImageResolutionBuildState image_resolution_state;
     ImageResolutionBuildState* previous_image_resolution_state = active_image_resolution_state;
     active_image_resolution_state = &image_resolution_state;

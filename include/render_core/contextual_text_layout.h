@@ -48,6 +48,7 @@ public:
 private:
   std::shared_ptr<const State> state_;
   friend class ::jellyframe::LayoutEngine;
+  friend class ::jellyframe::LayerTreeBuilder;
 };
 // Retains both geometry and resource ownership. Background commands are frozen
 // in normal tree order; insert each paragraph after its corresponding command
@@ -60,6 +61,8 @@ public:
   struct State;
   bool valid() const noexcept { return bool(state_); }
   const LayerNode* layer_tree() const noexcept;
+  // Paragraphs and paint geometry remain usable after DOM destruction. DOM
+  // pointers reachable through layout().tree() keep their borrowed lifetime.
   const LayoutResult& layout() const noexcept;
   const std::vector<std::uint32_t>& after_command_counts() const noexcept;
 private:
