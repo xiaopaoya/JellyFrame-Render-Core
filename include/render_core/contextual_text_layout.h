@@ -53,9 +53,9 @@ private:
 // Retains both geometry and resource ownership. Background commands are frozen
 // in normal tree order; insert each paragraph after its corresponding command
 // count. These lines must use contextual paint, never a scalar text painter.
-// DOM must remain alive and unchanged during capture. Afterwards painting these
-// value-owned commands/packets needs no DOM access. Whole-frame transactional
-// presentation remains the caller's responsibility (for example a back buffer).
+// Capture refuses an expired or stale document. DOM must not be mutated
+// concurrently. Painting these value-owned commands/packets needs no DOM access.
+// The caller is responsible for whole-frame transactional presentation.
 class LayerCapture {
 public:
   struct State;

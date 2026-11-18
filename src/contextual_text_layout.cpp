@@ -91,6 +91,10 @@ contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,st
   }
   draft->source_root=document;
   draft->source_generation=document?document->mutation_generation:0;
+  if (!document || !const_cast<Node*>(document)->add_lifetime_observer(
+          draft->source_lifetime, [](Node&, void*) noexcept {}, nullptr)) {
+    return status=Status::allocation;
+  }
   return status;
 }
 std::int64_t ContextualLayoutFrame::prepare(LayoutBox& box,std::int64_t x,std::int64_t y,std::int64_t width) {

@@ -2032,13 +2032,9 @@ bool LayerTreeBuilder::build_contextual(const contextual_text::LayoutResult& lay
                                         contextual_text::LayerCapture& output) const noexcept {
     if (!layout.valid() || !layout.tree() || !options_.max_layers) return false;
     const auto source_is_current = [&]() {
-        const auto* node = layout.tree()->node;
-        for (std::size_t depth = 0; node && node->parent; ++depth) {
-            if (depth == 4096) return false;
-            node = node->parent;
-        }
-        return node && node == layout.state_->source_root &&
-               node->mutation_generation == layout.source_generation();
+        const auto& source = *layout.state_;
+        return source.source_lifetime.active() && !source.source_root->parent &&
+               source.source_root->mutation_generation == source.source_generation;
     };
     if (!source_is_current()) return false;
     try {
@@ -2068,11 +2064,10 @@ bool LayerTreeBuilder::build_contextual(const contextual_text::LayoutResult& lay
         while (!pending.empty()) {
             const auto* box = pending.back();
             pending.pop_back();
-            if (!box || !box->node || !detail::is_contextual_layout_box(*box)) return false;
-            if (box->node->type == NodeType::Text) {
-                if (next_paragraph >= layout.paragraphs().size() ||
-                    layout.paragraphs()[next_paragraph].owner != box ||
-                    root.display_list.size() > std::numeric_limits<std::uint32_t>::max()) return false;
+            if (!box || !detail::is_contextual_layout_box(*box)) return false;
+            if (next_paragraph < layout.paragraphs().size() &&
+                layout.paragraphs()[next_paragraph].owner == box) {
+                if (root.display_list.size() > std::numeric_limits<std::uint32_t>::max()) return false;
                 draft->after_command_counts.push_back(static_cast<std::uint32_t>(root.display_list.size()));
                 ++next_paragraph;
             } else if (box->style.background_color.a) {

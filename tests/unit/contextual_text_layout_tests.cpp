@@ -61,6 +61,7 @@ FrameBuffer draw_capture(const LayerCapture& capture, bool all_backgrounds_first
 
 void check_capture(const char* fixture_root) {
   LayerCapture capture;
+  LayoutResult expired_layout;
   check(!capture.valid() && !capture.layer_tree() && !capture.layout().valid() &&
         capture.after_command_counts().empty(), "empty capture accessors");
   FrameBuffer expected(viewport.width, viewport.height, {255, 255, 255, 255});
@@ -146,7 +147,37 @@ void check_capture(const char* fixture_root) {
     check(target.mutation_generation == moved_layout.source_generation(), "fixture has equal generations");
     check(!LayerTreeBuilder().build_contextual(moved_layout, capture) && capture.layer_tree() == previous,
           "same-generation different document preserves capture");
+
+    branch = RenderTreeBuilder(styles).build(attached);
+    work = budget;
+    check(LayoutEngine(styles).layout_contextual(*branch, viewport.width, viewport.height,
+                                                  options, work, moved_layout) == Status::ok,
+          "layout before removing the subtree");
+    check(target.remove_child(attached), "destroy the layout subtree");
+    check(!LayerTreeBuilder().build_contextual(moved_layout, capture) && capture.layer_tree() == previous,
+          "removed subtree preserves capture");
+
+    auto standalone = make_element("div");
+    standalone->append_child(make_text("Standalone AV"));
+    branch = RenderTreeBuilder(styles).build(*standalone);
+    work = budget;
+    check(LayoutEngine(styles).layout_contextual(*branch, viewport.width, viewport.height,
+                                                  options, work, moved_layout) == Status::ok,
+          "layout of standalone subtree");
+    auto& temporarily_attached = target.append_child(std::move(standalone));
+    temporarily_attached.children.front()->set_text("Changed AV");
+    standalone = target.detach_child(temporarily_attached);
+    check(!LayerTreeBuilder().build_contextual(moved_layout, capture) && capture.layer_tree() == previous,
+          "attach and detach invalidates the earlier standalone layout");
+
+    work = budget;
+    check(LayoutEngine(styles).layout_contextual(*render, viewport.width, viewport.height,
+                                                  options, work, expired_layout) == Status::ok,
+          "layout before destroying its document");
   }
+  const auto* previous = capture.layer_tree();
+  check(!LayerTreeBuilder().build_contextual(expired_layout, capture) && capture.layer_tree() == previous,
+        "expired document preserves capture");
   check(same_pixels(draw_capture(capture), expected), "capture retains paint after source and binding destruction");
 }
 }

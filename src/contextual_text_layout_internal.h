@@ -6,6 +6,7 @@ struct LayoutResult::State {
   std::vector<LayoutParagraph> paragraphs;
   const Node* source_root = nullptr;
   std::uint64_t source_generation = 0;
+  NodeLifetimeObserverRegistration source_lifetime;
 };
 struct LayerCapture::State {
   LayoutResult layout;
