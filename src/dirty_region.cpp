@@ -881,6 +881,10 @@ void compute_dirty_region_into(const Node& document,
                          options.viewport,
                          max_rects);
     }
+    if (result.rects.size() > 1) {
+        // Report disjoint envelopes so repaint planning does not count pixels twice.
+        merge_overlapping_rects(result.rects);
+    }
     if (result.rects.empty()) {
         set_full_frame_result(result, options.viewport, DirtyRegionFallbackReason::EmptyAfterClipping);
         return;

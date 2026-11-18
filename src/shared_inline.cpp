@@ -47,13 +47,14 @@ bool empty_edges(const EdgeSizes& e) {
 }
 bool neutral(const Style& s, bool host, bool allow_image_dimensions = false,
     bool allow_sharp_text_shadow = false, bool allow_inline_background = false,
-    bool allow_text_decoration = false) {
+    bool allow_text_decoration = false, bool allow_inline_block = false) {
     if (s.visibility_hidden || s.text_transform != TextTransform::None || s.letter_spacing != 0 ||
         s.text_overflow_ellipsis || (s.text_shadow.enabled &&
             (!allow_sharp_text_shadow || s.text_shadow.blur != 0)) ||
         (!allow_text_decoration && (s.text_decoration_underline || s.text_decoration_line_through))) return false;
     if (host) return s.display == Display::Block;
-    if (s.display != Display::Inline || s.position_type != PositionType::Static ||
+    if ((s.display != Display::Inline && !(allow_inline_block && s.display == Display::InlineBlock)) ||
+        s.position_type != PositionType::Static ||
         s.opacity != 1.0F || !s.transform.empty() || !s.overflow.empty() ||
         (s.background_color.a != 0 && !allow_inline_background) || s.box_shadow.enabled || s.outline_width != 0 ||
         !empty_edges(s.margin) || !empty_edges(s.padding) || !empty_edges(s.border_width) ||
@@ -126,21 +127,22 @@ bool image_dimensions(const Style& style, std::int64_t containing_width,
     height = static_cast<int>(value / 1000);
     return true;
 }
-bool inline_image_style_eligible(const Node& node, const Style& style) {
+bool inline_image_style_eligible(const Node& node, const Style& style, bool allow_inline_block = false) {
     if (node.type != NodeType::Element || node.tag_name != "img" || !node.children.empty() ||
         node.attribute("src").empty() || node.attributes.find("srcset") != node.attributes.end() ||
         node.attributes.find("sizes") != node.attributes.end() || style.text_shadow.enabled ||
         style.object_fit != ObjectFit::Fill || style.object_position.x_percent != 50 ||
         style.object_position.y_percent != 50 || style.image_rendering != ImageRendering::Auto ||
-        !neutral(style, false, true)) return false;
+        !neutral(style, false, true, false, false, false, allow_inline_block)) return false;
     return true;
 }
 bool eligible_inline_image(const Node& node, const Style& style, std::int64_t containing_width,
     std::int64_t& width_units, int& height, NaturalImageSizingFrame* natural_images,
     ImageIntrinsicSize* retained_intrinsic = nullptr) {
-    if (!inline_image_style_eligible(node, style)) return false;
+    if (!inline_image_style_eligible(node, style, true)) return false;
     const bool constrained = has_image_constraints(style);
-    if (!constrained && image_dimensions(style, containing_width, width_units, height)) return true;
+    if (!constrained && image_dimensions(style, containing_width, width_units, height))
+        return style.display != Display::InlineBlock;
     if (!natural_images || !natural_images->options.provider.intrinsic_size || style.height_percent >= 0)
         return false;
     const auto authored_width = computed_size_units(style, SizeProperty::Width, containing_width);
@@ -709,8 +711,14 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
     ++statistics.attempts;
     ContextBudget budget{options.shared_inline, statistics, {}, 0, false};
     try {
+        // The ordinary single-source path accepts only integer widths. Keep
+        // the shared planner for a plain text child at a fractional allocation.
+        const bool precise_single_text = precise_width_units >= 0 &&
+            precise_width_units % 1000 != 0 && host.children.size() == 1 &&
+            host.children.front()->node && host.children.front()->node->type == NodeType::Text;
         std::size_t member_count = 0, owner_count = 0;
-        if (!preflight(*host.node, 0, member_count, owner_count, budget) || member_count <= 2 || owner_count == 0) return false;
+        if (!preflight(*host.node, 0, member_count, owner_count, budget) ||
+            (member_count <= 2 && !precise_single_text) || owner_count == 0) return false;
         budget.capacity(sizeof(SharedInlineSnapshot)+member_count*(sizeof(SharedInlineMember)+sizeof(SharedInlineOmittedSource))+
             owner_count*(sizeof(SharedInlineOwner)+sizeof(CoreTextParagraphSpan)+sizeof(SharedInlineSnapshot::OwnerPaint)));
         auto snapshot = std::make_shared<SharedInlineSnapshot>();
@@ -787,7 +795,7 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
             snapshot->marker.color = host.style.color;
         }
         if (!collector.collect(host, 0, 0) ||
-            collector.spans.empty() || snapshot->members.size() <= 2) return false;
+            collector.spans.empty() || (snapshot->members.size() <= 2 && !precise_single_text)) return false;
         paragraph_options.strut = snapshot->members[0].proof.font;
         if (!snapshot->system->resolve_family_hash(paragraph_options.strut.family, paragraph_options.strut.family)) return false;
         snapshot->host_geometry = host_geometry(host.style);
@@ -1016,7 +1024,7 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
             : image_dimensions(box.style, snapshot.width_units, image_width, image_height) &&
                 image_width == p.image_width_units && image_height == p.image_height;
         const bool style_current = p.atomic_image
-            ? inline_image_style_eligible(*p.node, box.style) && image_dimensions_current &&
+            ? inline_image_style_eligible(*p.node, box.style, p.natural_image_sized) && image_dimensions_current &&
                 p.node->attribute("src") == p.image_source
             : neutral(box.style, i == 0, false, true, i != 0, true) &&
                 generated_source_eligible(box.style, i == 0);

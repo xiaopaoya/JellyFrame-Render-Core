@@ -8,6 +8,9 @@
 #include "intrinsic_source_query_height.h"
 #include "layout_mutation_journal.h"
 #include "natural_image_sizing.h"
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+#include "contextual_text_layout_internal.h"
+#endif
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
 #include "flex_length_resolution.h"
 #include "flex_auto_min.h"
@@ -1271,6 +1274,9 @@ struct LayoutEngine::PreciseBoxContext {
     std::int64_t allocated_width = -1;
     std::int64_t allocated_height = -1;
     bool border_origin = false;
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    detail::ContextualLayoutFrame* contextual = nullptr;
+#endif
 };
 
 struct LayoutEngine::PositionedContext {
@@ -1333,6 +1339,41 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
                                             int viewport_width,
                                             int viewport_height,
                                             MonotonicArena* arena) const {
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    return build_contextual_snapshot(render_tree, viewport_width, viewport_height, arena, nullptr);
+}
+
+contextual_text::Status LayoutEngine::layout_contextual(const RenderObject& root, int width, int height,
+    const contextual_text::LayoutOptions& options, std::uint64_t& work,
+    contextual_text::LayoutResult& output, contextual_text::LayoutUsage* usage) const noexcept {
+    using contextual_text::Status;
+    detail::ContextualLayoutFrame frame(options, work);
+    struct Report {
+        detail::ContextualLayoutFrame& frame;
+        std::uint64_t initial;
+        contextual_text::LayoutUsage* output;
+        ~Report() {
+            frame.usage.work = initial - frame.work;
+            if (output) *output = frame.usage;
+        }
+    } report{frame, work, usage};
+    if (width <= 0 || height <= 0 || options_.text_system) return Status::invalid;
+    try {
+        const auto status = frame.admit(root, options_.max_layout_boxes, options_.max_layout_depth);
+        if (status != Status::ok) return status;
+        auto tree = build_contextual_snapshot(root, width, height, nullptr, &frame);
+        if (!frame.finalize(std::move(tree))) return frame.status;
+        output.state_ = std::move(frame.draft);
+        return Status::ok;
+    } catch (const std::bad_alloc&) { return Status::allocation; }
+      catch (const std::length_error&) { return Status::allocation; }
+      catch (...) { return Status::invalid; }
+}
+
+LayoutBoxPtr LayoutEngine::build_contextual_snapshot(const RenderObject& render_tree,
+    int viewport_width, int viewport_height, MonotonicArena* arena,
+    detail::ContextualLayoutFrame* contextual) const {
+#endif
     SharedInlineLayoutStatistics shared_statistics;
     struct SharedStatisticsOutput {
         SharedInlineLayoutStatistics* output;
@@ -1356,15 +1397,28 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
     bool unsupported_mixed_dimension = false;
     pass_engine.build_layout_tree(render_tree, *root_box, arena, unsupported_mixed_dimension);
     if (unsupported_mixed_dimension) {
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+        if (contextual) {
+            contextual->status = contextual_text::Status::invalid;
+            return {};
+        }
+#endif
         report_diagnostic(options_.diagnostics, DiagnosticStage::Layout,
             DiagnosticSeverity::Warning, "unsupported-mixed-dimension-layout",
             "Mixed dimensions require a normal precise Block layout context",
             "Use a supported normal Block layout context.");
         return root_box;
     }
-    const PreciseBoxContext precision{static_cast<std::int64_t>(std::max(0,viewport_width))*1000,
+    PreciseBoxContext precision{static_cast<std::int64_t>(std::max(0,viewport_width))*1000,
         static_cast<std::int64_t>(std::max(0,viewport_height))*1000,0,0};
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    precision.contextual = contextual;
+#endif
     pass_engine.layout_box(*root_box, 0, 0, viewport_width, viewport_height, 1, &precision);
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    // Admission has already excluded positioned descendants and scalar caches.
+    if (contextual) return root_box;
+#endif
     const LayoutContentGeometry viewport{0, 0, precision.width, precision.height, true};
     pass_engine.layout_positioned_children(*root_box, PositionedContext{viewport, viewport}, 1);
     if (options_.text_system) finalize_core_ellipsis(*root_box, options_);
@@ -1956,6 +2010,12 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
         }
     }
     if (content_width_units < 0 || fixed_height_units < -1) {
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+        if (context.contextual) {
+            context.contextual->status = contextual_text::Status::invalid;
+            return 0;
+        }
+#endif
         const auto result = layout_box(box,project_size_edge(context.x),project_size_edge(context.y),
             project_size_edge(context.width),height,depth);
         if (flow_units) *flow_units = static_cast<std::int64_t>(result)*1000;
@@ -2075,6 +2135,17 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
         }
     } else
 #endif
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    if (context.contextual && has_only_inline_children(box)) {
+        auto& frame = *context.contextual;
+        if (box.children.size() != 1 || !box.children[0]->node ||
+            box.children[0]->node->type != NodeType::Text) {
+            frame.status = contextual_text::Status::invalid;
+            return 0;
+        }
+        children_units = frame.prepare(*box.children[0], content_x_units, content_y_units, content_width_units);
+    } else
+#endif
     if (has_only_inline_children(box)) {
         children_units = static_cast<std::int64_t>(layout_inline_children(box,project_size_edge(content_x_units),
             project_size_edge(content_y_units),content_width,depth,content_width_units))*1000;
@@ -2085,7 +2156,10 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
                 child->content_geometry = {content_x_units, cursor_units, -2, -2, false};
                 continue;
             }
-            const PreciseBoxContext child_context{content_width_units,child_height_basis,content_x_units,cursor_units};
+            PreciseBoxContext child_context{content_width_units,child_height_basis,content_x_units,cursor_units};
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+            child_context.contextual = context.contextual;
+#endif
             std::int64_t child_flow_units = std::numeric_limits<std::int64_t>::min();
             const auto child_height = layout_box(*child,project_size_edge(content_x_units),project_size_edge(cursor_units),
                 content_width,height,depth+1,&child_context,&child_flow_units);

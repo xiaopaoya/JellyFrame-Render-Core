@@ -14,6 +14,8 @@
 #include <vector>
 
 namespace jellyframe {
+namespace contextual_text { struct LayoutOptions; struct LayoutUsage; class LayoutResult; enum class Status; }
+namespace detail { struct ContextualLayoutFrame; }
 
 #define JELLYFRAME_NATURAL_IMAGE_LAYOUT_API_VERSION 1
 
@@ -231,6 +233,11 @@ public:
     LayoutBoxPtr layout(const RenderObject& render_tree, int viewport_width, int viewport_height) const;
     LayoutBoxPtr layout(const RenderObject& render_tree, int viewport_width, MonotonicArena& arena) const;
     LayoutBoxPtr layout(const RenderObject& render_tree, int viewport_width, int viewport_height, MonotonicArena& arena) const;
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    contextual_text::Status layout_contextual(const RenderObject&, int viewport_width,
+        int viewport_height, const contextual_text::LayoutOptions&, std::uint64_t& work,
+        contextual_text::LayoutResult&, contextual_text::LayoutUsage* = nullptr) const noexcept;
+#endif
 
 private:
     const StyleResolver& style_resolver_;
@@ -278,6 +285,10 @@ private:
                                   int viewport_width,
                                   int viewport_height,
                                   MonotonicArena* arena) const;
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    LayoutBoxPtr build_contextual_snapshot(const RenderObject&, int, int, MonotonicArena*,
+                                         detail::ContextualLayoutFrame*) const;
+#endif
     void build_layout_tree(const RenderObject& object, LayoutBox& box, MonotonicArena* arena,
                            bool& unsupported_mixed_dimension) const;
     LayoutBoxPtr make_layout_box(MonotonicArena* arena) const;

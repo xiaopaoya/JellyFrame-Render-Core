@@ -36,8 +36,50 @@ if(JELLYFRAME_ENABLE_TEXT_SHAPING)
             -P "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/package/shaped_text_binding_consumer/run_installed.cmake")
 endif()
 add_executable(jellyframe_shaped_text_packet_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shaped_text_packet_tests.cpp")
+if(JELLYFRAME_ENABLE_CONTEXTUAL_TEXT)
+    set(_contextual_tests contextual_text_paragraph)
+    if(JELLYFRAME_ENABLE_SHAPED_PACKET_V2)
+        list(APPEND _contextual_tests contextual_text_paint)
+    endif()
+    if(JELLYFRAME_ENABLE_CONTEXTUAL_LAYOUT)
+        list(APPEND _contextual_tests contextual_text_layout)
+    endif()
+    foreach(_test IN LISTS _contextual_tests)
+        add_executable(jellyframe_${_test}_tests
+            "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/${_test}_tests.cpp")
+        target_link_libraries(jellyframe_${_test}_tests PRIVATE jellyframe_render_core)
+        target_include_directories(jellyframe_${_test}_tests PRIVATE "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/src")
+        if(MSVC)
+            target_compile_options(jellyframe_${_test}_tests PRIVATE /UNDEBUG /utf-8)
+        else()
+            target_compile_options(jellyframe_${_test}_tests PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME jellyframe_${_test}_tests COMMAND jellyframe_${_test}_tests
+            "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/fixtures")
+    endforeach()
+    unset(_contextual_tests)
+endif()
 target_link_libraries(jellyframe_shaped_text_packet_tests PRIVATE jellyframe_render_core)
 add_test(NAME jellyframe_shaped_text_packet_tests COMMAND jellyframe_shaped_text_packet_tests)
+if(JELLYFRAME_ENABLE_SHAPED_PACKET_V2)
+    add_executable(jellyframe_shaped_packet_v2_tests
+        "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shaped_packet_v2_tests.cpp")
+    target_link_libraries(jellyframe_shaped_packet_v2_tests PRIVATE jellyframe_render_core)
+    add_test(NAME jellyframe_shaped_packet_v2_tests COMMAND jellyframe_shaped_packet_v2_tests)
+endif()
+if(JELLYFRAME_INSTALL_RENDER_CORE)
+    add_test(NAME jellyframe_shaped_packet_v2_installed_consumer
+        COMMAND ${CMAKE_COMMAND}
+            "-DCORE_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+            "-DCORE_SOURCE_ROOT=${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}"
+            "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+            "-DTEST_CONFIGURATION=$<CONFIG>"
+            "-DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            "-DEXPECT_CODEC=${JELLYFRAME_RENDER_CORE_SHAPED_PACKET_V2_ENABLED}"
+            "-DEXPECT_TEXT=${JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED}"
+            "-DEXPECT_LAYOUT=${JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED}"
+            -P "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/package/shaped_packet_v2_consumer/run_installed.cmake")
+endif()
 add_executable(jellyframe_shaped_text_painter_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shaped_text_painter_tests.cpp")
 target_link_libraries(jellyframe_shaped_text_painter_tests PRIVATE jellyframe_render_core)
 target_include_directories(jellyframe_shaped_text_painter_tests PRIVATE "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/src")

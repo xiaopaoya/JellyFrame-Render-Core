@@ -28,7 +28,10 @@ target_compile_definitions(jellyframe_render_core PUBLIC
     JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED=${JELLYFRAME_RENDER_CORE_MODERN_PAINT_ENABLED}
     JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED=${JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED}
     JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED=${JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED}
-    JELLYFRAME_RENDER_CORE_TEXT_SHAPING_ENABLED=${JELLYFRAME_RENDER_CORE_TEXT_SHAPING_ENABLED}
+    JELLYFRAME_RENDER_CORE_TEXT_SHAPING_ENABLED=0
+    JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED=${JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED}
+    JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED=${JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED}
+    JELLYFRAME_RENDER_CORE_SHAPED_PACKET_V2_ENABLED=${JELLYFRAME_RENDER_CORE_SHAPED_PACKET_V2_ENABLED}
 )
 if(JELLYFRAME_ENABLE_IMAGE_FILE_IO)
     target_compile_definitions(jellyframe_render_core PUBLIC JELLYFRAME_ENABLE_IMAGE_FILE_IO=1)
@@ -61,7 +64,7 @@ if(JELLYFRAME_INSTALL_RENDER_CORE)
         # Keep the -dev suffix in Core metadata while exposing the numeric
         # project version to find_package(... EXACT).
         VERSION "${JELLYFRAME_RENDER_CORE_CMAKE_VERSION}"
-        COMPATIBILITY SameMajorVersion)
+        COMPATIBILITY SameMinorVersion)
     install(TARGETS jellyframe_render_core
         EXPORT JellyFrameRenderCoreTargets
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
@@ -70,7 +73,25 @@ if(JELLYFRAME_INSTALL_RENDER_CORE)
     install(DIRECTORY "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/include/render_core/"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/render_core"
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
-)
+        PATTERN "contextual_text.h" EXCLUDE
+        PATTERN "contextual_text_paragraph.h" EXCLUDE
+        PATTERN "contextual_text_layout.h" EXCLUDE
+        PATTERN "shaped_text_binding.h" EXCLUDE
+        PATTERN "shaped_packet_v2.h" EXCLUDE)
+    if(JELLYFRAME_ENABLE_CONTEXTUAL_TEXT)
+        install(FILES
+            "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/include/render_core/contextual_text.h"
+            "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/include/render_core/contextual_text_paragraph.h"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/render_core")
+    endif()
+    if(JELLYFRAME_ENABLE_SHAPED_PACKET_V2)
+        install(FILES "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/include/render_core/shaped_packet_v2.h"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/render_core")
+    endif()
+    if(JELLYFRAME_ENABLE_CONTEXTUAL_LAYOUT)
+        install(FILES "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/include/render_core/contextual_text_layout.h"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/render_core")
+    endif()
     install(EXPORT JellyFrameRenderCoreTargets
         FILE JellyFrameRenderCoreTargets.cmake
         NAMESPACE JellyFrame::

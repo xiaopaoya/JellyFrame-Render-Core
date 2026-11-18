@@ -1,6 +1,6 @@
 # JellyFrame Render Core
 
-> Last updated: 2026-11-16; Applies to: 0.9.0 / ABI4 release candidate
+> Last updated: 2026-11-19; Applies to: 0.10.0 / ABI9 development candidate
 
 JellyFrame Render Core is a platform-neutral, modular HTML/CSS subset,
 document/layout pipeline and CPU software renderer for bounded embedded and
@@ -46,6 +46,13 @@ are selected with `JELLYFRAME_ENABLE_CANVAS2D`,
 `JELLYFRAME_ENABLE_MODERN_PAINT`, `JELLYFRAME_ENABLE_FLEX_GRID` and
 `JELLYFRAME_ENABLE_ADVANCED_FORMS`.
 
+Contextual text is opt-in. Enable `JELLYFRAME_ENABLE_SHAPED_PACKET_V2`,
+`JELLYFRAME_ENABLE_CONTEXTUAL_TEXT` and `JELLYFRAME_ENABLE_CONTEXTUAL_LAYOUT`
+to build the contextual DOM pipeline. The packet codec can be built by itself;
+it does not advertise either contextual application capability. The default
+scalar build leaves all three off. The optional ABI4 `text.shaping` interface
+remains available from the ABI4 source line.
+
 The repository intentionally contains no App Runtime, JerryScript integration,
 device ports or launcher implementation. Those belong to the Runtime and
 Device OS layers. The `benchmarks/`, `tests/unit/`, `docs/` and `samples/`
@@ -53,7 +60,7 @@ directories contain platform-neutral Core maintenance material.
 
 ## C++ Integration Surface
 
-For Core ABI `4`, every installed header below `render_core/` is part of the
+For the selected Core ABI, every installed header below `render_core/` is part of the
 supported C++ integration surface. A host includes those installed paths and
 links `JellyFrame::jellyframe_render_core`; it must not include Core files by
 repository-relative `src/` paths or compile Core source files itself. This is

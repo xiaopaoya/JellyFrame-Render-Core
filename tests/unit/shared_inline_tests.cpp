@@ -397,39 +397,69 @@ void definite_inline_image_percent_width() {
 }
 void natural_inline_image_metadata_path() {
     const auto run = [](const char* image_style, ImageIntrinsicSize intrinsic, bool expect_shared,
-        std::int64_t expected_width, int expected_height) {
+        std::int64_t expected_width, int expected_height, bool direct_children = false,
+        bool expect_inline_block = false) {
         Fixture f;
         NaturalInlineImageState state;
         state.result = intrinsic;
         f.options.natural_image_sizing.provider = {natural_inline_size, &state};
         NaturalImageSizingStatistics stats;
         f.options.natural_image_sizing.statistics = &stats;
+        const std::string image_display = expect_inline_block ? "" : "display:inline;";
         StyleResolver styles(CssParser{}.parse(std::string(
             "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:18px}"
-            "span{display:inline}img{display:inline;") + image_style + "}"));
-        auto dom = HtmlParser{}.parse("<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
+            "span{display:inline}img{") + image_display + image_style + "}"));
+        auto dom = HtmlParser{}.parse(direct_children
+            ? "<div id='p'>A<img id='i' src='tile'>B</div>"
+            : "<div id='p'><span>A<img id='i' src='tile'>B</span></div>");
         auto layout = LayoutEngine(styles, f.options).layout(*dom, 80, 50);
         const auto& host = find(*layout, "p");
         const auto& image = find(*layout, "i");
         check(static_cast<bool>(host.text_layout_cache.shared_inline) == expect_shared,
             "natural inline image admission follows bounded sizing result");
-        check(state.calls == 1 && stats.queries == 1,
-            "natural inline metadata is queried once through the layout operation memo");
+        if (expect_inline_block)
+            check(image.style.display == Display::InlineBlock,
+                "default replaced-image display remains inline-block");
+        const auto expected_queries = expect_inline_block && !expect_shared ? 0U : 1U;
+        check(state.calls == expected_queries && stats.queries == expected_queries,
+            "natural inline metadata is queried only when the natural sizing path is needed");
         if (expect_shared) {
             check(image.content_geometry.width == expected_width && image.rect.height == expected_height &&
                 image.content_geometry.height() == static_cast<std::int64_t>(expected_height) * 1000,
                 "natural inline image publishes Q1000 width and integral pixel height");
         }
+        if (expect_inline_block && expect_shared) {
+            const auto binding = host.text_layout_cache.shared_inline;
+            check(binding && !binding->snapshot->paragraph.lines.empty() &&
+                image.rect.y + image.rect.height == host.rect.y + binding->snapshot->content_offset_y +
+                    binding->snapshot->paragraph.lines.front().baseline,
+                "default inline-block image aligns its bottom with the line baseline");
+        }
+        InlineImageState image_state;
+        f.layers.image_resolver = {resolve_inline_image, &image_state};
         auto layers = LayerTreeBuilder(f.layers).build(*layout);
         const auto painted = glyphs(*layers);
         check(painted.size() == 2 && std::get<0>(painted[0]) == 'A' && std::get<0>(painted[1]) == 'B',
             "natural image admission or refusal preserves surrounding source text");
+        std::size_t image_commands = 0;
+        for (const auto& command : LayerTreeBuilder(f.layers).flatten(*layers))
+            image_commands += command.type() == DisplayCommandType::Image ? 1U : 0U;
+        const bool expect_image_command = expect_shared ||
+            (expect_inline_block && expected_width > 0 && expected_height > 0);
+        check(image_commands == (expect_image_command ? 1U : 0U),
+            "accepted inline image emits an Image command through shared or ordinary layout");
     };
     run("", {ImageIntrinsicSizeState::Known, 15, 10}, true, 15000, 10);
     run("width:30px", {ImageIntrinsicSizeState::Known, 15, 10}, true, 30000, 20);
     run("height:12px", {ImageIntrinsicSizeState::Known, 15, 10}, true, 18000, 12);
     run("min-width:18px", {ImageIntrinsicSizeState::Known, 15, 10}, true, 18000, 12);
     run("max-width:9px", {ImageIntrinsicSizeState::Known, 15, 10}, true, 9000, 6);
+    run("width:24px;height:auto", {ImageIntrinsicSizeState::Known, 12, 8}, true,
+        24000, 16, true);
+    run("width:24px;height:auto", {ImageIntrinsicSizeState::Known, 12, 8}, true,
+        24000, 16, true, true);
+    run("width:24px;height:16px", {ImageIntrinsicSizeState::Known, 12, 8}, false,
+        24000, 16, true, true);
     run("width:20px", {ImageIntrinsicSizeState::Known, 15, 10}, false, 0, 0);
     run("", {ImageIntrinsicSizeState::Unknown, 0, 0}, false, 0, 0);
 }
@@ -1906,6 +1936,35 @@ void fractional_alignment() {
     }
 }
 
+void fractional_flex_allocations_preserve_text_wrap() {
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    Fixture f;
+    // The fixture's two A glyphs, space and final A advance by 28px.
+    for (const bool nested : {false, true}) {
+        for (const char* alignment : {"start", "center", "end"}) {
+            auto dom = HtmlParser{}.parse(std::string("<div id='flex'><div id='one'>") +
+                (nested ? "<div>AA A</div>" : "AA A") + "</div><div>AA A</div></div>");
+            StyleResolver styles(CssParser{}.parse(std::string(
+                "*{margin:0;padding:0;border:0;font-size:16px;line-height:20px}"
+                "#flex{display:flex;width:55.2px;align-items:start}"
+                "#flex>div{min-width:0;flex:1 1 0;text-align:") + alignment + "}"));
+            auto layout = LayoutEngine(styles, f.options).layout(*dom, 100, 100);
+            const auto& first = find(*layout, "one");
+            check(first.content_geometry.width == 27600 && first.rect.height == 40,
+                "fractional row Flex must wrap a 28px phrase in a 27.6px allocation");
+            auto layer = LayerTreeBuilder(f.layers).build(*layout);
+            const auto values = glyphs(*layer);
+            const auto spare = 27600 - 16000;
+            const auto expected = *alignment == 's' ? 0 : *alignment == 'c' ? spare / 2 : spare;
+            check(values.size() == 6 && std::get<1>(values[0]) == expected &&
+                    std::get<2>(values[0]) == std::get<2>(values[1]) &&
+                    std::get<2>(values[2]) == std::get<2>(values[0]) + 20,
+                "prepared text must retain exact alignment and the second Flex line");
+        }
+    }
+#endif
+}
+
 void cumulative_scratch_acquisitions() {
     Fixture fixture;
     using namespace jellyframe::detail;
@@ -2009,6 +2068,7 @@ int main() {
         layout_topology_replacement();
         flex_override_and_budget_fallback();
         fractional_alignment();
+        fractional_flex_allocations_preserve_text_wrap();
         partition_matrix_and_events();
         scrolling_topology_and_packet_refusal();
         std::cout << "sizeof_LayoutBox=" << sizeof(LayoutBox) << " sizeof_TextLayoutCache=" << sizeof(TextLayoutCache) << '\n';

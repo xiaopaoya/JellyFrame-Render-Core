@@ -257,6 +257,8 @@ std::unique_ptr<Node> Node::detach_child(const Node& child) {
         std::unique_ptr<Node> detached = std::move(*it);
         detached->clear_mutation_observer(mutation_observer_, mutation_observer_context_);
         detached->parent = nullptr;
+        // Invalidate snapshots from a previous period as a standalone root.
+        ++detached->mutation_generation;
         children.erase(it);
         mark_dirty(*this, DomDirtyTree | DomDirtyLayout);
         return detached;

@@ -1,4 +1,7 @@
 #include "shaped_text_packet.h"
+#if JELLYFRAME_RENDER_CORE_SHAPED_PACKET_V2_ENABLED
+#include "render_core/shaped_packet_v2.h"
+#endif
 #include <algorithm>
 #include <limits>
 #include <new>
@@ -69,17 +72,29 @@ bool sum(std::int32_t a, std::int32_t b) noexcept {
   auto s = std::int64_t(a) + b;
   return s >= INT32_MIN && s <= INT32_MAX;
 }
-} // namespace
-Header View::header() const noexcept {
-  if (!valid())
-    return {};
-  Header result{signed32(bytes_, 24),
-                static_cast<std::uint16_t>(read(bytes_, 28, 2)),
-                read(bytes_, 32, 8), read(bytes_, 40, 8)};
+template <class H> H read_header(std::string_view b) noexcept {
+  H result{signed32(b, 24), static_cast<std::uint16_t>(read(b, 28, 2)),
+           read(b, 32, 8), read(b, 40, 8)};
   std::copy_n(reinterpret_cast<const unsigned char *>(
-                  bytes_.data() + binding_identity_offset),
+                  b.data() + binding_identity_offset),
                result.binding_identity.size(), result.binding_identity.begin());
   return result;
+}
+template <class C> C read_cluster(std::string_view b, std::size_t p) noexcept {
+  return {static_cast<std::uint32_t>(read(b, p, 4)),
+          static_cast<std::uint32_t>(read(b, p + 4, 4)),
+          static_cast<std::uint32_t>(read(b, p + 8, 4)),
+          static_cast<std::uint32_t>(read(b, p + 12, 4))};
+}
+template <class G> G read_glyph(std::string_view b, std::size_t p) noexcept {
+  return {static_cast<std::uint32_t>(read(b, p, 4)),
+          static_cast<std::uint32_t>(read(b, p + 4, 4)),
+          signed32(b, p + 8), signed32(b, p + 12), signed32(b, p + 16),
+          signed32(b, p + 20), signed32(b, p + 24), signed32(b, p + 28)};
+}
+} // namespace
+Header View::header() const noexcept {
+  return valid() ? read_header<Header>(bytes_) : Header{};
 }
 std::size_t View::cluster_count() const noexcept {
   return valid() ? read(bytes_, 16, 4) : 0;
@@ -95,10 +110,7 @@ bool View::cluster(std::size_t i, Cluster &out) const noexcept {
   if (i >= cluster_count())
     return false;
   auto p = header_bytes + source().size() + i * cluster_bytes;
-  out = {static_cast<std::uint32_t>(read(bytes_, p, 4)),
-         static_cast<std::uint32_t>(read(bytes_, p + 4, 4)),
-         static_cast<std::uint32_t>(read(bytes_, p + 8, 4)),
-         static_cast<std::uint32_t>(read(bytes_, p + 12, 4))};
+  out = read_cluster<Cluster>(bytes_, p);
   return true;
 }
 bool View::glyph(std::size_t i, Glyph &out) const noexcept {
@@ -106,14 +118,7 @@ bool View::glyph(std::size_t i, Glyph &out) const noexcept {
     return false;
   auto p = header_bytes + source().size() +
            cluster_count() * cluster_bytes + i * glyph_bytes;
-  out = {static_cast<std::uint32_t>(read(bytes_, p, 4)),
-         static_cast<std::uint32_t>(read(bytes_, p + 4, 4)),
-         signed32(bytes_, p + 8),
-         signed32(bytes_, p + 12),
-         signed32(bytes_, p + 16),
-         signed32(bytes_, p + 20),
-         signed32(bytes_, p + 24),
-         signed32(bytes_, p + 28)};
+  out = read_glyph<Glyph>(bytes_, p);
   return true;
 }
 Status decode(std::string_view b, const Limits &l, std::uint64_t &work,
@@ -174,9 +179,12 @@ Status decode(std::string_view b, const Limits &l, std::uint64_t &work,
   out = v;
   return Status::ok;
 }
-Status encode(const Header &h, std::string_view s, const Cluster *c,
-              std::size_t nc, const Glyph *g, std::size_t ng, const Limits &l,
-              std::uint64_t &work, std::string &out) noexcept {
+namespace {
+template <class H, class C, class G>
+Status encode_records(const H &h, std::string_view s, const C *c,
+                      std::size_t nc, const G *g, std::size_t ng,
+                      const Limits &l, std::uint64_t &work,
+                      std::string &out) noexcept {
   if ((nc && !c) || (ng && !g))
     return Status::malformed;
   if (std::all_of(h.binding_identity.begin(), h.binding_identity.end(),
@@ -208,7 +216,7 @@ Status encode(const Header &h, std::string_view s, const Cluster *c,
                   b.data() + binding_identity_offset));
     b.replace(header_bytes, s.size(), s);
     auto p = header_bytes + s.size();
-    for (std::size_t i = 0; i < nc; ++i, p += 16) {
+    for (std::size_t i = 0; i < nc; ++i, p += cluster_bytes) {
       put(b, p, c[i].source_begin);
       put(b, p + 4, c[i].source_end);
       put(b, p + 8, c[i].glyph_begin);
@@ -236,5 +244,99 @@ Status encode(const Header &h, std::string_view s, const Cluster *c,
     return Status::allocation;
   }
 }
+} // namespace
+Status encode(const Header &h, std::string_view s, const Cluster *c,
+              std::size_t nc, const Glyph *g, std::size_t ng, const Limits &l,
+              std::uint64_t &work, std::string &out) noexcept {
+  return encode_records(h, s, c, nc, g, ng, l, work, out);
+}
 } // namespace shaped_packet
+
+#if JELLYFRAME_RENDER_CORE_SHAPED_PACKET_V2_ENABLED
+namespace shaped_packet_v2 {
+static_assert(version == shaped_packet::packet_version);
+static_assert(header_bytes == shaped_packet::header_bytes);
+
+namespace {
+bool valid_limits(const Limits &l) noexcept {
+  constexpr Limits max;
+  return l.bytes && l.bytes <= max.bytes &&
+         l.source_bytes && l.source_bytes <= max.source_bytes &&
+         l.clusters && l.clusters <= max.clusters &&
+         l.glyphs && l.glyphs <= max.glyphs &&
+         l.glyph_ceiling && l.glyph_ceiling <= max.glyph_ceiling;
+}
+
+shaped_packet::Limits wire_limits(const Limits &l) noexcept {
+  return {l.bytes, l.source_bytes, l.clusters, l.glyphs, l.glyph_ceiling};
+}
+
+Status public_status(shaped_packet::Status status) noexcept {
+  switch (status) {
+  case shaped_packet::Status::ok: return Status::ok;
+  case shaped_packet::Status::malformed: return Status::malformed;
+  case shaped_packet::Status::limit: return Status::limit;
+  case shaped_packet::Status::allocation: return Status::allocation;
+  }
+  return Status::malformed;
+}
+} // namespace
+
+Header View::header() const noexcept {
+  return valid() ? shaped_packet::read_header<Header>(bytes_) : Header{};
+}
+std::size_t View::cluster_count() const noexcept {
+  return valid() ? shaped_packet::read(bytes_, 16, 4) : 0;
+}
+std::size_t View::glyph_count() const noexcept {
+  return valid() ? shaped_packet::read(bytes_, 12, 4) : 0;
+}
+std::string_view View::source() const noexcept {
+  return valid() ? bytes_.substr(header_bytes, shaped_packet::read(bytes_, 20, 4))
+                 : std::string_view{};
+}
+bool View::cluster(std::size_t i, Cluster &out) const noexcept {
+  if (i >= cluster_count())
+    return false;
+  const auto offset = header_bytes + source().size() + i * shaped_packet::cluster_bytes;
+  out = shaped_packet::read_cluster<Cluster>(bytes_, offset);
+  return true;
+}
+bool View::glyph(std::size_t i, Glyph &out) const noexcept {
+  if (i >= glyph_count())
+    return false;
+  const auto offset = header_bytes + source().size() +
+      cluster_count() * shaped_packet::cluster_bytes + i * shaped_packet::glyph_bytes;
+  out = shaped_packet::read_glyph<Glyph>(bytes_, offset);
+  return true;
+}
+
+Status decode(std::string_view b, const Limits &l, std::uint64_t &work,
+              View &out) noexcept {
+  if (!valid_limits(l))
+    return Status::limit;
+  auto remaining = work;
+  shaped_packet::View wire;
+  const auto status = shaped_packet::decode(b, wire_limits(l), remaining, wire);
+  if (status == shaped_packet::Status::ok) {
+    out.bytes_ = wire.bytes();
+    work = remaining;
+  }
+  return public_status(status);
+}
+
+Status encode(const Header &h, std::string_view s, const Cluster *c,
+              std::size_t nc, const Glyph *g, std::size_t ng, const Limits &l,
+              std::uint64_t &work, std::string &out) noexcept {
+  if (!valid_limits(l))
+    return Status::limit;
+  auto remaining = work;
+  const auto status = shaped_packet::encode_records(h, s, c, nc, g, ng,
+                                                    wire_limits(l), remaining, out);
+  if (status == shaped_packet::Status::ok)
+    work = remaining;
+  return public_status(status);
+}
+} // namespace shaped_packet_v2
+#endif
 } // namespace jellyframe
