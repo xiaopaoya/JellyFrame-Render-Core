@@ -41,7 +41,8 @@ collapsed spaces or tabs, neutral inline partitions and ordinary hard breaks.
 Wrap opportunities occur between adjacent ideographs. The profile requires
 positive glyph advances and retains the primary face's vertical metrics on
 each line. Han segment breaks, explicit `wbr`, Unicode punctuation, mixed
-metrics and glyph substitutions retain the ordinary fallback path.
+metrics, glyph substitutions and nonzero `word-spacing` retain the ordinary
+fallback path.
 Preserving contexts such as `pre` retain spaces, tabs, hard line breaks,
 blank lines and trailing spaces; CRLF is one line break even when CR and LF
 belong to different text owners. Tabs use the bounded Core tab-stop policy

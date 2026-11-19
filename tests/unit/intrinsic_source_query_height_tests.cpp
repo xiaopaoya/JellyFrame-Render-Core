@@ -321,6 +321,14 @@ void verify_han_wrapping(const TextSystem& system) {
 }
 
 void verify_han_refusals(const TextSystem& system) {
+    {
+        Fixture f;
+        f.root.style.word_spacing = 4;
+        f.text(f.root, f.root_node, std::string(kHanFirst) + " " + kHanSecond);
+        const auto r = query(f, system);
+        check(r.status == IntrinsicSourceStatus::Unsupported && r.border_box_block_size_units == -1,
+              "Han height with nonzero word spacing uses ordinary layout");
+    }
     for (const auto* text : {"A\xe4\xb8\xad", "\xe4\xb8\xad" "A", "\xc2\xa0\xe4\xb8\xad",
                              "\xe4\xb8\xad\xc2\xa0", "\xe4\xb8\xad\xe3\x80\x82",
                              "\xe4\xb8\xad\xcc\x81", "\n\xe4\xb8\xad", "\xe4\xb8\xad\r",

@@ -288,6 +288,7 @@ private:
             }
             if (cp > 0x7fU && cp != kNonbreakingSpace) {
                 if (!is_cjk_codepoint(cp) || source_mode_ == SourceMode::Ascii || han_excluded_ ||
+                    root_.style.word_spacing != 0 ||
                     root_.style.text_transform != TextTransform::None) {
                     status_ = IntrinsicSourceStatus::Unsupported;
                     return false;
