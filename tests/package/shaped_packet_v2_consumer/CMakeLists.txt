@@ -1,16 +1,20 @@
 cmake_minimum_required(VERSION 3.16)
 project(ShapedPacketV2Consumer LANGUAGES CXX)
 
-# A consumer requesting the previous ABI4 line without EXACT must not be
-# silently matched to the installed ABI9 package.
-find_package(JellyFrameRenderCore 0.9.0 CONFIG QUIET PATHS "${CMAKE_PREFIX_PATH}" NO_DEFAULT_PATH)
-if(JellyFrameRenderCore_FOUND)
-    message(FATAL_ERROR "ABI9 package advertised compatibility with the ABI4 version line")
-endif()
-find_package(JellyFrameRenderCore CONFIG REQUIRED PATHS "${CMAKE_PREFIX_PATH}" NO_DEFAULT_PATH)
-if(NOT JellyFrameRenderCore_ENGINE_ABI STREQUAL "9" OR
-   NOT JellyFrameRenderCore_PACKAGE_VERSION VERSION_GREATER_EQUAL "0.10.0")
-    message(FATAL_ERROR "Expected an ABI9 Core package")
+# Exercise incompatible minor versions without EXACT to verify the export's
+# version-selection policy.
+foreach(incompatible_version IN ITEMS 0.9.0 0.10.0 0.10.1)
+    find_package(JellyFrameRenderCore ${incompatible_version} CONFIG QUIET
+        PATHS "${CMAKE_PREFIX_PATH}" NO_DEFAULT_PATH)
+    if(JellyFrameRenderCore_FOUND)
+        message(FATAL_ERROR "Core ${EXPECT_CORE_VERSION} accepted an incompatible request for ${incompatible_version}")
+    endif()
+endforeach()
+find_package(JellyFrameRenderCore ${EXPECT_CORE_VERSION} EXACT CONFIG REQUIRED
+    PATHS "${CMAKE_PREFIX_PATH}" NO_DEFAULT_PATH)
+if(NOT JellyFrameRenderCore_ENGINE_ABI STREQUAL EXPECT_CORE_ABI OR
+   NOT JellyFrameRenderCore_PACKAGE_VERSION STREQUAL EXPECT_CORE_VERSION)
+    message(FATAL_ERROR "Expected the Core ${EXPECT_CORE_VERSION} / ABI${EXPECT_CORE_ABI} producer identity")
 endif()
 if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.19")
     file(READ "${JellyFrameRenderCore_PROFILE_FILE}" profile)

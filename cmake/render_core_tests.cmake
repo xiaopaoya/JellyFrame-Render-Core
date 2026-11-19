@@ -78,6 +78,8 @@ if(JELLYFRAME_INSTALL_RENDER_CORE)
             "-DEXPECT_CODEC=${JELLYFRAME_RENDER_CORE_SHAPED_PACKET_V2_ENABLED}"
             "-DEXPECT_TEXT=${JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED}"
             "-DEXPECT_LAYOUT=${JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED}"
+            "-DEXPECT_CORE_VERSION=${JELLYFRAME_RENDER_CORE_CMAKE_VERSION}"
+            "-DEXPECT_CORE_ABI=${JELLYFRAME_RENDER_CORE_ENGINE_ABI}"
             -P "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/package/shaped_packet_v2_consumer/run_installed.cmake")
 endif()
 add_executable(jellyframe_shaped_text_painter_tests "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/shaped_text_painter_tests.cpp")

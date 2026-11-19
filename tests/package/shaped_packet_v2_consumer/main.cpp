@@ -19,7 +19,7 @@ static_assert(!JELLYFRAME_RENDER_CORE_TEXT_SHAPING_ENABLED);
 #endif
 
 #if __has_include(<render_core/shaped_text_binding.h>)
-#error "the ABI4 shaping binding header must not be installed with ABI9"
+#error "the ABI4 shaping binding header is outside the current installed contract"
 #endif
 
 #if EXPECT_CODEC
