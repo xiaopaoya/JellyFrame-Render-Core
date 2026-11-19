@@ -50,6 +50,7 @@ struct CoreTextParagraphLine {
 struct CoreTextParagraphFragment {
     std::size_t owner = 0, line = 0, begin = 0, end = 0;
     std::int32_t letter_spacing = 0; // Q1000 logical advance adjustment
+    std::int32_t word_spacing = 0;
     // Packet X is Q1000 relative to the paragraph content origin. Its source
     // byte ranges are local to this fragment's normalized UTF-8 substring.
     std::string packet;

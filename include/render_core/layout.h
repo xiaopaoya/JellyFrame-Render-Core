@@ -104,6 +104,7 @@ struct TextLayoutCache {
     bool white_space_nowrap = false;
     bool text_overflow_ellipsis = false;
     TextAlign text_align = TextAlign::Start;
+    std::int16_t word_spacing = 0;
 };
 
 // Final flow geometry before pixel projection, also restored by speculative

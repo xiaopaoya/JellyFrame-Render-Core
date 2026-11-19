@@ -1,6 +1,6 @@
 # JellyFrame Render Core
 
-> Last updated: 2026-11-19; Applies to: 0.10.1 / ABI9
+> Last updated: 2026-11-19. Applies to Core 0.11.0 / ABI10.
 
 JellyFrame Render Core is a platform-neutral, modular HTML/CSS subset,
 document/layout pipeline and CPU software renderer for bounded embedded and

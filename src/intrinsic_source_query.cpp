@@ -107,6 +107,7 @@ bool same_text_metrics(const Style& a, const Style& b) {
     return !b.text_decoration_underline && !b.text_decoration_line_through &&
         a.font_size == b.font_size && a.font_weight == b.font_weight &&
         a.font_family_hash == b.font_family_hash && a.letter_spacing == b.letter_spacing &&
+        a.word_spacing == b.word_spacing &&
         a.text_transform == b.text_transform && a.white_space_nowrap == b.white_space_nowrap &&
         a.overflow_wrap_anywhere == b.overflow_wrap_anywhere;
 }
@@ -542,7 +543,7 @@ private:
             status_ = IntrinsicSourceStatus::ResourceLimit;
             return false;
         }
-        if (measurement_status != TextSystemStatus::Ok || metrics.advance < 0) {
+        if (measurement_status != TextSystemStatus::Ok) {
             status_ = IntrinsicSourceStatus::MeasurementFailure;
             return false;
         }

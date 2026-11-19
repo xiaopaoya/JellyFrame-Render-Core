@@ -115,7 +115,7 @@ if(NOT DEFINED JELLYFRAME_ENABLE_ADVANCED_FORMS)
     set(JELLYFRAME_ENABLE_ADVANCED_FORMS ON)
 endif()
 option(JELLYFRAME_ENABLE_TEXT_SHAPING
-    "ABI4-only installed shaped-text binding API (unsupported in ABI9)" OFF)
+    "ABI4-only installed shaped-text binding API" OFF)
 if(JELLYFRAME_ENABLE_TEXT_SHAPING)
     message(FATAL_ERROR "The installed text.shaping API requires an ABI4 Core source checkout")
 endif()

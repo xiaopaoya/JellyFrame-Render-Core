@@ -547,6 +547,7 @@ const TextLayoutCache* valid_text_layout_cache(const LayoutBox& box,
             : cache.line_height) ||
         cache.text_indent != box.style.text_indent ||
         cache.letter_spacing != box.style.letter_spacing ||
+        cache.word_spacing != box.style.word_spacing ||
         cache.text_transform != box.style.text_transform ||
         cache.overflow_wrap_anywhere != box.style.overflow_wrap_anywhere ||
         cache.white_space_nowrap != box.style.white_space_nowrap ||

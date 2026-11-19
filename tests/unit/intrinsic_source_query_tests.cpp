@@ -419,6 +419,22 @@ void nonbreaking_space_widths(const TextSystem& text_system) {
 #endif
 }
 
+void word_spacing_widths(const TextSystem& text_system) {
+    Fixture fixture;
+    fixture.root_box.style.word_spacing = 3;
+    fixture.append_text(fixture.root_box, fixture.root_node, " A ");
+    auto [span, node] = fixture.append_element(
+        fixture.root_box, fixture.root_node, "span", Display::Inline);
+    fixture.append_text(span, node, " B");
+    fixture.append_text(fixture.root_box, fixture.root_node, "\xc2\xa0" "A ");
+    expect_widths(fixture, text_system, 24600, 39600);
+
+    Fixture negative;
+    negative.root_box.style.word_spacing = -5;
+    negative.append_text(negative.root_box, negative.root_node, "A B");
+    expect_widths(negative, text_system, 9600, 16600);
+}
+
 void text_runs_and_breaks(const TextSystem& text_system) {
     {
         Fixture fixture;
@@ -1356,6 +1372,7 @@ int main() {
         unsupported_original_size_kinds();
         text_runs_and_breaks(text_system);
         nonbreaking_space_widths(text_system);
+        word_spacing_widths(text_system);
         han_runs_and_refusals(text_system);
         refusals_and_budgets(text_system);
         std::cout << "intrinsic source query ASCII/Han runs, breaks, refusals and budgets passed\n";

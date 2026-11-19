@@ -7,6 +7,7 @@
 #include "intrinsic_source_query.h"
 #include "intrinsic_source_query_height.h"
 #include "layout_mutation_journal.h"
+#include "layout_text_service.h"
 #include "natural_image_sizing.h"
 #if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
 #include "contextual_text_layout_internal.h"
@@ -176,6 +177,11 @@ void finalize_core_ellipsis(LayoutBox& owner, const LayoutEngineOptions& options
                        owner.style.border_width.left - owner.style.border_width.right)) * 1000;
     const auto indent = std::clamp<std::int64_t>(static_cast<std::int64_t>(text.style.text_indent) * 1000, 0, owner_width);
     const auto available = owner_width - indent;
+    detail::LayoutTextFont spacing;
+    if (detail::layout_text_font(text.style, spacing) != TextSystemStatus::Ok) {
+        refuse(text, "ellipsis font properties are invalid");
+        return;
+    }
     if (cache.prepared_lines.size() != 1) {
         // Ordinary wrapped lines that fit have no active horizontal overflow.
         bool overflow = false;
@@ -187,10 +193,9 @@ void finalize_core_ellipsis(LayoutBox& owner, const LayoutEngineOptions& options
                 refuse(text, "ellipsis wrapped source packet is invalid"); return;
             }
             const auto line_available = line_index++ == 0 ? available : owner_width;
-            const auto spacing = static_cast<std::int64_t>(
-                bounded_letter_spacing(text.style.font_size, text.style.letter_spacing)) * 1000;
             overflow |= packet.size() &&
-                static_cast<std::int64_t>(last.x) + last.geometry.advance + spacing > line_available;
+                static_cast<std::int64_t>(last.x) + last.geometry.advance +
+                    spacing.spacing_for(last.source_codepoint) > line_available;
         }
         if (overflow) refuse(text, "ellipsis requires a single overflowing prepared text line");
         return;
@@ -199,13 +204,11 @@ void finalize_core_ellipsis(LayoutBox& owner, const LayoutEngineOptions& options
     if (!decode_prepared_text(cache.prepared_lines.front().packet, source)) {
         refuse(text, "ellipsis source packet is invalid"); return;
     }
-    const std::int64_t spacing = static_cast<std::int64_t>(
-        bounded_letter_spacing(text.style.font_size, text.style.letter_spacing)) * 1000;
     std::vector<PreparedTextGlyph> glyphs(source.size());
     std::int64_t advance = 0;
     for (std::size_t i = 0; i < source.size(); ++i) {
         if (!source.read(i, glyphs[i])) { refuse(text, "ellipsis source glyph is invalid"); return; }
-        advance += glyphs[i].geometry.advance + spacing;
+        advance += glyphs[i].geometry.advance + spacing.spacing_for(glyphs[i].source_codepoint);
     }
     if (advance <= available) return;
     if (text.style.text_indent < 0) {
@@ -229,10 +232,11 @@ void finalize_core_ellipsis(LayoutBox& owner, const LayoutEngineOptions& options
     };
     // When the first scalar itself overflows, CSS clips it. No invisible marker
     // needs resource admission. Negative spacing may bring later glyphs back in.
-    if (spacing >= 0 && glyphs.front().geometry.advance + spacing > available) {
+    const auto first_advance = glyphs.front().geometry.advance + spacing.spacing_for(glyphs.front().source_codepoint);
+    if (spacing.letters >= 0 && spacing.words >= 0 && first_advance > available) {
         const auto first_end = glyphs.front().source_end;
         glyphs.resize(1);
-        publish(cache.rendered_text.substr(0,first_end), glyphs.front().geometry.advance + spacing);
+        publish(cache.rendered_text.substr(0,first_end), first_advance);
         return;
     }
     std::uint32_t family = 0;
@@ -258,15 +262,15 @@ void finalize_core_ellipsis(LayoutBox& owner, const LayoutEngineOptions& options
         refuse(text, "ellipsis marker coverage or budget was refused"); return;
     }
     const auto marker_width = static_cast<std::int64_t>(marker_metrics.advance) +
-        static_cast<std::int64_t>(marker_metrics.glyph_count) * spacing;
+        static_cast<std::int64_t>(marker_metrics.glyph_count) * spacing.letters;
     // CSS preserves the first scalar and clips it when even that scalar cannot
     // fit. The marker follows it and can itself be partly/fully clipped.
     std::size_t prefix = glyphs.empty() ? 0 : 1;
     std::int64_t prefix_width = 0, selected_width = std::max<std::int64_t>(0,
-        marker_width + (glyphs.empty() ? 0 : glyphs.front().geometry.advance + spacing));
+        marker_width + first_advance);
     // Negative spacing can make prefix widths nonmonotonic: scan every prefix.
     for (std::size_t i = 0; i + 1 < glyphs.size(); ++i) {
-        prefix_width += glyphs[i].geometry.advance + spacing;
+        prefix_width += glyphs[i].geometry.advance + spacing.spacing_for(glyphs[i].source_codepoint);
         const auto candidate = prefix_width + marker_width;
         if (i + 1 + marker_metrics.glyph_count <= options.max_prepared_text_glyphs &&
             candidate <= available) {
@@ -284,12 +288,14 @@ void finalize_core_ellipsis(LayoutBox& owner, const LayoutEngineOptions& options
     if (options.text_system->prepare(visible, request, glyphs.data(), glyphs.size(), metrics) != TextSystemStatus::Ok) {
         refuse(text, "ellipsis final preparation was refused"); return;
     }
-    for (std::size_t i = 0; i < glyphs.size(); ++i) {
-        const auto x = static_cast<std::int64_t>(glyphs[i].x) + static_cast<std::int64_t>(i) * spacing;
+    std::int64_t offset = 0;
+    for (auto& glyph : glyphs) {
+        const auto x = static_cast<std::int64_t>(glyph.x) + offset;
         if (x < std::numeric_limits<std::int32_t>::min() || x > std::numeric_limits<std::int32_t>::max()) {
             refuse(text, "ellipsis glyph position overflow"); return;
         }
-        glyphs[i].x = static_cast<std::int32_t>(x);
+        glyph.x = static_cast<std::int32_t>(x);
+        offset += spacing.spacing_for(glyph.source_codepoint);
     }
     publish(visible, selected_width);
 }
@@ -307,12 +313,12 @@ TextSystemStatus measure_core_text(const TextSystem& text_system, std::string_vi
     request.size_q1000 = style.font_size * 1000;
     request.weight = static_cast<std::uint16_t>(std::clamp(style.font_weight, 1, 1000));
     const auto status = text_system.measure(text, request, metrics);
-    if (status != TextSystemStatus::Ok || metrics.glyph_count == 0 || style.letter_spacing == 0)
+    if (status != TextSystemStatus::Ok || metrics.glyph_count == 0 ||
+        (style.letter_spacing == 0 && style.word_spacing == 0))
         return status;
-    const std::int64_t spacing = static_cast<std::int64_t>(
-        bounded_letter_spacing(style.font_size, style.letter_spacing)) * 1000;
-    const std::int64_t advance = static_cast<std::int64_t>(metrics.advance) +
-        static_cast<std::int64_t>(metrics.glyph_count) * spacing;
+    const std::int32_t spacing = bounded_letter_spacing(style.font_size, style.letter_spacing) * 1000;
+    const std::int64_t advance = metrics.advance + detail::scalar_spacing_q1000(text, metrics.glyph_count,
+        spacing, detail::bounded_word_spacing_q1000(style.font_size, style.word_spacing));
     if (advance > std::numeric_limits<std::int32_t>::max())
         return TextSystemStatus::Overflow;
     metrics.advance = static_cast<std::int32_t>(std::max<std::int64_t>(0, advance));
@@ -2620,6 +2626,7 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
         cache.font_family_hash = box.style.font_family_hash;
         cache.text_indent = box.style.text_indent;
         cache.letter_spacing = box.style.letter_spacing;
+        cache.word_spacing = box.style.word_spacing;
         cache.text_transform = box.style.text_transform;
         cache.overflow_wrap_anywhere = box.style.overflow_wrap_anywhere;
         cache.white_space_nowrap = box.style.white_space_nowrap;
@@ -2659,10 +2666,10 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
         const auto ceil_px = [](std::int32_t value) {
             return value <= 0 ? 0 : static_cast<int>((static_cast<std::int64_t>(value) + 999) / 1000);
         };
-        const int bounded_spacing = bounded_letter_spacing(box.style.font_size, box.style.letter_spacing);
-        const std::int64_t spacing_q1000 = static_cast<std::int64_t>(bounded_spacing) * 1000;
-        const std::int64_t raw_advance = static_cast<std::int64_t>(run.advance) +
-            static_cast<std::int64_t>(run.glyph_count) * spacing_q1000;
+        const int spacing_q1000 = bounded_letter_spacing(box.style.font_size, box.style.letter_spacing) * 1000;
+        const int word_spacing_q1000 = detail::bounded_word_spacing_q1000(box.style.font_size, box.style.word_spacing);
+        const std::int64_t raw_advance = run.advance +
+            detail::scalar_spacing_q1000(text, run.glyph_count, spacing_q1000, word_spacing_q1000);
         const int raw_text_width = ceil_px(static_cast<std::int32_t>(std::clamp<std::int64_t>(
             raw_advance, 0, std::numeric_limits<std::int32_t>::max())));
         const int text_indent = std::max(0, std::min(box.style.text_indent, content_width));
@@ -2711,13 +2718,15 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
             const auto append_token = [&]() -> bool {
                 if (token.text.empty()) return true;
                 const std::int64_t separator = line.text.empty() || !pending_space ? 0 :
-                    static_cast<std::int64_t>(space_metrics.advance) + spacing_q1000;
+                    static_cast<std::int64_t>(space_metrics.advance) + spacing_q1000 + word_spacing_q1000;
                 const std::int64_t candidate = line.advance + separator + token.advance;
                 if (!line.text.empty() && candidate > static_cast<std::int64_t>(usable_text_width) * 1000) emit_line();
                 if (box.style.overflow_wrap_anywhere && token.advance > static_cast<std::int64_t>(usable_text_width) * 1000) {
                     for (std::size_t glyph_index = token.first_glyph; glyph_index < token.end_glyph; ++glyph_index) {
                         const auto& glyph = glyphs[glyph_index];
-                        const auto glyph_advance = static_cast<std::int64_t>(glyph.geometry.advance) + spacing_q1000;
+                        const auto glyph_advance = static_cast<std::int64_t>(glyph.geometry.advance) +
+                            spacing_q1000 + (detail::is_word_spacing_separator(glyph.source_codepoint)
+                                ? word_spacing_q1000 : 0);
                         if (!line.text.empty() && line.advance + glyph_advance > static_cast<std::int64_t>(usable_text_width) * 1000)
                             emit_line();
                         line.text.append(text.data() + glyph.source_begin, glyph.source_end - glyph.source_begin);
@@ -2747,7 +2756,8 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
                 if (token.text.empty()) token.first_glyph = glyph_index;
                 token.end_glyph = glyph_index + 1;
                 token.text.append(text.data() + glyph.source_begin, byte_count);
-                token.advance += static_cast<std::int64_t>(glyph.geometry.advance) + spacing_q1000;
+                token.advance += static_cast<std::int64_t>(glyph.geometry.advance) + spacing_q1000 +
+                    (detail::is_word_spacing_separator(cp) ? word_spacing_q1000 : 0);
                 if (is_cjk_codepoint(cp) || cp == '-' || cp == '/' || cp == 0x3001U || cp == 0x3002U) {
                     if (!append_token()) return refuse("line token could not be prepared");
                 }
@@ -2794,9 +2804,10 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
                 const std::int64_t positioned_x = static_cast<std::int64_t>(glyph.x) + glyph_spacing_offset;
                 if (positioned_x < std::numeric_limits<std::int32_t>::min() ||
                     positioned_x > std::numeric_limits<std::int32_t>::max())
-                    return refuse("letter spacing exceeds the prepared glyph position range");
+                    return refuse("text spacing exceeds the prepared glyph position range");
                 glyph.x = static_cast<std::int32_t>(positioned_x);
-                if (glyph_index + 1 < line_glyphs.size()) glyph_spacing_offset += spacing_q1000;
+                glyph_spacing_offset += static_cast<std::int64_t>(spacing_q1000) +
+                    (detail::is_word_spacing_separator(glyph.source_codepoint) ? word_spacing_q1000 : 0);
             }
             PreparedTextLine prepared_line;
             const int line_width = ceil_px(static_cast<std::int32_t>(std::min<std::int64_t>(line.advance,
@@ -2812,7 +2823,7 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
                 bounded_add(bounded_non_negative_multiply(std::max(0, line_height), static_cast<int>(line_index)),
                             bounded_add(ceil_px(run.ascent), leading / 2)));
             prepared_line.width = line_width;
-            const bool encoded = bounded_spacing == 0
+            const bool encoded = spacing_q1000 == 0 && word_spacing_q1000 == 0
                 ? encode_prepared_text(line_glyphs.data(), line_glyphs.size(), request.size_q1000,
                                        static_cast<std::uint32_t>(line.text.size()), prepared_line.packet)
                 : encode_positioned_prepared_text(line_glyphs.data(), line_glyphs.size(), request.size_q1000,

@@ -909,9 +909,14 @@ bool is_supported_declaration_feature(std::string_view feature) {
             return supported_keyword(item, {"border-box", "padding-box", "content-box"});
         });
     }
+    if (property == "word-spacing") {
+        return supported_keyword(value, {"normal", "initial", "inherit", "unset"}) ||
+            is_number_with_suffix(value, {"px"});
+    }
     if (property == "width" || property == "height" || property == "min-width" ||
         property == "min-height" || property == "max-width" || property == "max-height" || property == "font-size" ||
-        property == "text-indent" || property == "letter-spacing" || property == "gap" || property == "row-gap" ||
+        property == "text-indent" || property == "letter-spacing" ||
+        property == "gap" || property == "row-gap" ||
         property == "column-gap" || property == "grid-auto-rows") {
         return is_supported_length_value(value);
     }

@@ -54,6 +54,8 @@ bool layout_fields_equal(const Style& left, const Style& right) {
         left.text_indent == right.text_indent && left.text_indent_specified == right.text_indent_specified &&
         left.letter_spacing == right.letter_spacing &&
         left.letter_spacing_specified == right.letter_spacing_specified &&
+        left.word_spacing == right.word_spacing &&
+        left.word_spacing_specified == right.word_spacing_specified &&
         left.text_transform == right.text_transform && left.text_transform_specified == right.text_transform_specified &&
         left.white_space_nowrap == right.white_space_nowrap &&
         left.white_space_specified == right.white_space_specified &&

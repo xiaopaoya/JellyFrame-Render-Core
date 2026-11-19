@@ -228,6 +228,13 @@ void verify_nonbreaking_space(const TextSystem& system) {
     const auto r = query(f, system, 15000);
     check(r.status == IntrinsicSourceStatus::Complete && r.border_box_block_size_units == 16800,
           "edge NBSP must generate a line after adjacent ordinary spaces collapse");
+
+    Fixture spaced;
+    spaced.root.style.word_spacing = 4;
+    spaced.text(spaced.root, spaced.root_node, "A\xc2\xa0" "B A");
+    const auto wrapped = query(spaced, system, 44000);
+    check(wrapped.status == IntrinsicSourceStatus::Complete && wrapped.border_box_block_size_units == 33600,
+          "word spacing on NBSP contributes to line fit without introducing a break");
 }
 
 constexpr const char* kHanFirst = "\xe4\xb8\xad";
@@ -314,6 +321,14 @@ void verify_han_wrapping(const TextSystem& system) {
 }
 
 void verify_han_refusals(const TextSystem& system) {
+    {
+        Fixture f;
+        f.root.style.word_spacing = 4;
+        f.text(f.root, f.root_node, std::string(kHanFirst) + " " + kHanSecond);
+        const auto r = query(f, system);
+        check(r.status == IntrinsicSourceStatus::Unsupported && r.border_box_block_size_units == -1,
+              "Han height with nonzero word spacing uses ordinary layout");
+    }
     for (const auto* text : {"A\xe4\xb8\xad", "\xe4\xb8\xad" "A", "\xc2\xa0\xe4\xb8\xad",
                              "\xe4\xb8\xad\xc2\xa0", "\xe4\xb8\xad\xe3\x80\x82",
                              "\xe4\xb8\xad\xcc\x81", "\n\xe4\xb8\xad", "\xe4\xb8\xad\r",

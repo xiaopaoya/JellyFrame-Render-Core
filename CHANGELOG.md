@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0 / ABI10
+
+Rebuild all consumers against the new public style and text layout cache
+definitions. The installed CMake package accepts the 0.11 version line.
+
+- Apply bounded CSS `word-spacing` to ASCII and nonbreaking spaces in Core
+  scalar text, including layout, glyph placement and admitted intrinsic sizes.
+- Measure bounded intrinsic height for uniform BMP Han paragraphs with
+  ordinary whitespace and hard breaks.
+
 ## 0.9.0 / ABI4
 
 ABI4 is a source and binary compatibility break from ABI3. Rebuild every Core

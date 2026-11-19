@@ -39,6 +39,9 @@ void inherit_text_style(Style& style, const Style& parent_style) {
     if (!style.letter_spacing_specified) {
         style.letter_spacing = parent_style.letter_spacing;
     }
+    if (!style.word_spacing_specified) {
+        style.word_spacing = parent_style.word_spacing;
+    }
     if (!style.text_transform_specified) {
         style.text_transform = parent_style.text_transform;
     }
@@ -124,6 +127,7 @@ ContentsSourceStyle contents_source_style(const Style& style) {
     result.font_weight = style.font_weight;
     result.line_height = style.line_height;
     result.letter_spacing = style.letter_spacing;
+    result.word_spacing = style.word_spacing;
     result.text_transform = style.text_transform;
     result.white_space_nowrap = style.white_space_nowrap;
     result.overflow_wrap_anywhere = style.overflow_wrap_anywhere;

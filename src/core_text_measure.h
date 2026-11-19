@@ -3,6 +3,7 @@
 #include "render_core/style.h"
 #include "render_core/text_system.h"
 #include "text_system_access.h"
+#include "layout_text_service.h"
 
 #include <algorithm>
 #include <limits>
@@ -33,6 +34,16 @@ inline TextSystemStatus measure_core_text(const TextSystem& text_system,
     const auto status = TextSystemAccess::measure(text_system, text, request, metrics,
         work_limit - work_used, measured_work);
     work_used += measured_work;
+    if (status == TextSystemStatus::Ok && style.word_spacing) {
+        if (text.size() > work_limit - work_used) return TextSystemStatus::ResourceLimit;
+        work_used += text.size();
+        const auto advance = metrics.advance + scalar_spacing_q1000(text, metrics.glyph_count,
+            0, bounded_word_spacing_q1000(style.font_size, style.word_spacing));
+        if (advance > std::numeric_limits<std::int32_t>::max() ||
+            advance < std::numeric_limits<std::int32_t>::min())
+            return TextSystemStatus::Overflow;
+        metrics.advance = static_cast<std::int32_t>(advance);
+    }
     return status;
 }
 

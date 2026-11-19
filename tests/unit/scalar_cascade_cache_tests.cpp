@@ -161,6 +161,8 @@ bool equal_value(const Style &a, const Style &b) {
            equal_value(a.text_indent_specified, b.text_indent_specified) &&
            equal_value(a.letter_spacing, b.letter_spacing) &&
            equal_value(a.letter_spacing_specified, b.letter_spacing_specified) &&
+           equal_value(a.word_spacing, b.word_spacing) &&
+           equal_value(a.word_spacing_specified, b.word_spacing_specified) &&
            equal_value(a.text_transform, b.text_transform) &&
            equal_value(a.text_transform_specified, b.text_transform_specified) &&
            equal_value(a.text_decoration_underline, b.text_decoration_underline) &&
