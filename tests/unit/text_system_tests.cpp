@@ -960,18 +960,18 @@ void core_prepared_text_applies_bounded_letter_spacing() {
         "line-height: 20px; color: #000000; white-space: nowrap; text-align: right; letter-spacing: 2px; }");
     const LayoutBox* positive_text = find_text_box(*positive);
     assert(positive_text != nullptr);
-    assert(positive_text->rect.width >= 20);
-    assert(positive_text->text_layout_cache.prepared_lines[0].width == 20);
+    assert(positive_text->rect.width >= 22);
+    assert(positive_text->text_layout_cache.prepared_lines[0].width == 22);
     assert(positive_text->text_layout_cache.prepared_lines[0].origin_x ==
-           positive_text->rect.x + positive_text->rect.width - 20);
+           positive_text->rect.x + positive_text->rect.width - 22);
     assert_positions(*positive_text, 2);
     auto negative = layout_text(
         "div { margin: 0; width: 40px; font-family: 'Core Test'; font-size: 16px; "
         "line-height: 20px; white-space: nowrap; letter-spacing: -2px; }");
     const LayoutBox* negative_text = find_text_box(*negative);
     assert(negative_text != nullptr);
-    assert(negative_text->rect.width >= 16);
-    assert(negative_text->text_layout_cache.prepared_lines[0].width == 16);
+    assert(negative_text->rect.width >= 14);
+    assert(negative_text->text_layout_cache.prepared_lines[0].width == 14);
     assert_positions(*negative_text, -2);
 
     auto bounded = layout_text(
@@ -987,14 +987,14 @@ void core_prepared_text_applies_bounded_letter_spacing() {
     assert(system.measure("AB", request, base_metrics) == S::Ok);
     const int bounded_spacing = bounded_letter_spacing(16, bounded_text->style.letter_spacing);
     const std::int64_t expected_advance = static_cast<std::int64_t>(base_metrics.advance) +
-        static_cast<std::int64_t>(bounded_spacing) * 1000;
+        static_cast<std::int64_t>(base_metrics.glyph_count) * bounded_spacing * 1000;
     assert(bounded_text->text_layout_cache.prepared_lines[0].width ==
            (expected_advance + 999) / 1000);
     assert_positions(*bounded_text, bounded_spacing);
 
     auto wrapped_document = HtmlParser().parse("<body><div>AB</div></body>");
     StyleResolver wrapped_resolver(CssParser().parse(
-        "div { margin: 0; width: 18px; font-family: 'Core Test'; font-size: 16px; "
+        "div { margin: 0; width: 20px; font-family: 'Core Test'; font-size: 16px; "
         "line-height: 20px; overflow-wrap: anywhere; letter-spacing: 2px; }"));
     auto wrapped = LayoutEngine(wrapped_resolver, layout_options).layout(*wrapped_document, 80, 40);
     const LayoutBox* wrapped_text = find_text_box(*wrapped);
@@ -1006,6 +1006,7 @@ void core_prepared_text_applies_bounded_letter_spacing() {
         PreparedTextGlyph glyph;
         assert(decode_prepared_text(line.packet, view) && view.size() == 1);
         assert(view.read(0, glyph) && glyph.x == 0);
+        assert(line.width == (glyph.geometry.advance + 2000 + 999) / 1000);
     }
 
     auto document = HtmlParser().parse("<body><p id='label'>AB</p></body>");

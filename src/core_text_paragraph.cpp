@@ -57,9 +57,13 @@ struct Builder {
         usage.queries+=count;usage.query_bytes+=bytes*count;work(bytes*count);
     }
     TextRunMetrics measure(std::string_view text,const LayoutTextFont& font) {
-        if (font.letters || font.words) throw Failure{S::UnsupportedStyle};
+        if (font.words) throw Failure{S::UnsupportedStyle};
         query(text.size());TextRunMetrics m;const auto result=system.measure(text,font.request(),m);
         if(result!=S::Ok) throw Failure{result};
+        const auto advance = static_cast<std::int64_t>(m.advance) +
+            static_cast<std::int64_t>(m.glyph_count) * font.letters;
+        if (!fits(advance)) throw Failure{S::Overflow};
+        m.advance = static_cast<std::int32_t>(advance);
         return m;
     }
     char character_at(std::size_t piece) const noexcept {
@@ -288,28 +292,22 @@ struct Builder {
     }
     std::int32_t advance(std::size_t first,std::size_t end,bool maximum=false,std::int32_t origin=0) {
         trim(first,end,maximum);std::int64_t pen=origin;
-        bool previous=false,previous_atomic=false;std::int32_t letters=0;
         for(auto at=first;at<end;) {
             if(preserved&&character_at(at)=='\t') {
                 work(1);
                 pen+=tab_advance(pen);if(!fits(pen))throw Failure{S::Overflow};
-                previous=previous_atomic=false;++at;continue;
+                ++at;continue;
             }
             if((atomic_count||preserved)&&kind_at(at)==Kind::Opportunity){work(1);++at;continue;}
             if(atomic_count&&kind_at(at)==Kind::Atomic) {
-                work(1);const auto next_letters=font_at(at).letters;
-                if(previous&&!previous_atomic)pen+=(static_cast<std::int64_t>(letters)+next_letters)/2;
-                if(!fits(pen))throw Failure{S::Overflow};
+                work(1);
                 pen+=atomic_width(draft.sources[at].owner,maximum);
                 if(!fits(pen))throw Failure{S::Overflow};
-                previous=previous_atomic=true;letters=next_letters;++at;continue;
+                ++at;continue;
             }
             if(kind_at(at)!=Kind::Text)throw Failure{S::InvalidRequest};
             bool gaps=false;const auto next=group_end(at,end,gaps);
-            if(previous_atomic)pen+=(static_cast<std::int64_t>(letters)+font_at(at).letters)/2;
-            if(!fits(pen))throw Failure{S::Overflow};
             pen+=measure(run_text(at,next,gaps),font_at(at)).advance;
-            previous=true;previous_atomic=false;letters=font_at(at).letters;
             if(!fits(pen)) throw Failure{S::Overflow};
             at=next;
         }
@@ -389,7 +387,6 @@ struct Builder {
     }
     void emit(std::size_t row,std::size_t first,std::size_t end,std::int32_t origin,std::int64_t alignment=0) {
         std::int64_t pen=origin;
-        bool previous_text=false,previous_atomic=false;std::int32_t letters=0;
         for(auto at=first;at<end;) {
             if((atomic_count||preserved)&&kind_at(at)==Kind::Opportunity){work(1);++at;continue;}
             if(preserved&&character_at(at)=='\t') {
@@ -397,20 +394,16 @@ struct Builder {
                 // containing-block Tab grid. No Tab record enters a packet.
                 work(1);pen+=tab_advance(pen-alignment);
                 if(!fits(pen))throw Failure{S::Overflow};
-                previous_text=previous_atomic=false;++at;continue;
+                ++at;continue;
             }
             if(atomic_count&&kind_at(at)==Kind::Atomic) {
                 work(1);const auto owner=draft.sources[at].owner;const auto& value=geometry[atomic_index(owner)];
-                const auto next_letters=font_at(at).letters;
-                if(previous_text)pen+=(static_cast<std::int64_t>(letters)+next_letters)/2;
                 const auto top=static_cast<std::int64_t>(draft.lines[row].baseline)-value.extent;
                 if(!fits(pen)||!fits(pen+value.advance)||!fits(top))throw Failure{S::Overflow};
                 placements->placements.push_back({owner,row,static_cast<std::int32_t>(pen),static_cast<std::int32_t>(value.advance),static_cast<int>(top),value.extent});
-                pen+=value.advance;previous_text=false;previous_atomic=true;letters=next_letters;++at;continue;
+                pen+=value.advance;++at;continue;
             }
             bool gaps=false;const auto next=group_end(at,end,gaps);const auto& font=font_at(at);
-            if(previous_atomic)pen+=(static_cast<std::int64_t>(letters)+font.letters)/2;
-            if(!fits(pen))throw Failure{S::Overflow};
             std::size_t glyph_count=0;
             const auto text=run_text(at,next,gaps,&glyph_count);
             capacity(glyph_count,sizeof(PreparedTextGlyph));std::vector<PreparedTextGlyph> glyphs(glyph_count);
@@ -426,24 +419,30 @@ struct Builder {
                 const auto stop=begin+source_end-source_at;
                 const auto packet_start=glyphs[begin].source_begin;
                 const auto packet_bytes=glyphs[stop-1].source_end-packet_start;
-                const auto packet_origin=pen+glyphs[begin].x;
+                const auto packet_origin=pen+glyphs[begin].x+static_cast<std::int64_t>(begin)*font.letters;
                 if(!fits(packet_origin))throw Failure{S::Overflow};
                 for(auto i=begin;i<stop;++i) {
-                    work(1);auto& g=glyphs[i];const auto x=pen+g.x;
-                    const auto glyph_end=x+std::max<std::int64_t>(0,static_cast<std::int64_t>(g.geometry.advance)+(g.source_codepoint==' '?font.words:0));
-                    if(!fits(x)||!fits(glyph_end)) throw Failure{S::Overflow};
+                    work(1);auto& g=glyphs[i];
+                    const auto x=pen+g.x+static_cast<std::int64_t>(i)*font.letters;
+                    if(!fits(x)||!fits(x+g.geometry.advance)||!fits(x+g.geometry.advance+font.letters))
+                        throw Failure{S::Overflow};
                     g.x=static_cast<std::int32_t>(x);
                     g.source_begin-=packet_start;g.source_end-=packet_start;
                 }
                 capacity(kPreparedTextHeaderBytes+(stop-begin)*kPreparedTextRecordBytes+1,1);
                 draft.fragments.emplace_back();auto& fragment=draft.fragments.back();
                 fragment.owner=owner;fragment.line=row;fragment.begin=source_at;fragment.end=source_end;
-                if(!encode_prepared_text(glyphs.data()+begin,stop-begin,font.size,packet_bytes,
-                    fragment.packet,static_cast<std::int32_t>(packet_origin)))throw Failure{S::ResourceLimit};
+                fragment.letter_spacing=font.letters;
+                const bool encoded=font.letters
+                    ? encode_positioned_prepared_text(glyphs.data()+begin,stop-begin,font.size,packet_bytes,fragment.packet)
+                    : encode_prepared_text(glyphs.data()+begin,stop-begin,font.size,packet_bytes,
+                        fragment.packet,static_cast<std::int32_t>(packet_origin));
+                if(!encoded)throw Failure{S::ResourceLimit};
                 begin=stop;source_at=source_end;
             }
-            pen+=m.advance;if(!fits(pen))throw Failure{S::Overflow};at=next;
-            previous_text=true;previous_atomic=false;letters=font.letters;
+            pen+=m.advance+static_cast<std::int64_t>(glyph_count)*font.letters;
+            if(!fits(pen))throw Failure{S::Overflow};
+            at=next;
         }
     }
 };
@@ -538,11 +537,6 @@ S measure_core_text_intrinsic(const TextSystem& system,const CoreTextParagraphSp
         b.preserved_options=&options.preserved;b.hanging=!options.nowrap&&!options.preserved.break_spaces;
         b.draft.revision=system.generation();b.normalize(count,true,options.whitespace,false,
             options.nowrap||(!options.break_all&&!options.anywhere));
-        bool mixed=false,spaced=false,initialized=false;LayoutTextFont first_font;
-        for(std::size_t i=0;i<count;++i){b.work(1);if(spans[i].kind!=Kind::Text)continue;
-            if(initialized)mixed|=!equal_font(first_font,spans[i].font);else{first_font=spans[i].font;initialized=true;}
-            spaced|=spans[i].font.letters||spans[i].font.words;}
-        if(mixed&&spaced)return S::UnsupportedText;
         // Validate complete requests even for collapsed/empty/event owners.
         for(std::size_t i=0;i<count;++i)if(spans[i].kind!=Kind::Atomic&&(!i||!equal_font(spans[i-1].font,spans[i].font)||spans[i-1].kind==Kind::Atomic))b.measure({},spans[i].font);
         CoreTextIntrinsicSizes draft;const auto end=b.draft.sources.size();

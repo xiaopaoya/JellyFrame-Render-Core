@@ -1,4 +1,5 @@
 #include "render_core/text_normalization.h"
+#include "render_core/text_backend.h"
 #include "computed_size_geometry.h"
 #include "natural_image_sizing.h"
 #include "shared_inline.h"
@@ -48,7 +49,7 @@ bool empty_edges(const EdgeSizes& e) {
 bool neutral(const Style& s, bool host, bool allow_image_dimensions = false,
     bool allow_sharp_text_shadow = false, bool allow_inline_background = false,
     bool allow_text_decoration = false, bool allow_inline_block = false) {
-    if (s.visibility_hidden || s.text_transform != TextTransform::None || s.letter_spacing != 0 ||
+    if (s.visibility_hidden || s.text_transform != TextTransform::None ||
         s.text_overflow_ellipsis || (s.text_shadow.enabled &&
             (!allow_sharp_text_shadow || s.text_shadow.blur != 0)) ||
         (!allow_text_decoration && (s.text_decoration_underline || s.text_decoration_line_through))) return false;
@@ -172,7 +173,8 @@ std::array<int, 32> host_geometry(const Style& s) {
         static_cast<int>(s.position_type), static_cast<int>(s.display)}};
 }
 bool same_font(const LayoutTextFont& a, const LayoutTextFont& b) {
-    return a.family == b.family && a.size == b.size && a.weight == b.weight && a.style == b.style;
+    return a.family == b.family && a.size == b.size && a.weight == b.weight &&
+        a.style == b.style && a.letters == b.letters && a.words == b.words;
 }
 bool same_color(Color a, Color b) {
     return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
@@ -414,7 +416,7 @@ struct Collector {
             record->text != node.text)) return false;
         if (record && (style.white_space_nowrap != snapshot.members[0].proof.nowrap ||
             style.overflow_wrap_anywhere != snapshot.members[0].proof.anywhere)) return false;
-        if (record && (style.letter_spacing != 0 || style.text_transform != TextTransform::None ||
+        if (record && (style.text_transform != TextTransform::None ||
             style.visibility_hidden)) return false;
         if (node.type != NodeType::Text || !node.children.empty() ||
             (!node.text.empty() && !is_collapsible_whitespace_text(node)) ||
@@ -432,18 +434,12 @@ struct Collector {
         omitted.dom_index = dom_index;
         omitted.source = node.text;
         LayoutTextFont source_font;
-        if (record) {
-            if (record->style.font_size < 0 || record->style.font_weight < 1 ||
-                record->style.font_weight > 1000) return false;
-            source_font.family = record->style.font_family_hash;
-            source_font.size = record->style.font_size * 1000;
-            source_font.weight = static_cast<std::uint16_t>(record->style.font_weight);
-        } else {
-            source_font.family = style.font_family_hash;
-            if (style.font_size < 0 || style.font_weight < 1 || style.font_weight > 1000) return false;
-            source_font.size = style.font_size * 1000;
-            source_font.weight = static_cast<std::uint16_t>(style.font_weight);
-        }
+        if (style.font_size < 0 || style.font_size > std::numeric_limits<int>::max() / 1000 ||
+            style.font_weight < 1 || style.font_weight > 1000) return false;
+        source_font.family = style.font_family_hash;
+        source_font.size = style.font_size * 1000;
+        source_font.weight = static_cast<std::uint16_t>(style.font_weight);
+        source_font.letters = bounded_letter_spacing(style.font_size, style.letter_spacing) * 1000;
         if (!snapshot.system->resolve_family_hash(source_font.family, source_font.family)) return false;
         spans.push_back({node.text, source_font, style.line_height, CoreTextParagraphSpanKind::Text});
         snapshot.owners.push_back({member, &node, static_cast<std::size_t>(-1)});
@@ -475,7 +471,7 @@ struct Collector {
         const auto kind = after ? style.after_content_kind : style.before_content_kind;
         if (kind == GeneratedContentKind::None) return true;
         if (kind != GeneratedContentKind::Text || wrapper.node == nullptr ||
-            wrapper.node->type != NodeType::Element || style.letter_spacing != 0 ||
+            wrapper.node->type != NodeType::Element ||
             style.text_transform != TextTransform::None || style.visibility_hidden ||
             style.white_space_nowrap != snapshot.members[0].proof.nowrap ||
             style.overflow_wrap_anywhere != snapshot.members[0].proof.anywhere ||
@@ -490,6 +486,7 @@ struct Collector {
         LayoutTextFont font;
         font.family = style.font_family_hash;
         font.size = style.font_size * 1000;
+        font.letters = bounded_letter_spacing(style.font_size, style.letter_spacing) * 1000;
         font.weight = static_cast<std::uint16_t>(weight_specified ? weight : style.font_weight);
         if (!snapshot.system->resolve_family_hash(font.family, font.family)) return false;
         append_text(*const_cast<LayoutBox*>(snapshot.members[member].proof.box), member, source, font,
@@ -640,7 +637,8 @@ Rect fragment_bounds(const CoreTextParagraphFragment& fragment, const CoreTextPa
         PreparedTextGlyph glyph;
         packet.read(i, glyph);
         left = std::min(left, static_cast<std::int64_t>(glyph.x));
-        right = std::max(right, static_cast<std::int64_t>(glyph.x)+glyph.geometry.advance);
+        right = std::max(right, static_cast<std::int64_t>(glyph.x) +
+            std::max<std::int64_t>(0, static_cast<std::int64_t>(glyph.geometry.advance) + fragment.letter_spacing));
     }
     if (!packet.size()) return {};
     const auto x = floor_pixel(left), edge = ceil_pixel(right);
