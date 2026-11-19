@@ -86,8 +86,9 @@ preserves those per-glyph choices and geometry and decodes to a borrowed,
 allocation-free view. It does not carry source text or raw pointers and does not
 reuse the old single-font packet. `LayoutEngineOptions::text_system` can measure,
 break and prepare supported scalar text into per-line packets. Bounded integer
-`letter-spacing` is included in wrapping and explicit Q1000 glyph positions;
-v3 packets carry those positions without changing v1/v2 decoding. The cache
+`letter-spacing` contributes to each scalar's advance, including at line ends.
+Wrapping and alignment use that advance. Version 3 packets carry the explicit
+Q1000 glyph positions using the existing packet format. The cache
 retains each line's packet and
 baseline plus the bound TextSystem generation; the layer builder must receive
 the same service instance and generation and emits one

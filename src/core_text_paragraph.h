@@ -49,6 +49,7 @@ struct CoreTextParagraphLine {
 };
 struct CoreTextParagraphFragment {
     std::size_t owner = 0, line = 0, begin = 0, end = 0;
+    std::int32_t letter_spacing = 0; // Q1000 logical advance adjustment
     // Packet X is Q1000 relative to the paragraph content origin. Its source
     // byte ranges are local to this fragment's normalized UTF-8 substring.
     std::string packet;
@@ -137,11 +138,11 @@ TextSystemStatus measure_core_text_paragraph_metrics(const TextSystem&,
 
 // Private ordinary ASCII width prerequisite. Shares paragraph normalization,
 // font-run grouping and exact range advances, without glyph packets or lines.
-// Uniform requests may use signed spacing; mixed requests require zero spacing.
+// Each scalar contributes its source run's signed letter spacing.
 // Owner boundaries never add breaks. Forced events divide natural lines; optional
 // events add min-content cuts only when wrapping, and remain transparent to
-// font-run tracking when unused. Atoms have separate borrowed MIN/MAX endpoints,
-// split shaping runs and retain half-sum exterior tracking (none between atoms).
+// font-run tracking when unused. Atoms have separate borrowed MIN/MAX endpoints
+// and split shaping runs.
 // Wrapping cuts on each side; nowrap still uses distinct atomic endpoints.
 // max_content is floored at min_content.
 // No containing width/indent/alignment, host callback or integer-font projection.
@@ -162,7 +163,8 @@ TextSystemStatus measure_core_text_intrinsic(const TextSystem&,
 // Private builder, also used by the bounded LayoutEngine collector. Collapsing ASCII text
 // with explicit forced/optional events; source/style boundaries never add cuts. Equal font
 // requests share measurement/preparation even across owner boundaries. Different
-// font requests start separate scalar runs (no cross-font spacing/shaping).
+// font requests start separate scalar runs. Each scalar contributes its run's
+// letter spacing even at owner and line boundaries.
 // Common-baseline line metrics include glyph struts, atomic extents and the block
 // strut. Atomic spans require selected geometry plus a separate placement output;
 // neither events nor atoms enter glyph packets. Both outputs are transactional.

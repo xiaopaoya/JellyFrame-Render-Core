@@ -112,6 +112,45 @@ struct Fixture {
         layers.text_system = &system;
     }
 };
+void scalar_letter_spacing() {
+    Fixture f;
+    const auto check_layout = [&](const char* html, const char* extra,
+                                  const std::vector<int>& advances, const std::vector<int>& positions) {
+        StyleResolver styles(CssParser{}.parse(std::string(
+            "*{margin:0;padding:0;border:0}div{display:block;width:40px;font-size:16px;line-height:20px;"
+            "letter-spacing:4px}") + extra));
+        auto dom = HtmlParser{}.parse(html);
+        auto layout = LayoutEngine(styles, f.options).layout(*dom, 80, 80);
+        const auto& host = find(*layout, "p");
+        const auto& binding = host.text_layout_cache.shared_inline;
+        if (!binding || !detail::shared_inline_current(*binding, &f.system))
+            throw std::runtime_error(std::string(html) + " did not retain a live shared inline layout");
+        const auto& paragraph = binding->snapshot->paragraph;
+        check(paragraph.lines.size() == advances.size(), "letter spacing determines line fit");
+        for (std::size_t i = 0; i < advances.size(); ++i)
+            if (paragraph.lines[i].advance != advances[i])
+                throw std::runtime_error(std::string(html) + " line advance: " +
+                    std::to_string(paragraph.lines[i].advance) + " expected " + std::to_string(advances[i]));
+
+        auto tree = LayerTreeBuilder(f.layers).build(*layout);
+        const auto painted = glyphs(*tree);
+        check(painted.size() == positions.size(), "positioned text emits all expected glyphs");
+        for (std::size_t i = 0; i < positions.size(); ++i)
+            check(std::get<1>(painted[i]) == positions[i], "spacing belongs to the preceding glyph");
+    };
+    check_layout("<div id='p'>A<span>B</span>A</div>", "span{letter-spacing:-3px}",
+                 {30600}, {0, 12000, 18600});
+    check_layout("<div id='p'>A<span>B</span></div>", "div{text-align:center}",
+                 {25600}, {7200, 19200});
+    check_layout("<div id='p'>A <span>B</span></div>", "div{width:32px}",
+                 {12000, 13600}, {0, 0});
+    check_layout("<div id='p'>A <span>B</span></div>", "div{width:32px;letter-spacing:-2px}",
+                 {15600}, {0, 6000, 8000});
+    check_layout("<div id='p'>A<wbr><span>B</span></div>", "div{width:24px}",
+                 {12000, 13600}, {0, 0});
+    check_layout("<div id='p'>A<img src='tile'><span>B</span></div>", "img{display:inline;width:6px;height:16px}",
+                 {31600}, {0, 18000});
+}
 struct InlineImageState {
     std::uint32_t handle = 91;
     std::size_t resolve_calls = 0;
@@ -973,8 +1012,9 @@ void contents_whitespace_joins_shared_paragraph() {
     auto spacing_dom = HtmlParser{}.parse(
         "<main id='p'>A<span><span id='inner'> </span></span>B</main>");
     auto spacing_layout = LayoutEngine(spacing_styles, fixture.options).layout(*spacing_dom, 140, 80);
-    check(!find(*spacing_layout, "p").text_layout_cache.shared_inline,
-          "unsupported inherited letter spacing on an omitted source refuses whole publication");
+    const auto spacing = find(*spacing_layout, "p").text_layout_cache.shared_inline;
+    check(spacing && spacing->snapshot->paragraph.lines.front().advance == 22600,
+          "collapsed space preserves letter spacing from its contents source");
 
     StyleResolver pseudo_styles(CssParser{}.parse(
         "*{margin:0;padding:0;border:0}main{display:block;width:120px;font-size:16px;line-height:20px}"
@@ -2121,6 +2161,7 @@ int main() {
         inline_scope_backgrounds();
         propagated_inline_text_decorations();
         shared_mixed_font_and_line_height_owners();
+        scalar_letter_spacing();
         preserved_whitespace_shared_paragraph();
         nonbreaking_space_stays_in_shared_paragraph();
         nonbreaking_space_packet_source_ranges();

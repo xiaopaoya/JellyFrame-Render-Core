@@ -16,7 +16,7 @@ struct LayoutTextFont {
 };
 
 // CSS inputs are checked without passing through the old integer-font callback
-// boundary. The current service admits the upright zero-spacing profile.
+// boundary. Scalar tracking is separate from the font request and glyph metrics.
 // Refusal preserves output. CSS family hashes are resolved by the collector.
 TextSystemStatus layout_text_font(const Style&, LayoutTextFont&) noexcept;
 
