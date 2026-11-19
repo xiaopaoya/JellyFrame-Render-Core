@@ -3075,6 +3075,7 @@ enum class CascadeProperty : std::size_t {
     LineHeight,
     TextIndent,
     LetterSpacing,
+    WordSpacing,
     TextTransform,
     TextDecoration,
     BoxShadow,
@@ -3285,6 +3286,7 @@ CascadeSlot* cascade_slot_for_property(CascadeSlots& slots, const std::string& p
         {"visibility", CascadeProperty::Visibility},
         {"white-space", CascadeProperty::WhiteSpace},
         {"width", CascadeProperty::Width},
+        {"word-spacing", CascadeProperty::WordSpacing},
         {"z-index", CascadeProperty::ZIndex},
     };
     const auto* it = std::lower_bound(std::begin(kPropertySlots),
@@ -3832,6 +3834,35 @@ bool apply_declaration(Style& style,
         }
         style.text_indent = px;
         style.text_indent_specified = true;
+        return true;
+    } else if (property == "word-spacing") {
+        const std::string lowered = lowercase(trim(value));
+        if (lowered == "inherit" || lowered == "unset") {
+            style.word_spacing = 0;
+            style.word_spacing_specified = false;
+            return true;
+        }
+        char* end = nullptr;
+        errno = 0;
+        const float literal = std::strtof(lowered.c_str(), &end);
+        const bool unitless_zero = end != lowered.c_str() && *end == '\0' &&
+            errno != ERANGE && literal == 0;
+        if (lowered == "normal" || lowered == "initial" || unitless_zero) {
+            style.word_spacing = 0;
+            style.word_spacing_specified = true;
+            return true;
+        }
+        int px = 0;
+        if (lowered.size() <= 2 || lowered.compare(lowered.size() - 2, 2, "px") != 0 ||
+            !parse_length_px(lowered, px, style.font_size, context) ||
+            px < -std::max(1, style.font_size / 2) ||
+            px > static_cast<std::int64_t>(style.font_size) * 2 ||
+            px < std::numeric_limits<std::int16_t>::min() ||
+            px > std::numeric_limits<std::int16_t>::max()) {
+            return false;
+        }
+        style.word_spacing = static_cast<std::int16_t>(px);
+        style.word_spacing_specified = true;
         return true;
     } else if (property == "letter-spacing") {
         const std::string lowered = lowercase(trim(value));

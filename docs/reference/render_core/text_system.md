@@ -87,6 +87,10 @@ allocation-free view. It does not carry source text or raw pointers and does not
 reuse the old single-font packet. `LayoutEngineOptions::text_system` can measure,
 break and prepare supported scalar text into per-line packets. Bounded integer
 `letter-spacing` contributes to each scalar's advance, including at line ends.
+Inherited `word-spacing` accepts `normal` and bounded pixel lengths. It adjusts
+the advance of retained ASCII spaces, including those produced by collapsing
+whitespace. Nonbreaking spaces keep their font advance. The contextual shaping
+profile does not apply nonzero word spacing.
 Wrapping and alignment use that advance. Version 3 packets carry the explicit
 Q1000 glyph positions using the existing packet format. The cache
 retains each line's packet and

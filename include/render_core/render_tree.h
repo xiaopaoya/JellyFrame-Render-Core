@@ -49,6 +49,7 @@ struct ContentsSourceStyle {
     std::string before_counter_suffix;
     Color before_color{0, 0, 0, 255};
     bool before_color_specified = false;
+    std::int16_t word_spacing = 0;
     int before_font_weight = 400;
     bool before_font_weight_specified = false;
     bool before_left_specified = false;

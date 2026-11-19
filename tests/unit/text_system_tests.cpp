@@ -1061,6 +1061,36 @@ void core_prepared_text_applies_bounded_letter_spacing() {
     }
     assert(changed);
 }
+void core_prepared_text_applies_word_spacing() {
+    auto font = asset();
+    TextFontFace face{101, 0, font.font};
+    TextSystem system;
+    assert(system.bind(&face, 1) == S::Ok);
+    LayoutEngineOptions options;
+    options.text_system = &system;
+    options.shared_inline.max_attempts = 0;
+    const auto run = [&](const char* extra, int width, const std::vector<std::string>& expected) {
+        auto document = HtmlParser().parse("<div>A  B</div>");
+        StyleResolver resolver(CssParser().parse(
+            "body,div{margin:0}div{font-size:16px;line-height:20px;word-spacing:4px;" +
+            std::string(extra) + "}"));
+        auto layout = LayoutEngine(resolver, options).layout(*document, width, 80);
+        const auto* text = find_text_box(*layout);
+        assert(text && text->text_layout_cache.prepared_text);
+        assert(text->text_layout_cache.lines == expected);
+        if (expected.size() == 1) {
+            const auto& line = text->text_layout_cache.prepared_lines.front();
+            PreparedTextView packet;
+            PreparedTextGlyph space, last;
+            assert(decode_prepared_text(line.packet, packet) && packet.size() == 3);
+            assert(packet.read(1, space) && packet.read(2, last));
+            assert(space.x == 8000 && last.x == 16000 && line.width == 26);
+        }
+    };
+    run("", 24, {"A", "B"});
+    run("white-space:nowrap", 24, {"A B"});
+}
+
 void core_layout_refusals_are_explicit() {
     auto a=asset();
     std::array<TextFontFace,2> faces={{{101,17,a.font,normalized_font_family_hash("Core Test")},
@@ -1191,6 +1221,7 @@ int main(int argc,char** argv) {
     positioned_prepared_packets_validate_final_coordinates();
     route_relayout_keeps_prepared_text_while_dom_is_dirty();aligned_prepared_text_stays_inside_its_layout_box();
     core_prepared_text_applies_bounded_letter_spacing();
+    core_prepared_text_applies_word_spacing();
     core_prepared_text_ellipsis();
     core_native_control_prepared_labels();
     unrelated_input_mutation_preserves_static_prepared_text();

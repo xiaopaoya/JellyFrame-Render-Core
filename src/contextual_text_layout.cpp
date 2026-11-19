@@ -30,7 +30,7 @@ bool plain(const Style& s) {
      s.box_shadow.enabled||s.text_shadow.enabled||s.outline_width||
      s.before_content_kind!=GeneratedContentKind::None||s.after_content_kind!=GeneratedContentKind::None||
      s.list_style_type!=ListStyleType::None||s.text_decoration_underline||s.text_decoration_line_through||
-     s.text_transform!=TextTransform::None||s.letter_spacing||s.text_indent||s.text_overflow_ellipsis||
+     s.text_transform!=TextTransform::None||s.letter_spacing||s.word_spacing||s.text_indent||s.text_overflow_ellipsis||
      s.line_height==0||s.line_height>INT_MAX/1000||!s.transitions.empty()||!s.animations.empty()||
      s.aspect_ratio_width||s.aspect_ratio_height||!bounded(s.margin)||!bounded(s.padding)||!zero(s.border_width)||
      s.border_radius||s.border_radius_percent>=0||s.border_radius_axes_specified||

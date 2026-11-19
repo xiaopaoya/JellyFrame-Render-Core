@@ -18,6 +18,7 @@ TextSystemStatus layout_text_font(const Style& style, LayoutTextFont& output) no
     draft.family = style.font_family_hash;
     draft.size = style.font_size*1000;
     draft.letters = bounded_letter_spacing(style.font_size, style.letter_spacing) * 1000;
+    draft.words = bounded_word_spacing_q1000(style.font_size, style.word_spacing);
     draft.weight = static_cast<std::uint16_t>(style.font_weight);
     output = draft;
     return TextSystemStatus::Ok;

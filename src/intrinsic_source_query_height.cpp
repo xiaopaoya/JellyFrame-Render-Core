@@ -98,6 +98,7 @@ bool same_text_metrics(const Style& left, const Style& right) {
     return !right.text_decoration_underline && !right.text_decoration_line_through &&
         left.font_size == right.font_size && left.font_weight == right.font_weight &&
         left.font_family_hash == right.font_family_hash && left.letter_spacing == right.letter_spacing &&
+        left.word_spacing == right.word_spacing &&
         left.line_height == right.line_height && left.text_transform == right.text_transform &&
         left.white_space_nowrap == right.white_space_nowrap &&
         left.overflow_wrap_anywhere == right.overflow_wrap_anywhere;

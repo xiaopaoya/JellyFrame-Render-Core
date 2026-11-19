@@ -186,6 +186,7 @@ ContentsSourceStyle contents_source_style(const Style& style) {
     result.font_weight = style.font_weight;
     result.line_height = style.line_height;
     result.letter_spacing = style.letter_spacing;
+    result.word_spacing = style.word_spacing;
     result.text_transform = style.text_transform;
     result.white_space_nowrap = style.white_space_nowrap;
     result.overflow_wrap_anywhere = style.overflow_wrap_anywhere;
@@ -440,6 +441,7 @@ struct Collector {
         source_font.size = style.font_size * 1000;
         source_font.weight = static_cast<std::uint16_t>(style.font_weight);
         source_font.letters = bounded_letter_spacing(style.font_size, style.letter_spacing) * 1000;
+        source_font.words = bounded_word_spacing_q1000(style.font_size, style.word_spacing);
         if (!snapshot.system->resolve_family_hash(source_font.family, source_font.family)) return false;
         spans.push_back({node.text, source_font, style.line_height, CoreTextParagraphSpanKind::Text});
         snapshot.owners.push_back({member, &node, static_cast<std::size_t>(-1)});
@@ -487,6 +489,7 @@ struct Collector {
         font.family = style.font_family_hash;
         font.size = style.font_size * 1000;
         font.letters = bounded_letter_spacing(style.font_size, style.letter_spacing) * 1000;
+        font.words = bounded_word_spacing_q1000(style.font_size, style.word_spacing);
         font.weight = static_cast<std::uint16_t>(weight_specified ? weight : style.font_weight);
         if (!snapshot.system->resolve_family_hash(font.family, font.family)) return false;
         append_text(*const_cast<LayoutBox*>(snapshot.members[member].proof.box), member, source, font,
@@ -638,7 +641,8 @@ Rect fragment_bounds(const CoreTextParagraphFragment& fragment, const CoreTextPa
         packet.read(i, glyph);
         left = std::min(left, static_cast<std::int64_t>(glyph.x));
         right = std::max(right, static_cast<std::int64_t>(glyph.x) +
-            std::max<std::int64_t>(0, static_cast<std::int64_t>(glyph.geometry.advance) + fragment.letter_spacing));
+            std::max<std::int64_t>(0, static_cast<std::int64_t>(glyph.geometry.advance) + fragment.letter_spacing +
+                (glyph.source_codepoint == ' ' ? fragment.word_spacing : 0)));
     }
     if (!packet.size()) return {};
     const auto x = floor_pixel(left), edge = ceil_pixel(right);

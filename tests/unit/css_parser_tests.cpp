@@ -1318,6 +1318,38 @@ void font_weight_list_style_and_generated_counter_apply() {
     check(item_style.before_font_weight == 600, "before font-weight parsed");
 }
 
+void bounded_word_spacing_cascade() {
+    auto document = HtmlParser{}.parse(
+        "<main><span>A</span><b>B</b><i>A</i><em>B</em><small>A</small></main>");
+    StyleResolver resolver(parse(
+        "main{word-spacing:3px;word-spacing:2%;word-spacing:4;word-spacing:100000px}"
+        "span{word-spacing:1px;word-spacing:inherit}b{word-spacing:normal}"
+        "i{word-spacing:unset}em{word-spacing:initial}small{word-spacing:0.0}"
+        "@supports (word-spacing:2px){main{word-spacing:4px}}"
+        "@supports (word-spacing:2%){main{word-spacing:5px}}"));
+    const auto render = RenderTreeBuilder(resolver).build(*document);
+    const auto find = [](const auto& self, const RenderObject& box, const char* tag) -> const RenderObject* {
+        if (box.node && box.node->tag_name == tag) return &box;
+        for (const auto& child : box.children)
+            if (const auto* match = self(self, *child, tag)) return match;
+        return nullptr;
+    };
+    const auto* main = find(find, *render, "main");
+    const auto* span = find(find, *render, "span");
+    const auto* bold = find(find, *render, "b");
+    const auto* italic = find(find, *render, "i");
+    const auto* emphasis = find(find, *render, "em");
+    const auto* small = find(find, *render, "small");
+    check(main && main->style.word_spacing == 4, "only the supported query applies");
+    check(span && span->style.word_spacing == 4 && italic && italic->style.word_spacing == 4,
+          "inherit and unset recover the parent's word spacing");
+    check(bold && bold->style.word_spacing == 0 && emphasis && emphasis->style.word_spacing == 0 &&
+          small && small->style.word_spacing == 0, "normal, initial and zero stop inheritance");
+    auto element = make_element("p");
+    check(StyleResolver(parse("p{word-spacing:3px;word-spacing:2%;word-spacing:4}"))
+        .resolve(*element).word_spacing == 3, "invalid declarations preserve the earlier value");
+}
+
 void text_transform_parses_and_inherits() {
     auto root = make_element("section");
     root->attributes["class"] = "screen";
@@ -2030,6 +2062,7 @@ int main() {
         physical_edge_longhands_apply_per_side();
         font_weight_list_style_and_generated_counter_apply();
         text_transform_parses_and_inherits();
+        bounded_word_spacing_cascade();
         font_family_declares_runtime_family_hash_and_inherits();
         after_generated_content_and_text_overflow_apply();
         per_corner_border_radius_applies();

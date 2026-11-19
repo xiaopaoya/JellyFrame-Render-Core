@@ -151,6 +151,30 @@ void scalar_letter_spacing() {
     check_layout("<div id='p'>A<img src='tile'><span>B</span></div>", "img{display:inline;width:6px;height:16px}",
                  {31600}, {0, 18000});
 }
+void scalar_word_spacing() {
+    Fixture fixture;
+    const auto check_case = [&](const char* rules, const std::vector<int>& advances,
+                                const std::vector<int>& positions) {
+        auto document = HtmlParser{}.parse("<div id='p'>A <span> B</span></div>");
+        StyleResolver styles(CssParser{}.parse(std::string(
+            "*{margin:0;padding:0;border:0}div{font-size:16px;line-height:20px;width:24px}") + rules));
+        auto layout = LayoutEngine(styles, fixture.options).layout(*document, 80, 80);
+        const auto& binding = find(*layout, "p").text_layout_cache.shared_inline;
+        check(binding && detail::shared_inline_current(*binding, &fixture.system),
+              "word spacing retains a valid shared paragraph");
+        const auto& lines = binding->snapshot->paragraph.lines;
+        check(lines.size() == advances.size(), "word spacing changes line fit");
+        for (std::size_t index = 0; index < lines.size(); ++index)
+            check(lines[index].advance == advances[index], "word spacing changes the kept space only");
+        const auto painted = glyphs(*LayerTreeBuilder(fixture.layers).build(*layout));
+        check(painted.size() == positions.size(), "collapsed separator is painted at most once");
+        for (std::size_t index = 0; index < positions.size(); ++index)
+            check(std::get<1>(painted[index]) == positions[index], "word spacing moves the next glyph");
+    };
+    check_case("div{word-spacing:4px}", {8000, 9600}, {0, 0});
+    check_case("div{word-spacing:4px;white-space:nowrap}", {25600}, {0, 8000, 16000});
+    check_case("div{word-spacing:-2px}", {19600}, {0, 8000, 10000});
+}
 struct InlineImageState {
     std::uint32_t handle = 91;
     std::size_t resolve_calls = 0;
@@ -2162,6 +2186,7 @@ int main() {
         propagated_inline_text_decorations();
         shared_mixed_font_and_line_height_owners();
         scalar_letter_spacing();
+        scalar_word_spacing();
         preserved_whitespace_shared_paragraph();
         nonbreaking_space_stays_in_shared_paragraph();
         nonbreaking_space_packet_source_ranges();

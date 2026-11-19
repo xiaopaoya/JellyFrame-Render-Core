@@ -57,11 +57,10 @@ struct Builder {
         usage.queries+=count;usage.query_bytes+=bytes*count;work(bytes*count);
     }
     TextRunMetrics measure(std::string_view text,const LayoutTextFont& font) {
-        if (font.words) throw Failure{S::UnsupportedStyle};
         query(text.size());TextRunMetrics m;const auto result=system.measure(text,font.request(),m);
         if(result!=S::Ok) throw Failure{result};
-        const auto advance = static_cast<std::int64_t>(m.advance) +
-            static_cast<std::int64_t>(m.glyph_count) * font.letters;
+        if (font.words) work(text.size());
+        const auto advance = m.advance + scalar_spacing_q1000(text, m.glyph_count, font.letters, font.words);
         if (!fits(advance)) throw Failure{S::Overflow};
         m.advance = static_cast<std::int32_t>(advance);
         return m;
@@ -411,6 +410,8 @@ struct Builder {
             const auto result=system.prepare(text,font.request(),glyphs.data(),glyphs.size(),m);
             if(result!=S::Ok)throw Failure{result};
             if(m.glyph_count!=glyph_count)throw Failure{S::InvalidRequest};
+            const bool positioned = font.letters || font.words;
+            std::int64_t spacing_offset = 0;
             std::size_t source_at=at;
             for(std::size_t begin=0;begin<glyphs.size();) {
                 while(source_at<next&&kind_at(source_at)==Kind::Opportunity){work(1);++source_at;}
@@ -419,13 +420,15 @@ struct Builder {
                 const auto stop=begin+source_end-source_at;
                 const auto packet_start=glyphs[begin].source_begin;
                 const auto packet_bytes=glyphs[stop-1].source_end-packet_start;
-                const auto packet_origin=pen+glyphs[begin].x+static_cast<std::int64_t>(begin)*font.letters;
+                const auto packet_origin=pen+glyphs[begin].x+spacing_offset;
                 if(!fits(packet_origin))throw Failure{S::Overflow};
                 for(auto i=begin;i<stop;++i) {
                     work(1);auto& g=glyphs[i];
-                    const auto x=pen+g.x+static_cast<std::int64_t>(i)*font.letters;
-                    if(!fits(x)||!fits(x+g.geometry.advance)||!fits(x+g.geometry.advance+font.letters))
+                    const auto x=pen+g.x+spacing_offset;
+                    const auto adjustment = font.spacing_for(g.source_codepoint);
+                    if(!fits(x)||!fits(x+g.geometry.advance)||!fits(x+g.geometry.advance+adjustment))
                         throw Failure{S::Overflow};
+                    spacing_offset += adjustment;
                     g.x=static_cast<std::int32_t>(x);
                     g.source_begin-=packet_start;g.source_end-=packet_start;
                 }
@@ -433,14 +436,15 @@ struct Builder {
                 draft.fragments.emplace_back();auto& fragment=draft.fragments.back();
                 fragment.owner=owner;fragment.line=row;fragment.begin=source_at;fragment.end=source_end;
                 fragment.letter_spacing=font.letters;
-                const bool encoded=font.letters
+                fragment.word_spacing=font.words;
+                const bool encoded=positioned
                     ? encode_positioned_prepared_text(glyphs.data()+begin,stop-begin,font.size,packet_bytes,fragment.packet)
                     : encode_prepared_text(glyphs.data()+begin,stop-begin,font.size,packet_bytes,
                         fragment.packet,static_cast<std::int32_t>(packet_origin));
                 if(!encoded)throw Failure{S::ResourceLimit};
                 begin=stop;source_at=source_end;
             }
-            pen+=m.advance+static_cast<std::int64_t>(glyph_count)*font.letters;
+            pen+=m.advance+spacing_offset;
             if(!fits(pen))throw Failure{S::Overflow};
             at=next;
         }

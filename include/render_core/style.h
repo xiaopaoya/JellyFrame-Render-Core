@@ -355,6 +355,8 @@ struct Style {
     bool text_align_specified = false;
     JustifyContent justify_content = JustifyContent::Start;
     AlignItems align_items = AlignItems::Stretch;
+    bool word_spacing_specified = false;
+    std::int16_t word_spacing = 0;
     // Bounded separate-table state and local inheritance provenance.
     std::uint32_t table_properties = (2U << 20U) | (2U << 12U) | (1U << 3U);
     std::vector<StyleTransition> transitions;
