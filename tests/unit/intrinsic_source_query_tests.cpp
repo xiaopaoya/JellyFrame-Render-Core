@@ -47,7 +47,7 @@ FontAsset make_font() {
     std::vector<std::pair<unsigned, unsigned>> glyphs = {
         {32, 250}, {33, 300}, {45, 300}, {47, 300}, {63, 400},
         {65, 500}, {66, 600}, {67, 400}, {68, 300}, {0x4e2d, 1000}, {0x6587, 1000},
-        {97, 700}, {98, 800}
+        {97, 700}, {98, 800}, {0xa0, 250}
     };
     for (const auto range : {std::pair<unsigned, unsigned>{33, 47}, {58, 64},
                              {91, 96}, {123, 126}}) {
@@ -378,6 +378,45 @@ void expect_widths(const Fixture& fixture, const TextSystem& text_system,
     check(result.boxes_visited > 0 && result.source_bytes > 0 &&
           result.measurements > 0 && result.work >= result.source_bytes,
           "complete source query reports aggregate resource usage");
+}
+
+void nonbreaking_space_widths(const TextSystem& text_system) {
+    Fixture fixture;
+    fixture.append_text(fixture.root_box, fixture.root_node, " A");
+    auto [span, node] = fixture.append_element(
+        fixture.root_box, fixture.root_node, "span", Display::Inline);
+    fixture.append_text(span, node, "\xc2\xa0");
+    fixture.append_text(fixture.root_box, fixture.root_node, "B ");
+    expect_widths(fixture, text_system, 21600, 21600);
+
+    Fixture edges;
+    edges.append_text(edges.root_box, edges.root_node, " \xc2\xa0" "A\xc2\xa0 ");
+    expect_widths(edges, text_system, 16000, 16000);
+    edges.root_box.style.overflow_wrap_anywhere = true;
+    edges.root_box.children[0]->style.overflow_wrap_anywhere = true;
+    expect_widths(edges, text_system, 8000, 16000);
+
+    Fixture punctuation;
+    punctuation.append_text(punctuation.root_box, punctuation.root_node, "A/");
+    punctuation.append_text(punctuation.root_box, punctuation.root_node, "\xc2\xa0" "B A-\xc2\xa0" "B");
+    expect_widths(punctuation, text_system, 26400, 56800);
+
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    auto document = HtmlParser{}.parse(
+        "<main id='flex'><div id='flex-item'>A<span>&nbsp;</span>B</div></main>"
+        "<main id='grid'><div id='grid-item'>A<span>&nbsp;</span>B</div><div></div></main>");
+    StyleResolver styles(CssParser{}.parse(
+        "*{margin:0;padding:0;border:0;font-size:16px}"
+        "#flex{display:flex;width:5px}#flex-item{flex:0 1 0px}"
+        "#grid{display:grid;width:100px;grid-template-columns:auto 1fr}"));
+    LayoutEngineOptions options;
+    options.text_system = &text_system;
+    auto layout = LayoutEngine(styles, options).layout(*document, 120, 100);
+    const auto* flex_item = find_box(*layout, "flex-item");
+    const auto* grid_item = find_box(*layout, "grid-item");
+    check(flex_item && flex_item->rect.width == 22, "Flex uses the unbroken NBSP minimum");
+    check(grid_item && grid_item->rect.width == 22, "Grid uses the NBSP max-content width");
+#endif
 }
 
 void text_runs_and_breaks(const TextSystem& text_system) {
@@ -1316,6 +1355,7 @@ int main() {
         fractional_percentage_pipeline(text_system);
         unsupported_original_size_kinds();
         text_runs_and_breaks(text_system);
+        nonbreaking_space_widths(text_system);
         han_runs_and_refusals(text_system);
         refusals_and_budgets(text_system);
         std::cout << "intrinsic source query ASCII/Han runs, breaks, refusals and budgets passed\n";

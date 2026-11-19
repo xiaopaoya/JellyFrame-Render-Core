@@ -34,25 +34,27 @@ void u32(std::vector<std::uint8_t>& b, std::size_t at, std::uint32_t v) {
 }
 struct FontAsset { std::vector<std::uint8_t> bytes; FontResource font; };
 FontAsset make_font() {
-    constexpr std::uint32_t cps[] = {32, 45, 65, 66, 67, 68};
+    constexpr std::uint32_t cps[] = {32, 45, 65, 66, 67, 68, 0xa0};
+    constexpr std::size_t glyphs = sizeof(cps) / sizeof(cps[0]);
     constexpr unsigned advance = 600;
-    constexpr std::size_t bitmap = 128 + 6 * 40;
+    constexpr std::size_t bitmap = 128 + glyphs * 40;
     FontAsset asset;
     asset.bytes.resize(bitmap, 0);
     auto& b = asset.bytes;
     const char magic[] = "JFFONT2";
     for (unsigned i = 0; i < 8; ++i) b[i] = static_cast<std::uint8_t>(magic[i]);
     u16(b, 8, 2); u16(b, 10, 128); u16(b, 12, 40); u16(b, 14, 1);
-    u32(b, 20, 6); u32(b, 24, 128); u32(b, 28, static_cast<std::uint32_t>(bitmap));
+    u32(b, 20, glyphs); u32(b, 24, 128); u32(b, 28, static_cast<std::uint32_t>(bitmap));
     u16(b, 36, 1000); u16(b, 38, 16); u16(b, 40, 400); b[42] = 4;
     u32(b, 44, 800); u32(b, 48, 200); u32(b, 52, 50); b[64] = 1;
     u32(b, 100, 1); u16(b, 104, 1);
-    for (std::size_t i = 0; i < 6; ++i) {
+    for (std::size_t i = 0; i < glyphs; ++i) {
         const auto at = 128 + i * 40;
+        const bool space = cps[i] == 32 || cps[i] == 0xa0;
         u32(b, at, cps[i]); u32(b, at + 4, static_cast<std::uint32_t>(i + 1));
-        u32(b, at + 8, cps[i] == 32 ? 300U : advance);
+        u32(b, at + 8, space ? 300U : advance);
         u32(b, at + 28, static_cast<std::uint32_t>(b.size() - bitmap));
-        if (cps[i] != 32) {
+        if (!space) {
             u32(b, at + 12, static_cast<std::uint32_t>(-1));
             u32(b, at + 16, static_cast<std::uint32_t>(-2));
             u16(b, at + 20, 1); u16(b, at + 22, 2);
@@ -198,6 +200,30 @@ void verify_oracle_shapes(const TextSystem& system) {
               "simple block child creates separate hard-break lines");
     }
 }
+void verify_nonbreaking_space(const TextSystem& system) {
+    for (const bool nbsp : {false, true}) {
+        for (const bool anywhere : {false, true}) {
+            Fixture f;
+            f.root.style.overflow_wrap_anywhere = anywhere;
+            f.text(f.root, f.root_node, "A");
+            auto& span = f.element(f.root, f.root_node, "span", Display::Inline);
+            f.text(span, *f.root_node.children.back(), nbsp ? "\xc2\xa0" : " ");
+            f.text(f.root, f.root_node, "B");
+            const auto r = query(f, system, 15000);
+            const std::int64_t expected = nbsp && !anywhere ? 16800 : 33600;
+            check(r.status == IntrinsicSourceStatus::Complete &&
+                  r.border_box_block_size_units == expected &&
+                  r.source_bytes == (nbsp ? 4U : 3U),
+                  "split inline NBSP must glue words and split only at scalar boundaries under anywhere");
+        }
+    }
+    Fixture f;
+    f.text(f.root, f.root_node, " \xc2\xa0 ");
+    const auto r = query(f, system, 15000);
+    check(r.status == IntrinsicSourceStatus::Complete && r.border_box_block_size_units == 16800,
+          "edge NBSP must generate a line after adjacent ordinary spaces collapse");
+}
+
 void verify_browser_break_heights(const TextSystem& system) {
     // Line counts independently observed at 20px/20px in the localhost fixture
     // docs/evaluation/2026-11-09-empty-break-height-oracle.html.
@@ -521,6 +547,7 @@ int main() {
         exact_limits_and_cancellation(system);
         verify_browser_break_heights(system);
         verify_oracle_shapes(system);
+        verify_nonbreaking_space(system);
         verify_decoration_and_refusals(system);
         std::cout << "intrinsic source height wrapping, decoration, refusals and budgets passed\n";
     } catch (const std::exception& error) {

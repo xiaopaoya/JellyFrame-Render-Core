@@ -318,7 +318,8 @@ private:
                 status_ = IntrinsicSourceStatus::InvalidInput;
                 return false;
             }
-            if (codepoint > 0x7fU) {
+            const bool nonbreaking_space = codepoint == 0xa0U;
+            if (codepoint > 0x7fU && !nonbreaking_space) {
                 if (!is_cjk_codepoint(codepoint) || source_mode_ == SourceMode::Ascii ||
                     saw_segment_break_ ||
                     root_.style.text_transform != TextTransform::None) {
@@ -366,21 +367,22 @@ private:
                 pending_hyphen_break_ = false;
                 if (!emit_pending_space()) return false;
                 if (line_has_content_ && !append_byte(kSoftBreak)) return false;
-                needs_measurement_ = true;
-                if (!append_byte(static_cast<char>(ch))) return false;
-                line_has_content_ = true;
-                continue;
+            } else {
+                const bool ascii_alphanumeric =
+                    (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+                    (ch >= '0' && ch <= '9');
+                if (!flush_pending_question_break(ascii_alphanumeric) ||
+                    !flush_pending_hyphen_break(ch != '/') || !emit_pending_space()) return false;
+                pending_question_break_ = ch == '?';
+                pending_hyphen_break_ = ch == '-';
             }
-            const bool ascii_alphanumeric =
-                (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-                (ch >= '0' && ch <= '9');
-            if (!flush_pending_question_break(ascii_alphanumeric)) return false;
-            if (!flush_pending_hyphen_break(ch != '/')) return false;
             needs_measurement_ = true;
-            if (!emit_pending_space() || !append_byte(static_cast<char>(ch))) return false;
+            if (nonbreaking_space) {
+                if (!append_byte(text[begin]) || !append_byte(text[begin + 1])) return false;
+            } else if (!append_byte(static_cast<char>(ch))) {
+                return false;
+            }
             line_has_content_ = true;
-            if (ch == '?') pending_question_break_ = true;
-            if (ch == '-') pending_hyphen_break_ = true;
         }
         return true;
     }

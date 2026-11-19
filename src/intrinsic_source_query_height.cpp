@@ -21,6 +21,7 @@ constexpr char kOpportunity = '\x1e';
 constexpr char kSoftBreak = '\x1c';
 constexpr char kBlockBreak = '\x1d';
 constexpr char kForcedBreak = '\x1f';
+constexpr std::uint32_t kNonbreakingSpace = 0x00a0;
 constexpr std::size_t kHardMaxBoxes = 4096;
 constexpr std::size_t kHardMaxDepth = 64;
 constexpr std::size_t kHardMaxSourceBytes = 65536;
@@ -275,12 +276,13 @@ private:
         source_bytes_ += text.size();
         if (!consume_work(text.size())) return false;
         for (std::size_t pos = 0; pos < text.size();) {
+            const std::size_t start = pos;
             std::uint32_t cp = 0;
             if (!read_utf8_scalar(text, pos, cp)) {
                 status_ = IntrinsicSourceStatus::InvalidInput;
                 return false;
             }
-            if (cp > 0x7fU) {
+            if (cp > 0x7fU && cp != kNonbreakingSpace) {
                 status_ = IntrinsicSourceStatus::Unsupported;
                 return false;
             }
@@ -319,6 +321,12 @@ private:
                 pending_question_ = false;
             }
             if (!emit_space()) return false;
+            if (cp == kNonbreakingSpace) {
+                for (std::size_t i = start; i < pos; ++i) {
+                    if (!append(text[i])) return false;
+                }
+                continue;
+            }
             const auto transformed = transform_ascii(ch, root_.style.text_transform);
             if (!append(static_cast<char>(transformed))) return false;
             pending_hyphen_ = transformed == '-';
@@ -474,8 +482,9 @@ private:
                                      bool has_space_before, std::int64_t& width) -> bool {
             if (end == begin) { begin = next; return true; }
             line_generated = true;
+            const std::string_view word(stream_.get() + begin, end - begin);
             TextRunMetrics metrics;
-            const auto measured = measure(std::string_view(stream_.get() + begin, end - begin), metrics);
+            const auto measured = measure(word, metrics);
             if (measured != IntrinsicSourceStatus::Complete) return false;
             const std::int64_t word_width = metrics.advance;
             if (word_width < 0 || word_width > kDimensionPrecisionMaximum) {
@@ -493,9 +502,15 @@ private:
                 width = 0;
             }
             if (root_.style.overflow_wrap_anywhere && word_width > inline_size_) {
-                for (std::size_t j = begin; j < end; ++j) {
+                for (std::size_t pos = 0; pos < word.size();) {
+                    const std::size_t start = pos;
+                    std::uint32_t cp = 0;
+                    if (!read_utf8_scalar(word, pos, cp)) {
+                        status_ = IntrinsicSourceStatus::InvalidInput;
+                        return false;
+                    }
                     TextRunMetrics scalar;
-                    const auto measured_scalar = measure(std::string_view(stream_.get() + j, 1), scalar);
+                    const auto measured_scalar = measure(word.substr(start, pos - start), scalar);
                     if (measured_scalar != IntrinsicSourceStatus::Complete) return false;
                     const std::int64_t scalar_width = scalar.advance;
                     if (scalar_width < 0 || scalar_width > kDimensionPrecisionMaximum) {

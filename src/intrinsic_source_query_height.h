@@ -18,6 +18,7 @@ struct IntrinsicSourceHeightResult {
 // inline size. Normal line-height comes from Core TextSystem font metrics;
 // explicit line-height uses the style's pixel value. The result includes root
 // vertical padding and border, excludes margins, and commits only on Complete.
+// U+00A0 stays inside a word; anywhere wrapping measures whole UTF-8 scalars.
 IntrinsicSourceHeightResult query_intrinsic_source_height(
     const LayoutBox& box, const TextSystem& text_system,
     std::int64_t available_inline_size_units,

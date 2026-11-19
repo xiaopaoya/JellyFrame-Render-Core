@@ -24,6 +24,12 @@ marker types and list items with non-start alignment retain ordinary layout.
 This delivery accepts collapsing ASCII and uniformly preserved ASCII
 whitespace, per-owner registered font requests and line-heights,
 start/center/end alignment, first-line indent, nowrap and anywhere wrapping.
+Collapsing scalar paragraphs also accept U+00A0 in normal and nowrap mode.
+The intrinsic source queries accept U+00A0 with ASCII text and retain its
+advance without treating it as collapsible whitespace. With
+`overflow-wrap: anywhere`, those queries measure whole UTF-8 scalars at
+emergency breaks. Mixed Han and ASCII-profile text remains outside the
+intrinsic width query's supported scope.
 Preserving contexts such as `pre` retain spaces, tabs, hard line breaks,
 blank lines and trailing spaces; CRLF is one line break even when CR and LF
 belong to different text owners. Tabs use the bounded Core tab-stop policy
