@@ -845,6 +845,75 @@ void preserved_whitespace_shared_paragraph() {
     check(marker_host.text_layout_cache.shared_inline != nullptr,
           "wbr does not conflict with preserved text mode");
 }
+void nonbreaking_space_stays_in_shared_paragraph() {
+    auto font = asset(400, 16, 4, 1, {{32,250},{65,500},{66,600},{0xa0,250}});
+    TextFontFace face{1, 0, font.font};
+    TextSystem system;
+    check(system.bind(&face, 1) == TextSystemStatus::Ok, "bind NBSP fixture font");
+    LayoutEngineOptions options;
+    options.text_system = &system;
+    LayerTreeBuilderOptions layers;
+    layers.text_system = &system;
+    StyleResolver styles(CssParser{}.parse("*{margin:0;padding:0;border:0;font-size:16px}"));
+    auto document = HtmlParser{}.parse(
+        "<div id='normal' style='width:12px'>A<span>&nbsp;</span>B</div>"
+        "<div id='nowrap' style='width:12px;white-space:nowrap'>&nbsp;<span>A</span>&nbsp;</div>"
+        "<div id='control' style='width:12px'>A <span>B</span></div>");
+    auto layout = LayoutEngine(styles, options).layout(*document, 140, 120);
+    check(layout != nullptr, "layout NBSP fixture");
+    check(find(*layout, "control").text_layout_cache.shared_inline != nullptr, "ordinary space uses shared layout");
+    check(find(*layout, "normal").text_layout_cache.shared_inline != nullptr, "normal NBSP keeps shared layout");
+    check(find(*layout, "nowrap").text_layout_cache.shared_inline != nullptr, "nowrap NBSP keeps shared layout");
+    const auto laid_out_glyphs = [&](const char* id) {
+        auto tree = LayerTreeBuilder(layers).build(find(*layout, id));
+        check(tree != nullptr, "build NBSP fixture layers");
+        return glyphs(*tree);
+    };
+    const auto normal = laid_out_glyphs("normal");
+    const auto nowrap = laid_out_glyphs("nowrap");
+    const auto control = laid_out_glyphs("control");
+    check(normal.size() == 3 && std::get<0>(normal[1]) == 0xa0 &&
+          std::get<2>(normal[0]) == std::get<2>(normal[2]), "NBSP prevents wrapping across owners");
+    check(nowrap.size() == 3 && std::get<0>(nowrap[0]) == 0xa0 && std::get<0>(nowrap[2]) == 0xa0,
+          "nowrap retains edge NBSP");
+    check(control.size() == 2 && std::get<2>(control[0]) != std::get<2>(control[1]), "ordinary space still wraps");
+}
+
+void nonbreaking_space_packet_source_ranges() {
+    using namespace jellyframe::detail;
+    auto font = asset(400, 16, 4, 1, {{32,250},{65,500},{66,600},{0xa0,250}});
+    TextFontFace face{1, 0, font.font};
+    TextSystem system;
+    check(system.bind(&face, 1) == TextSystemStatus::Ok, "bind NBSP packet fixture font");
+    const LayoutTextFont request{0,16000};
+    const CoreTextParagraphSpan spans[] = {
+        {"A\xc2\xa0 ",request}, {{},request,-1,CoreTextParagraphSpanKind::Opportunity},
+        {{},request,-1,CoreTextParagraphSpanKind::ForcedBreak}, {"B",request}
+    };
+    CoreTextParagraphOptions options;
+    options.width_units = 40000;
+    CoreTextParagraph paragraph;
+    CoreTextParagraphUsage usage;
+    check(build_core_text_paragraph(system, spans, 4, options, paragraph, {}, &usage) == TextSystemStatus::Ok,
+        "build NBSP around explicit breaks");
+    check(paragraph.normalized == "A\xc2\xa0\v\nB" && paragraph.sources.size() == 5 &&
+        paragraph.sources[1].begin == 1 && paragraph.sources[1].end == 3 && paragraph.fragments.size() == 2,
+        "NBSP preserves exact byte range while trimming the following ordinary space");
+    PreparedTextView view;
+    PreparedTextGlyph glyph;
+    check(decode_prepared_text(paragraph.fragments[0].packet, view) && view.source_bytes() == 3 &&
+        view.read(1, glyph) && glyph.source_codepoint == 0xa0 && glyph.source_begin == 1 && glyph.source_end == 3,
+        "existing JFTP reader preserves NBSP's two-byte extent");
+    CoreTextLayoutLimits limit;
+    limit.max_capacity_bytes = usage.capacity - 1;
+    check(build_core_text_paragraph(system, spans, 4, options, paragraph, limit) == TextSystemStatus::ResourceLimit &&
+        paragraph.normalized == "A\xc2\xa0\v\nB", "NBSP capacity refusal preserves prior output");
+    CoreTextIntrinsicSizes sizes;
+    const CoreTextParagraphSpan unbreakable{"A\xc2\xa0" "B", request};
+    check(measure_core_text_intrinsic(system, &unbreakable, 1, {}, sizes) == TextSystemStatus::Ok &&
+        sizes.min_content == 21600 && sizes.max_content == 21600, "NBSP contributes advance without a min-content break");
+}
+
 void contents_whitespace_joins_shared_paragraph() {
     Fixture fixture;
     StyleResolver styles(CssParser{}.parse(
@@ -2053,6 +2122,8 @@ int main() {
         propagated_inline_text_decorations();
         shared_mixed_font_and_line_height_owners();
         preserved_whitespace_shared_paragraph();
+        nonbreaking_space_stays_in_shared_paragraph();
+        nonbreaking_space_packet_source_ranges();
         contents_whitespace_joins_shared_paragraph();
         partition_and_live_proof();
         refusal_and_rollback();
