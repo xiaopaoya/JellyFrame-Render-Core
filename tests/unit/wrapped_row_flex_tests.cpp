@@ -56,10 +56,12 @@ struct FontAsset {
 };
 
 FontAsset make_font() {
-    std::array<std::pair<unsigned, unsigned>, 96> glyphs{};
-    for (unsigned i = 0; i + 1 < glyphs.size(); ++i)
+    std::array<std::pair<unsigned, unsigned>, 98> glyphs{};
+    for (unsigned i = 0; i < 95; ++i)
         glyphs[i] = {32 + i, i == 0 ? 250U : 500U};
-    glyphs.back() = {0xa0, 250};
+    glyphs[95] = {0xa0, 250};
+    glyphs[96] = {0x4e2d, 1000};
+    glyphs[97] = {0x6587, 750};
     FontAsset asset;
     const auto bitmap = 128 + glyphs.size() * 40;
     asset.bytes.resize(bitmap, 0);
@@ -183,6 +185,18 @@ int main() {
         expect(*anywhere_rows.tree, "a", 0, 0, 13, 40);
         expect(*anywhere_rows.tree, "b", 13, 0, 13, 20);
         expect(*anywhere_rows.tree, "c", 0, 40, 13, 20);
+        const std::string han_items = "<div id='a'>\xe4\xb8\xad\xe6\x96\x87</div>"
+            "<div id='b'>\xe6\x96\x87</div><div id='c'>\xe4\xb8\xad</div>";
+        LayoutIntrinsicQueryStatistics han_stats;
+        const auto han_rows = layout(han_items, "#p{width:48px}div{flex:0 0 24px;min-width:0}",
+                                     system, true, {}, &han_stats);
+        expect(*han_rows.tree, "a", 0, 0, 24, 40);
+        expect(*han_rows.tree, "b", 24, 0, 24, 20);
+        expect(*han_rows.tree, "c", 0, 40, 24, 20);
+        expect(*han_rows.tree, "p", 0, 0, 48, 60);
+        check_core_cache(*han_rows.tree, system);
+        require(han_stats.queries == 6, "planner measures the width and height of every Han item");
+
         auto legacy_pair = layout(pair, "", system, false);
         require(find(*legacy_pair.tree, "a").rect.width == 32 &&
                 find(*legacy_pair.tree, "b").rect.y == 20,

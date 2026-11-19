@@ -4,9 +4,11 @@
 #include <cstdint>
 #include <iostream>
 #include <initializer_list>
+#include <iterator>
 #include <new>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace jellyframe;
@@ -33,11 +35,13 @@ void u32(std::vector<std::uint8_t>& b, std::size_t at, std::uint32_t v) {
     for (unsigned i = 0; i < 4; ++i) b[at + i] = static_cast<std::uint8_t>((v >> (8U * i)) & 255U);
 }
 struct FontAsset { std::vector<std::uint8_t> bytes; FontResource font; };
-FontAsset make_font() {
-    constexpr std::uint32_t cps[] = {32, 45, 65, 66, 67, 68, 0xa0};
-    constexpr std::size_t glyphs = sizeof(cps) / sizeof(cps[0]);
-    constexpr unsigned advance = 600;
-    constexpr std::size_t bitmap = 128 + glyphs * 40;
+FontAsset make_font(bool include_han = true, unsigned ascent = 800, unsigned fallback = 0) {
+    constexpr std::pair<std::uint32_t, unsigned> catalog[] = {
+        {32, 300}, {45, 600}, {65, 600}, {66, 600}, {67, 600}, {68, 600},
+        {0xa0, 300}, {0x4e2d, 1000}, {0x6587, 750}
+    };
+    const std::size_t glyphs = std::size(catalog) - (include_han ? 0U : 2U);
+    const std::size_t bitmap = 128 + glyphs * 40;
     FontAsset asset;
     asset.bytes.resize(bitmap, 0);
     auto& b = asset.bytes;
@@ -46,13 +50,15 @@ FontAsset make_font() {
     u16(b, 8, 2); u16(b, 10, 128); u16(b, 12, 40); u16(b, 14, 1);
     u32(b, 20, glyphs); u32(b, 24, 128); u32(b, 28, static_cast<std::uint32_t>(bitmap));
     u16(b, 36, 1000); u16(b, 38, 16); u16(b, 40, 400); b[42] = 4;
-    u32(b, 44, 800); u32(b, 48, 200); u32(b, 52, 50); b[64] = 1;
+    u32(b, 44, ascent); u32(b, 48, 200); u32(b, 52, 50); u32(b, 56, fallback);
+    b[64] = ascent == 800 ? 1 : 2;
     u32(b, 100, 1); u16(b, 104, 1);
     for (std::size_t i = 0; i < glyphs; ++i) {
         const auto at = 128 + i * 40;
-        const bool space = cps[i] == 32 || cps[i] == 0xa0;
-        u32(b, at, cps[i]); u32(b, at + 4, static_cast<std::uint32_t>(i + 1));
-        u32(b, at + 8, space ? 300U : advance);
+        const auto [codepoint, advance] = catalog[i];
+        const bool space = codepoint == 32 || codepoint == 0xa0;
+        u32(b, at, codepoint); u32(b, at + 4, static_cast<std::uint32_t>(i + 1));
+        u32(b, at + 8, advance);
         u32(b, at + 28, static_cast<std::uint32_t>(b.size() - bitmap));
         if (!space) {
             u32(b, at + 12, static_cast<std::uint32_t>(-1));
@@ -222,6 +228,156 @@ void verify_nonbreaking_space(const TextSystem& system) {
     const auto r = query(f, system, 15000);
     check(r.status == IntrinsicSourceStatus::Complete && r.border_box_block_size_units == 16800,
           "edge NBSP must generate a line after adjacent ordinary spaces collapse");
+}
+
+constexpr const char* kHanFirst = "\xe4\xb8\xad";
+constexpr const char* kHanSecond = "\xe6\x96\x87";
+constexpr const char* kHanPair = "\xe4\xb8\xad\xe6\x96\x87";
+
+void verify_han_wrapping(const TextSystem& system) {
+    // At 16px the two ideographs advance 16px and 12px. These cases mirror the
+    // fixed-metric Edge/Firefox checks, with exact Q1000 boundaries tested here.
+    for (bool anywhere : {false, true}) {
+        Fixture f;
+        f.root.style.overflow_wrap_anywhere = anywhere;
+        f.text(f.root, f.root_node, kHanPair);
+        for (const auto width : {28000, 27999, 27000, 8000, 0}) {
+            const auto r = query(f, system, width);
+            check(r.status == IntrinsicSourceStatus::Complete &&
+                  r.border_box_block_size_units == (width == 28000 ? 16800 : 33600) &&
+                  r.source_bytes == 6 && r.measurements == 3,
+                  "Han wraps at each complete ideograph in normal and anywhere modes");
+        }
+    }
+    {
+        Fixture f;
+        f.root.style.line_height = 20;
+        f.text(f.root, f.root_node, kHanFirst);
+        auto& span = f.element(f.root, f.root_node, "span", Display::Inline);
+        f.text(span, *f.root_node.children.back(), kHanSecond);
+        f.text(f.root, f.root_node, kHanFirst);
+        auto& other_span = f.element(f.root, f.root_node, "span", Display::Inline);
+        f.text(other_span, *f.root_node.children.back(), kHanSecond);
+        const auto exact = query(f, system, 28000);
+        const auto narrow = query(f, system, 27000);
+        check(exact.status == IntrinsicSourceStatus::Complete &&
+              exact.border_box_block_size_units == 40000 &&
+              narrow.status == IntrinsicSourceStatus::Complete &&
+              narrow.border_box_block_size_units == 80000,
+              "neutral inline ownership preserves Han wrap opportunities");
+        IntrinsicSourceQueryLimits limits;
+        limits.max_work = exact.work;
+        check(query(f, system, 28000, limits).status == IntrinsicSourceStatus::Complete,
+              "Han segmentation shares the exact query work limit");
+        --limits.max_work;
+        const auto refused = query(f, system, 28000, limits);
+        check(refused.status == IntrinsicSourceStatus::ResourceLimit &&
+              refused.border_box_block_size_units == -1,
+              "Han segmentation refuses atomically when its work limit is exhausted");
+    }
+    {
+        Fixture f;
+        f.root.style.line_height = 20;
+        f.root.style.padding.top = 2;
+        f.root.style.border_width.bottom = 1;
+        f.text(f.root, f.root_node, std::string(" ") + kHanFirst + " \t");
+        auto& span = f.element(f.root, f.root_node, "span", Display::Inline);
+        span.style.padding = {};
+        span.style.border_width = {};
+        f.text(span, *f.root_node.children.back(), std::string(" ") + kHanSecond + " ");
+        const auto exact = query(f, system, 32800);
+        const auto narrow = query(f, system, 32750);
+        check(exact.status == IntrinsicSourceStatus::Complete &&
+              exact.border_box_block_size_units == 23000 &&
+              narrow.status == IntrinsicSourceStatus::Complete &&
+              narrow.border_box_block_size_units == 43000,
+              "collapsed spaces contribute to Han line fit and are discarded at a soft wrap");
+    }
+    for (bool block : {false, true}) {
+        Fixture f;
+        f.root.style.line_height = 20;
+        f.text(f.root, f.root_node, kHanFirst);
+        if (block) {
+            auto& nested = f.element(f.root, f.root_node, "div", Display::Block);
+            f.text(nested, *f.root_node.children.back(), kHanSecond);
+            f.text(f.root, f.root_node, kHanFirst);
+        } else {
+            (void)f.element(f.root, f.root_node, "br", Display::Inline);
+            (void)f.element(f.root, f.root_node, "br", Display::Inline);
+            f.text(f.root, f.root_node, kHanSecond);
+            (void)f.element(f.root, f.root_node, "br", Display::Inline);
+        }
+        const auto r = query(f, system, 96000);
+        check(r.status == IntrinsicSourceStatus::Complete && r.border_box_block_size_units == 60000,
+              "Han height counts block boundaries and repeated explicit breaks");
+    }
+}
+
+void verify_han_refusals(const TextSystem& system) {
+    for (const auto* text : {"A\xe4\xb8\xad", "\xe4\xb8\xad" "A", "\xc2\xa0\xe4\xb8\xad",
+                             "\xe4\xb8\xad\xc2\xa0", "\xe4\xb8\xad\xe3\x80\x82",
+                             "\xe4\xb8\xad\xcc\x81", "\n\xe4\xb8\xad", "\xe4\xb8\xad\r",
+                             "\xe4\xb8\xad\f", "\xe4\xb8\xad\xf0\x9f\x98\x80"}) {
+        Fixture f;
+        f.text(f.root, f.root_node, text);
+        const auto r = query(f, system);
+        check(r.status == IntrinsicSourceStatus::Unsupported && r.border_box_block_size_units == -1,
+              "mixed Han scripts, punctuation and segment breaks must refuse atomically");
+    }
+    for (bool han_first : {false, true}) {
+        Fixture f;
+        if (han_first) f.text(f.root, f.root_node, kHanFirst);
+        (void)f.element(f.root, f.root_node, "wbr", Display::Inline);
+        f.text(f.root, f.root_node, kHanSecond);
+        const auto r = query(f, system);
+        check(r.status == IntrinsicSourceStatus::Unsupported && r.border_box_block_size_units == -1,
+              "Han height keeps explicit wbr outside its measured profile");
+    }
+    {
+        Fixture f;
+        f.text(f.root, f.root_node, kHanFirst);
+        auto& span = f.element(f.root, f.root_node, "span", Display::Inline);
+        f.text(span, *f.root_node.children.back(), "A");
+        check(query(f, system).status == IntrinsicSourceStatus::Unsupported,
+              "neutral spans must not bypass the mixed-script refusal");
+    }
+    {
+        Fixture f;
+        f.root.style.text_transform = TextTransform::Uppercase;
+        f.text(f.root, f.root_node, kHanFirst);
+        check(query(f, system).status == IntrinsicSourceStatus::Unsupported,
+              "Han height must refuse a text transform");
+    }
+    {
+        Fixture f;
+        f.text(f.root, f.root_node, "\xe4\xb8");
+        check(query(f, system).status == IntrinsicSourceStatus::InvalidInput,
+              "incomplete Han UTF-8 must be reported as invalid input");
+    }
+    Fixture f;
+    f.text(f.root, f.root_node, "\xe6\x97\xa5");
+    const auto missing = query(f, system);
+    check(missing.status == IntrinsicSourceStatus::MeasurementFailure &&
+          missing.border_box_block_size_units == -1,
+          "missing Han glyph must not publish partial geometry");
+    auto substitute = make_font(true, 800, 'A');
+    TextFontFace face;
+    auto substitution_system = bind(substitute, face);
+    check(query(f, substitution_system).status == IntrinsicSourceStatus::Unsupported,
+          "fallback substitution does not prove a Han glyph advance");
+
+    auto primary = make_font(false);
+    auto taller = make_font(true, 950);
+    TextFontFace faces[] = {{1, 7, primary.font, 123}, {2, 0, taller.font}};
+    TextSystem taller_system;
+    check(taller_system.bind(faces, 2) == TextSystemStatus::Ok, "Han fallback font setup failed");
+    Fixture fallback;
+    fallback.root.style.font_family_hash = 123;
+    fallback.text(fallback.root, fallback.root_node, kHanPair);
+    const auto incompatible = query(fallback, taller_system);
+    check(incompatible.status == IntrinsicSourceStatus::Unsupported &&
+          incompatible.border_box_block_size_units == -1,
+          "Han fallback metrics that increase the line strut must refuse atomically");
 }
 
 void verify_browser_break_heights(const TextSystem& system) {
@@ -443,12 +599,6 @@ void verify_decoration_and_refusals(const TextSystem& system) {
         check(query(f, system, 96000).status == IntrinsicSourceStatus::Complete,
               "supported ASCII uppercase transform must be measured by Core Text");
     }
-    {
-        Fixture f;
-        f.text(f.root, f.root_node, "\xE4\xB8\xad");
-        check(query(f, system).status == IntrinsicSourceStatus::Unsupported,
-              "Han remains outside the initial column source profile");
-    }
 }
 void exact_limits_and_cancellation(const TextSystem& system) {
     Fixture f; f.text(f.root, f.root_node, "AB");
@@ -548,6 +698,8 @@ int main() {
         verify_browser_break_heights(system);
         verify_oracle_shapes(system);
         verify_nonbreaking_space(system);
+        verify_han_wrapping(system);
+        verify_han_refusals(system);
         verify_decoration_and_refusals(system);
         std::cout << "intrinsic source height wrapping, decoration, refusals and budgets passed\n";
     } catch (const std::exception& error) {
