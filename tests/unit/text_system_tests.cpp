@@ -299,6 +299,42 @@ void offset_prepared_packets() {
     TextLayoutCache copied=cache;
     assert(!copied.shared_inline);
 }
+void positioned_prepared_packets_validate_final_coordinates() {
+    auto font=asset();TextFontFace face{1,0,font.font};TextSystem system;
+    assert(system.bind(&face,1)==S::Ok);
+    std::array<PreparedTextGlyph,2> glyphs;TextRunMetrics metrics;
+    assert(system.prepare("BA",{},glyphs.data(),glyphs.size(),metrics)==S::Ok);
+    glyphs[0].x=1250;
+    glyphs[1].x=-2500;
+    std::string packet;
+    assert(encode_positioned_prepared_text(glyphs.data(),glyphs.size(),16000,2,packet));
+    PreparedTextView view;
+    assert(packet[4]==3 && decode_prepared_text(packet,view) && view.size()==2);
+    for(std::size_t i=0;i<glyphs.size();++i) {
+        PreparedTextGlyph decoded;
+        assert(view.read(i,decoded) && decoded.x==glyphs[i].x &&
+               decoded.source_begin==glyphs[i].source_begin && decoded.source_end==glyphs[i].source_end);
+    }
+
+    constexpr auto max=std::numeric_limits<std::int32_t>::max();
+    glyphs[1].x=max-glyphs[1].geometry.advance;
+    assert(encode_positioned_prepared_text(glyphs.data(),glyphs.size(),16000,2,packet));
+    assert(decode_prepared_text(packet,view));
+    const auto previous=packet;
+    ++glyphs[1].x;
+    assert(!encode_positioned_prepared_text(glyphs.data(),glyphs.size(),16000,2,packet));
+    assert(packet==previous);
+
+    // Positioned records may overlap; their individual ends are representable
+    // even when the sum of all advances is not.
+    for(auto& glyph:glyphs) {
+        glyph.x=-1;
+        glyph.geometry.advance=max;
+    }
+    assert(encode_positioned_prepared_text(glyphs.data(),glyphs.size(),16000,2,packet));
+    assert(decode_prepared_text(packet,view) && view.size()==2);
+}
+
 void installed_shared_paragraph_path() {
     auto font=asset(); TextFontFace face{1,0,font.font}; TextSystem system;
     assert(system.bind(&face,1)==S::Ok);
@@ -1151,6 +1187,7 @@ int main(int argc,char** argv) {
     if (argc>1) return inspect(argc,argv);
     weights();strikes_and_families();fallback_and_geometry();refusals_and_budgets();
     prepared_packet_paint();offset_prepared_packets();installed_shared_paragraph_path();html_layout_to_core_paint();
+    positioned_prepared_packets_validate_final_coordinates();
     route_relayout_keeps_prepared_text_while_dom_is_dirty();aligned_prepared_text_stays_inside_its_layout_box();
     core_prepared_text_applies_bounded_letter_spacing();
     core_prepared_text_ellipsis();
