@@ -2,6 +2,7 @@
 
 #include "core_text_measure.h"
 #include "css_dimension_precision.h"
+#include "render_core/text_scan.h"
 #include "utf8_scalar.h"
 
 #include <algorithm>
@@ -191,6 +192,8 @@ public:
     }
 
 private:
+    enum class SourceMode : std::uint8_t { None, Ascii, Han };
+
     struct Frame {
         const LayoutBox* box = nullptr;
         std::size_t next_child = 0;
@@ -283,8 +286,19 @@ private:
                 return false;
             }
             if (cp > 0x7fU && cp != kNonbreakingSpace) {
-                status_ = IntrinsicSourceStatus::Unsupported;
-                return false;
+                if (!is_cjk_codepoint(cp) || source_mode_ == SourceMode::Ascii || han_excluded_ ||
+                    root_.style.text_transform != TextTransform::None) {
+                    status_ = IntrinsicSourceStatus::Unsupported;
+                    return false;
+                }
+                source_mode_ = SourceMode::Han;
+                if (han_line_has_content_ && !pending_space_ && !append(kOpportunity)) return false;
+                if (!emit_space()) return false;
+                for (std::size_t i = start; i < pos; ++i) {
+                    if (!append(text[i])) return false;
+                }
+                han_line_has_content_ = true;
+                continue;
             }
             const auto ch = static_cast<unsigned char>(cp);
             if (ch < 0x20U && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f') {
@@ -294,6 +308,7 @@ private:
             const bool whitespace = ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' ||
                 ch == '\f';
             if (whitespace) {
+                if (ch != ' ' && ch != '\t' && !exclude_han()) return false;
                 std::size_t prior = stream_size_;
                 while (prior > 0 && (stream_[prior - 1] == kOpportunity ||
                        stream_[prior - 1] == kSoftBreak)) {
@@ -310,6 +325,11 @@ private:
                 pending_space_ = line_has_content;
                 continue;
             }
+            if (source_mode_ == SourceMode::Han) {
+                status_ = IntrinsicSourceStatus::Unsupported;
+                return false;
+            }
+            source_mode_ = SourceMode::Ascii;
             if (pending_hyphen_) {
                 if (ch != '/') {
                     if (!append(kOpportunity)) return false;
@@ -335,6 +355,13 @@ private:
         return true;
     }
 
+    bool exclude_han() {
+        han_excluded_ = true;
+        if (source_mode_ != SourceMode::Han) return true;
+        status_ = IntrinsicSourceStatus::Unsupported;
+        return false;
+    }
+
     bool emit_space() {
         if (!pending_space_) return true;
         pending_space_ = false;
@@ -344,6 +371,7 @@ private:
     bool append_forced_break(bool coalesce = true) {
         pending_space_ = false;
         pending_question_ = false;
+        han_line_has_content_ = false;
         if (pending_hyphen_) {
             if (!append(kOpportunity)) return false;
             pending_hyphen_ = false;
@@ -417,6 +445,8 @@ private:
                     if (box.node->tag_name == "br") {
                         if (!append_forced_break(false)) return false;
                     } else {
+                        // Space collapsing next to wbr in Han text differs between browsers.
+                        if (!exclude_han()) return false;
                         if (pending_hyphen_) {
                             if (!append(kOpportunity)) return false;
                             pending_hyphen_ = false;
@@ -461,6 +491,12 @@ private:
         if (!consume_work(measured_work)) return status_;
         if (result == TextSystemStatus::ResourceLimit) return status_ = IntrinsicSourceStatus::ResourceLimit;
         if (result != TextSystemStatus::Ok) return status_ = IntrinsicSourceStatus::MeasurementFailure;
+        // This profile uses the primary face's line strut for every line.
+        if (source_mode_ == SourceMode::Han && (metrics.substitutions != 0 ||
+                metrics.ascent != metrics.primary_font.ascent ||
+                metrics.descent != metrics.primary_font.descent ||
+                metrics.natural_height != metrics.primary_font.line_height))
+            return status_ = IntrinsicSourceStatus::Unsupported;
         return IntrinsicSourceStatus::Complete;
     }
 
@@ -491,6 +527,10 @@ private:
                 status_ = IntrinsicSourceStatus::ResourceLimit;
                 return false;
             }
+            if (source_mode_ == SourceMode::Han && word_width == 0) {
+                status_ = IntrinsicSourceStatus::Unsupported;
+                return false;
+            }
             const std::int64_t separator = has_space_before && width > 0 ? space_width : 0;
             if (separator > kDimensionPrecisionMaximum - width ||
                 word_width > kDimensionPrecisionMaximum - width - separator) {
@@ -501,7 +541,7 @@ private:
                 ++line_count;
                 width = 0;
             }
-            if (root_.style.overflow_wrap_anywhere && word_width > inline_size_) {
+            if (source_mode_ != SourceMode::Han && root_.style.overflow_wrap_anywhere && word_width > inline_size_) {
                 for (std::size_t pos = 0; pos < word.size();) {
                     const std::size_t start = pos;
                     std::uint32_t cp = 0;
@@ -571,6 +611,9 @@ private:
     bool pending_space_ = false;
     bool pending_hyphen_ = false;
     bool pending_question_ = false;
+    bool han_excluded_ = false;
+    bool han_line_has_content_ = false;
+    SourceMode source_mode_ = SourceMode::None;
     IntrinsicSourceStatus status_ = IntrinsicSourceStatus::Unsupported;
 };
 

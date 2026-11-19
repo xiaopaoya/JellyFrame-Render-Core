@@ -32,8 +32,14 @@ Collapsing scalar paragraphs also accept U+00A0 in normal and nowrap mode.
 The intrinsic source queries accept U+00A0 with ASCII text and retain its
 advance without treating it as collapsible whitespace. With
 `overflow-wrap: anywhere`, those queries measure whole UTF-8 scalars at
-emergency breaks. Mixed Han and ASCII-profile text remains outside the
-intrinsic width query's supported scope.
+emergency breaks. Mixed Han and ASCII-profile text remains outside both
+intrinsic source queries' supported scope.
+The intrinsic height query also accepts uniform BMP Han ideographs with
+collapsed spaces or tabs, neutral inline partitions and ordinary hard breaks.
+Wrap opportunities occur between adjacent ideographs. The profile requires
+positive glyph advances and retains the primary face's vertical metrics on
+each line. Han segment breaks, explicit `wbr`, Unicode punctuation, mixed
+metrics and glyph substitutions retain the ordinary fallback path.
 Preserving contexts such as `pre` retain spaces, tabs, hard line breaks,
 blank lines and trailing spaces; CRLF is one line break even when CR and LF
 belong to different text owners. Tabs use the bounded Core tab-stop policy
