@@ -13,6 +13,7 @@
 namespace jellyframe {
 
 struct RenderObject;
+class RenderTreeStyleReuse;
 
 struct RenderObjectDeleter {
     bool arena_owned = false;
@@ -98,6 +99,42 @@ struct RenderTreeOptions {
     int viewport_height = 240;
     std::size_t max_contents_source_records = 512;
     std::size_t max_contents_source_bytes = 8192;
+    const RenderTreeStyleReuse* style_reuse = nullptr;
+};
+
+#define JELLYFRAME_RENDER_CORE_SCOPED_STYLE_REUSE_VERSION 2
+
+class RenderTreeStyleReuse {
+public:
+    // State borrows Node and RenderObject pointers. Keep the document and the
+    // previous RenderObject tree (and its arena, when applicable) alive until
+    // the next build has completed and complete() has been called. Pass the
+    // exact tree returned by that prepared builder and do not mutate it before
+    // complete() commits the snapshot.
+    RenderTreeStyleReuse();
+    ~RenderTreeStyleReuse();
+    RenderTreeStyleReuse(RenderTreeStyleReuse&&) noexcept;
+    RenderTreeStyleReuse& operator=(RenderTreeStyleReuse&&) noexcept;
+    RenderTreeStyleReuse(const RenderTreeStyleReuse&) = delete;
+    RenderTreeStyleReuse& operator=(const RenderTreeStyleReuse&) = delete;
+    bool prepare(const Node& document, const StyleResolver& resolver,
+                 const RenderTreeOptions& options, const RenderTreeStyleReuse* previous = nullptr);
+    bool prepare_tracked(const Node& document, const StyleResolver& resolver,
+                         const RenderTreeOptions& options, const RenderTreeStyleReuse* previous = nullptr);
+    // Accepts only the tree returned by the builder configured with this
+    // prepared state.
+    bool complete(const RenderObject& tree);
+    void reset();
+    std::size_t reused_styles() const;
+    std::size_t payload_bytes() const;
+
+private:
+    struct State;
+    std::unique_ptr<State> state_;
+    bool prepare_impl(const Node&, const StyleResolver&, const RenderTreeOptions&,
+                      const RenderTreeStyleReuse*, bool tracked);
+    const Style* find(const Node& node) const;
+    friend class RenderTreeBuilder;
 };
 
 class RenderTreeBuilder {

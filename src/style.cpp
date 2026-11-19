@@ -5715,6 +5715,7 @@ StyleResolver& StyleResolver::operator=(StyleResolver&& other) noexcept {
 
 void StyleResolver::clear_derived_state() noexcept {
     ++interaction_state_generation_;
+    ++scoped_style_context_generation_;
     scalar_cache_.reset();
     id_rules_.clear();
     class_rules_.clear();
@@ -6398,6 +6399,30 @@ StyleResolverStatistics StyleResolver::statistics() const {
 
 InteractionInvalidationHints StyleResolver::interaction_invalidation_hints() const {
     return interaction_hints_;
+}
+
+bool StyleResolver::permits_scoped_style_reuse() const {
+    if (options_.diagnostics || stylesheet_.keyframes_size()) return false;
+    for (const auto& rule : stylesheet_) {
+        if (rule.type != CssRuleType::Style || rule.pseudo_element != CssPseudoElement::None ||
+            rule.selector_parts.empty()) return false;
+        for (const auto& part : rule.selector_parts) {
+            if (part.combinator_to_left != CssSelectorCombinator::Child &&
+                part.combinator_to_left != CssSelectorCombinator::Descendant) return false;
+            for (const unsigned char c : part.compound)
+                if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                      (c >= '0' && c <= '9') || c == '.' || c == '#' ||
+                      c == '_' || c == '-' || c == '*')) return false;
+        }
+        for (const auto& declaration : rule.declarations) {
+            const auto& property = declaration.property;
+            if (property.compare(0, 2, "--") == 0 || property == "content" ||
+                property.compare(0, 7, "counter") == 0 || property.compare(0, 10, "list-style") == 0 ||
+                property.compare(0, 9, "animation") == 0 || property.compare(0, 10, "transition") == 0)
+                return false;
+        }
+    }
+    return true;
 }
 
 void StyleResolver::set_interaction_state(const Node* hovered_node,

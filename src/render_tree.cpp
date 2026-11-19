@@ -3,9 +3,12 @@
 #include "render_core/text_normalization.h"
 #include "css_aspect_ratio.h"
 #include "background_style_access.h"
+#include "scalar_cascade_cache.h"
 
 #include <algorithm>
+#include <cstring>
 #include <deque>
+#include <limits>
 #include <utility>
 
 namespace jellyframe {
@@ -209,6 +212,371 @@ void RenderObjectDeleter::operator()(RenderObject* object) const {
     }
 }
 
+struct RenderTreeStyleReuse::State {
+    static constexpr std::size_t max_nodes = 128;
+    static constexpr std::size_t max_bytes = 16 * 1024;
+    static constexpr std::size_t no_parent = std::numeric_limits<std::size_t>::max();
+    struct Entry {
+        const Node* node = nullptr;
+        std::size_t parent = no_parent;
+        std::size_t children = 0;
+        std::shared_ptr<const std::string> inputs;
+        const RenderObject* object = nullptr;
+        std::uint64_t local_generation = 0;
+        bool affected = true;
+    };
+    std::vector<Entry> entries;
+    const Node* document = nullptr;
+    const RenderObject* pending_tree = nullptr;
+    const Node* root_element = nullptr;
+    const StyleResolver* resolver = nullptr;
+    std::uint64_t context_generation = 0;
+    std::uint64_t dom_generation = 0;
+    std::uint64_t structure_generation = 0;
+    int width = 0;
+    int height = 0;
+    std::size_t object_limit = 0;
+    std::size_t contents_record_limit = 0;
+    std::size_t contents_byte_limit = 0;
+    std::size_t bytes = 0;
+    bool complete = false;
+    bool tracked = false;
+    mutable std::size_t hits = 0;
+
+    static bool safe_node(const Node& node) {
+        const auto& tag = node.tag_name;
+        return node.attributes.size() <= 64 && node.attribute("style").empty() &&
+            node.attribute("dir").empty() && tag != "bdi" && tag != "bdo" &&
+            tag != "ol" && tag != "ul" && tag != "li" && tag != "menu" &&
+            tag != "input" && tag != "select" && tag != "textarea" &&
+            tag != "option" && tag != "optgroup" && tag != "progress" && tag != "meter";
+    }
+
+    static bool same_inputs(const std::string& saved, const Node& node) {
+        std::size_t position = 0;
+        const auto number = [&](std::size_t value) {
+            if (saved.size() - position < sizeof(value) ||
+                std::memcmp(saved.data() + position, &value, sizeof(value)) != 0) return false;
+            position += sizeof(value);
+            return true;
+        };
+        const auto text = [&](std::string_view value) {
+            if (!number(value.size()) || saved.size() - position < value.size() ||
+                saved.compare(position, value.size(), value.data(), value.size()) != 0) return false;
+            position += value.size();
+            return true;
+        };
+        if (!number(static_cast<std::size_t>(node.type)) || !text(node.tag_name) ||
+            !number(node.attributes.size())) return false;
+        for (const auto& attribute : node.attributes)
+            if (!text(attribute.first) || !text(attribute.second)) return false;
+        return position == saved.size();
+    }
+
+    static std::shared_ptr<const std::string> capture_inputs(const Node& node) {
+        auto inputs = std::make_shared<std::string>();
+        const auto append_number = [&](std::size_t value) {
+            if (inputs->size() > max_bytes - sizeof(value))
+                throw std::length_error("style reuse input limit");
+            inputs->append(reinterpret_cast<const char*>(&value), sizeof(value));
+        };
+        const auto append_text = [&](std::string_view value) {
+            if (value.size() > max_bytes ||
+                inputs->size() > max_bytes - sizeof(std::size_t) ||
+                value.size() > max_bytes - inputs->size() - sizeof(std::size_t))
+                throw std::length_error("style reuse input limit");
+            append_number(value.size());
+            inputs->append(value.data(), value.size());
+        };
+        append_number(static_cast<std::size_t>(node.type));
+        append_text(node.tag_name);
+        append_number(node.attributes.size());
+        for (const auto& attribute : node.attributes) {
+            append_text(attribute.first);
+            append_text(attribute.second);
+        }
+        return inputs;
+    }
+
+    void invalidate_root_dependents() {
+        for (const auto& entry : entries) {
+            if (entry.node == root_element && entry.affected) {
+                for (auto& dependent : entries) {
+                    dependent.affected = true;
+                    dependent.object = nullptr;
+                }
+                return;
+            }
+        }
+    }
+
+    bool matches_document(const Node& current_document) const {
+        struct Pending { const Node* node; std::size_t parent; };
+        std::vector<Pending> pending{{&current_document, no_parent}};
+        std::size_t ordinal = 0;
+        while (!pending.empty()) {
+            const Pending current = pending.back();
+            pending.pop_back();
+            if (ordinal >= entries.size()) return false;
+            const Entry& entry = entries[ordinal];
+            if (entry.node != current.node || entry.parent != current.parent ||
+                entry.children != current.node->children.size() || !entry.inputs ||
+                !same_inputs(*entry.inputs, *current.node) ||
+                (current.parent != no_parent && current.node->parent != entries[current.parent].node))
+                return false;
+            ++ordinal;
+            for (auto it = current.node->children.rbegin(); it != current.node->children.rend(); ++it)
+                pending.push_back({it->get(), ordinal - 1});
+        }
+        return ordinal == entries.size();
+    }
+};
+
+RenderTreeStyleReuse::RenderTreeStyleReuse() = default;
+RenderTreeStyleReuse::~RenderTreeStyleReuse() = default;
+RenderTreeStyleReuse::RenderTreeStyleReuse(RenderTreeStyleReuse&&) noexcept = default;
+RenderTreeStyleReuse& RenderTreeStyleReuse::operator=(RenderTreeStyleReuse&&) noexcept = default;
+void RenderTreeStyleReuse::reset() { state_.reset(); }
+std::size_t RenderTreeStyleReuse::reused_styles() const { return state_ ? state_->hits : 0; }
+std::size_t RenderTreeStyleReuse::payload_bytes() const { return state_ ? state_->bytes : 0; }
+
+bool RenderTreeStyleReuse::prepare(const Node& document, const StyleResolver& resolver,
+                                   const RenderTreeOptions& options, const RenderTreeStyleReuse* previous) {
+    return prepare_impl(document, resolver, options, previous, false);
+}
+
+bool RenderTreeStyleReuse::prepare_tracked(const Node& document, const StyleResolver& resolver,
+                                           const RenderTreeOptions& options, const RenderTreeStyleReuse* previous) {
+    return prepare_impl(document, resolver, options, previous, true);
+}
+
+bool RenderTreeStyleReuse::prepare_impl(const Node& document, const StyleResolver& resolver,
+                                        const RenderTreeOptions& options, const RenderTreeStyleReuse* previous,
+                                        bool tracked) {
+    if (previous == this) {
+        reset();
+        return false;
+    }
+    reset();
+    if (document.parent || options.diagnostics ||
+        (options.style_overrides && !options.style_overrides->empty()) ||
+        !resolver.permits_scoped_style_reuse()) return false;
+    try {
+        const State* old = previous ? previous->state_.get() : nullptr;
+        const Node* root_element = &document;
+        if (document.tag_name == "document") {
+            root_element = nullptr;
+            for (const auto& child : document.children) {
+                if (child->type == NodeType::Element) {
+                    root_element = child.get();
+                    break;
+                }
+            }
+        }
+        const auto context_generation = resolver.scoped_style_context_generation();
+        std::vector<const Node*> current_nodes;
+        bool tracked_structure_matches = false;
+        if (tracked && old && old->tracked && old->complete && old->document == &document &&
+            old->resolver == &resolver && old->root_element == root_element &&
+            old->context_generation == context_generation &&
+            old->structure_generation == document.structural_mutation_generation() &&
+            old->width == options.viewport_width && old->height == options.viewport_height &&
+            old->object_limit == options.max_render_objects &&
+            old->contents_record_limit == options.max_contents_source_records &&
+            old->contents_byte_limit == options.max_contents_source_bytes) {
+            struct Pending { const Node* node; std::size_t parent; };
+            std::vector<Pending> pending{{&document, State::no_parent}};
+            current_nodes.reserve(old->entries.size());
+            tracked_structure_matches = true;
+            while (!pending.empty()) {
+                const Pending current = pending.back();
+                pending.pop_back();
+                const std::size_t ordinal = current_nodes.size();
+                if (ordinal >= old->entries.size() ||
+                    (current.parent != State::no_parent &&
+                     current.node->parent != current_nodes[current.parent]) ||
+                    current.node->children.size() != old->entries[ordinal].children ||
+                    current.node != old->entries[ordinal].node ||
+                    old->entries[ordinal].parent != current.parent) {
+                    tracked_structure_matches = false;
+                    break;
+                }
+                current_nodes.push_back(current.node);
+                for (auto it = current.node->children.rbegin(); it != current.node->children.rend(); ++it)
+                    pending.push_back({it->get(), ordinal});
+            }
+            tracked_structure_matches = tracked_structure_matches &&
+                current_nodes.size() == old->entries.size();
+        }
+        if (tracked_structure_matches) {
+            auto next = std::make_unique<State>(*old);
+            next->complete = false;
+            next->hits = 0;
+            next->dom_generation = document.mutation_generation;
+            for (std::size_t i = 0; i < next->entries.size(); ++i) {
+                auto& entry = next->entries[i];
+                const Node& node = *current_nodes[i];
+                const auto generation = node.local_style_mutation_generation();
+                const bool changed = generation != entry.local_generation || !entry.inputs ||
+                    !State::same_inputs(*entry.inputs, node);
+                if (changed && !State::safe_node(node)) return false;
+                entry.local_generation = generation;
+                if (changed) entry.inputs = State::capture_inputs(node);
+                entry.affected = changed ||
+                    (entry.parent != State::no_parent && next->entries[entry.parent].affected);
+                if (entry.affected) entry.object = nullptr;
+            }
+            next->invalidate_root_dependents();
+            next->bytes = sizeof(State) + next->entries.capacity() * sizeof(State::Entry);
+            for (const auto& entry : next->entries) {
+                if (entry.inputs) next->bytes += sizeof(std::string) + entry.inputs->capacity() + 1;
+            }
+            if (next->bytes > State::max_bytes) return false;
+            state_ = std::move(next);
+            return true;
+        }
+
+        auto next = std::make_unique<State>();
+        next->document = &document;
+        next->resolver = &resolver;
+        next->root_element = root_element;
+        next->context_generation = context_generation;
+        next->dom_generation = document.mutation_generation;
+        next->structure_generation = document.structural_mutation_generation();
+        next->width = options.viewport_width;
+        next->height = options.viewport_height;
+        next->object_limit = options.max_render_objects;
+        next->contents_record_limit = options.max_contents_source_records;
+        next->contents_byte_limit = options.max_contents_source_bytes;
+        next->tracked = tracked;
+
+        struct Pending { const Node* node; std::size_t parent; };
+        std::vector<Pending> pending{{&document, State::no_parent}};
+        while (!pending.empty()) {
+            const Pending current = pending.back();
+            pending.pop_back();
+            const Node& node = *current.node;
+            const std::size_t ordinal = next->entries.size();
+            if (current.parent != State::no_parent &&
+                node.parent != next->entries[current.parent].node) return false;
+            if (ordinal >= State::max_nodes || node.children.size() > State::max_nodes - ordinal - 1 ||
+                !State::safe_node(node)) return false;
+
+            State::Entry entry;
+            entry.node = &node;
+            entry.parent = current.parent;
+            entry.children = node.children.size();
+            entry.local_generation = node.local_style_mutation_generation();
+            entry.inputs = State::capture_inputs(node);
+            next->entries.push_back(std::move(entry));
+            for (auto it = node.children.rbegin(); it != node.children.rend(); ++it)
+                pending.push_back({it->get(), ordinal});
+        }
+        next->bytes = sizeof(State) + next->entries.capacity() * sizeof(State::Entry);
+        for (const auto& entry : next->entries) {
+            if (entry.inputs) next->bytes += sizeof(std::string) + entry.inputs->capacity() + 1;
+        }
+        if (next->bytes > State::max_bytes) return false;
+
+        const bool compatible = !tracked && old && !old->tracked && old->complete &&
+            old->document == &document && old->resolver == &resolver && old->root_element == root_element &&
+            old->context_generation == context_generation && old->width == options.viewport_width &&
+            old->height == options.viewport_height && old->object_limit == options.max_render_objects &&
+            old->contents_record_limit == options.max_contents_source_records &&
+            old->contents_byte_limit == options.max_contents_source_bytes &&
+            old->entries.size() == next->entries.size();
+        if (compatible) {
+            for (std::size_t i = 0; i < next->entries.size(); ++i) {
+                const auto& before = old->entries[i];
+                const auto& after = next->entries[i];
+                if (before.node != after.node || before.parent != after.parent ||
+                    before.children != after.children) {
+                    return false;
+                }
+            }
+            for (std::size_t i = 0; i < next->entries.size(); ++i) {
+                auto& entry = next->entries[i];
+                const auto& before = old->entries[i];
+                entry.affected = !before.inputs || !entry.inputs ||
+                    before.inputs->size() != entry.inputs->size() || *before.inputs != *entry.inputs ||
+                    (entry.parent != State::no_parent && next->entries[entry.parent].affected);
+                if (!entry.affected) entry.object = before.object;
+            }
+            next->invalidate_root_dependents();
+        }
+        state_ = std::move(next);
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    } catch (const std::length_error&) {
+        return false;
+    }
+}
+
+const Style* RenderTreeStyleReuse::find(const Node& node) const {
+    if (!state_ || state_->complete) return nullptr;
+    for (const auto& entry : state_->entries) {
+        if (entry.node == &node) {
+            if (!entry.object || entry.affected) return nullptr;
+            ++state_->hits;
+            return &entry.object->style;
+        }
+    }
+    return nullptr;
+}
+
+bool RenderTreeStyleReuse::complete(const RenderObject& tree) {
+    if (!state_) return false;
+    State& state = *state_;
+    if (state.pending_tree != &tree || state.document != tree.node ||
+        state.document->mutation_generation != state.dom_generation ||
+        state.resolver->scoped_style_context_generation() != state.context_generation) {
+        reset();
+        return false;
+    }
+    try {
+        if (!state.matches_document(*state.document)) {
+            reset();
+            return false;
+        }
+        for (auto& entry : state.entries) entry.object = nullptr;
+        std::vector<const RenderObject*> pending{&tree};
+        std::size_t visited = 0;
+        while (!pending.empty()) {
+            const RenderObject* object = pending.back();
+            pending.pop_back();
+            const Style& style = object->style;
+            if (++visited > State::max_nodes || !object->node ||
+                !detail::ScalarCascadeCache::scalar(style) ||
+                (style.display != Display::Block && style.display != Display::Inline &&
+                 style.display != Display::InlineBlock && style.display != Display::None) ||
+                style.before_content_kind != GeneratedContentKind::None ||
+                style.after_content_kind != GeneratedContentKind::None) {
+                reset();
+                return false;
+            }
+            for (auto& entry : state.entries) {
+                if (entry.node == object->node) {
+                    if (entry.object) {
+                        reset();
+                        return false;
+                    }
+                    entry.object = object;
+                    break;
+                }
+            }
+            for (const auto& child : object->children) pending.push_back(child.get());
+        }
+        state.complete = true;
+        state.pending_tree = nullptr;
+        state.hits = 0;
+        return true;
+    } catch (const std::bad_alloc&) {
+        reset();
+        return false;
+    }
+}
+
 RenderTreeBuilder::RenderTreeBuilder(const StyleResolver& style_resolver, RenderTreeOptions options)
     : style_resolver_(style_resolver),
       options_(options) {}
@@ -222,6 +590,28 @@ RenderObjectPtr RenderTreeBuilder::build(const Node& document, MonotonicArena& a
 }
 
 RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, MonotonicArena* arena) const {
+    const RenderTreeStyleReuse* reuse = options_.style_reuse;
+    if (reuse != nullptr) {
+        const auto* state = reuse->state_.get();
+        if (state == nullptr || state->complete || state->document != &document ||
+            state->resolver != &style_resolver_ || state->dom_generation != document.mutation_generation ||
+            state->context_generation != style_resolver_.scoped_style_context_generation() ||
+            state->width != options_.viewport_width || state->height != options_.viewport_height ||
+            state->object_limit != options_.max_render_objects ||
+            state->contents_record_limit != options_.max_contents_source_records ||
+            state->contents_byte_limit != options_.max_contents_source_bytes ||
+            options_.diagnostics != nullptr ||
+            (options_.style_overrides != nullptr && !options_.style_overrides->empty())) reuse = nullptr;
+        else {
+            try {
+                if (!state->matches_document(document)) reuse = nullptr;
+            } catch (const std::bad_alloc&) {
+                reuse = nullptr;
+            } catch (const std::length_error&) {
+                reuse = nullptr;
+            }
+        }
+    }
     struct PendingNode {
         const Node* node = nullptr;
         RenderObject* parent = nullptr;
@@ -237,9 +627,14 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
     RenderObject* view_raw = view.get();
     view->type = RenderObjectType::View;
     view->node = &document;
-    view->style = style_resolver_.resolve(document, style_context);
-    detail::finalize_inherited_aspect_ratio(view->style, nullptr);
-    apply_style_override(view->style, document, options_.style_overrides);
+    const Style* reusable_view_style = reuse != nullptr ? reuse->find(document) : nullptr;
+    if (reusable_view_style != nullptr) {
+        view->style = *reusable_view_style;
+    } else {
+        view->style = style_resolver_.resolve(document, style_context);
+        detail::finalize_inherited_aspect_ratio(view->style, nullptr);
+        apply_style_override(view->style, document, options_.style_overrides);
+    }
 
     std::size_t render_object_count = 1;
     bool budget_reported = false;
@@ -298,13 +693,16 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
             continue;
         }
 
-        Style style = style_resolver_.resolve(node, style_context);
-        if (node.type == NodeType::Text) {
-            inherit_text_style(style, *pending_node.parent_style);
-        } else {
-            inherit_element_style(style, *pending_node.parent_style);
+        const Style* reusable_style = reuse != nullptr ? reuse->find(node) : nullptr;
+        Style style = reusable_style != nullptr ? *reusable_style : style_resolver_.resolve(node, style_context);
+        if (reusable_style == nullptr) {
+            if (node.type == NodeType::Text) {
+                inherit_text_style(style, *pending_node.parent_style);
+            } else {
+                inherit_element_style(style, *pending_node.parent_style);
+            }
+            apply_style_override(style, node, options_.style_overrides);
         }
-        apply_style_override(style, node, options_.style_overrides);
 
         // The document element retains its root box; replaced elements remain
         // leaves even when their authored display value is contents.
@@ -363,6 +761,8 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         contents_sources->complete = false;
     }
     if (has_contents || budget_reported) view->contents_sources = std::move(contents_sources);
+
+    if (reuse != nullptr) reuse->state_->pending_tree = view_raw;
 
     return view;
 }

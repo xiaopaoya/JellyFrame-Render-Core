@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.0 / ABI11
+
+ABI11 changes the public `Node` layout. Rebuild every Core consumer.
+
+- Add bounded, opt-in tracked computed-style reuse for render-tree builds.
+  The feature defaults off and refuses unsupported selectors, oversized
+  snapshots, and mismatched DOM, resolver, viewport, or builder state.
+- Track local style and structural mutations and invalidate the document
+  structure before destroying descendants, including `set_text_content()`.
+- Bind snapshot completion to the exact tree returned by the prepared builder.
+
 ## 0.11.0 / ABI10
 
 Rebuild all consumers against the new public style and text layout cache

@@ -20,10 +20,21 @@ struct DestroyObservation {
     Node* parent = nullptr;
 };
 
+struct StructuralEpochObservation {
+    const Node* document = nullptr;
+    std::uint64_t before = 0;
+    std::uint64_t during = 0;
+};
+
 void observe_destroyed_node_parent(Node& node, void* context) {
     auto& observation = *static_cast<DestroyObservation*>(context);
     observation.called = true;
     observation.parent = node.parent;
+}
+
+void observe_structural_epoch_before_teardown(Node&, void* context) {
+    auto& observation = *static_cast<StructuralEpochObservation*>(context);
+    observation.during = observation.document->structural_mutation_generation();
 }
 
 struct LifetimeObservation {
@@ -139,6 +150,53 @@ void append_and_remove_mark_tree_dirty() {
     check((subtree_dirty_flags(*document) & DomDirtyTree) != 0U, "remove marks tree dirty");
 }
 
+void durable_style_and_structure_generations_survive_dirty_consumption() {
+    auto document = make_element("document");
+    auto& body = document->append_child(make_element("body"));
+    auto& paragraph = body.append_child(make_element("p"));
+    auto& text = paragraph.append_child(make_text("one"));
+    clear_dirty_flags(*document);
+    const auto structure = document->structural_mutation_generation();
+    const auto body_style = body.local_style_mutation_generation();
+
+    paragraph.set_attribute("class", "changed");
+    const auto style = paragraph.local_style_mutation_generation();
+    check(style == document->mutation_generation && style != 0,
+          "local style provenance uses the durable document mutation generation");
+    check(body.local_style_mutation_generation() == body_style,
+          "descendant style writes do not change ancestor local provenance");
+    check(document->structural_mutation_generation() == structure,
+          "style mutation preserves topology provenance");
+    take_dirty_flags(*document);
+    check(paragraph.local_style_mutation_generation() == style &&
+          document->structural_mutation_generation() == structure,
+          "dirty flag consumption preserves durable provenance");
+    const auto generation = document->mutation_generation;
+    paragraph.set_attribute("class", "changed");
+    check(document->mutation_generation == generation, "no-op writes do not advance provenance");
+
+    const auto text_style = text.local_style_mutation_generation();
+    text.set_text("two");
+    check(text.local_style_mutation_generation() == text_style &&
+          document->structural_mutation_generation() == structure,
+          "text value writes leave style and topology provenance unchanged");
+    mark_dirty(paragraph, DomDirtyPaint);
+    check(paragraph.local_style_mutation_generation() == style,
+          "paint-only invalidation leaves style provenance unchanged");
+    paragraph.attributes["class"] = "direct-write";
+    mark_dirty(paragraph, DomDirtyStyle);
+    check(paragraph.local_style_mutation_generation() > style,
+          "explicitly marked public style writes advance local provenance");
+
+    paragraph.append_child(make_element("span"));
+    const auto inserted = document->structural_mutation_generation();
+    check(inserted > structure, "insertion advances structural provenance");
+    paragraph.remove_child(*paragraph.children.back());
+    clear_dirty_flags(*document);
+    check(document->structural_mutation_generation() > inserted,
+          "removal provenance survives dirty flag clearing");
+}
+
 void insert_rejects_null_and_cycle_forming_nodes() {
     auto document = make_element("document");
     bool null_rejected = false;
@@ -211,6 +269,21 @@ void text_content_replacement_detaches_nodes_before_destroy_observers() {
     check(observation.called, "replaced child destroy observer runs");
     check(observation.parent == nullptr, "replaced child is detached before its destroy observer runs");
     check(body.text_content() == "replacement", "replacement text remains attached");
+}
+
+void text_content_replacement_invalidates_structure_before_destroy_observers() {
+    auto document = make_element("document");
+    Node& body = document->append_child(make_element("body"));
+    Node& old_child = body.append_child(make_element("section"));
+    StructuralEpochObservation observation{document.get(), document->structural_mutation_generation(), 0};
+    old_child.add_destroy_observer(observe_structural_epoch_before_teardown, &observation);
+
+    body.set_text_content("replacement");
+
+    check(observation.during > observation.before,
+          "structural reuse provenance advances before teardown callbacks");
+    check(document->structural_mutation_generation() > observation.during,
+          "completed replacement publishes its final structural mutation");
 }
 
 void protected_lifetime_observers_survive_regular_replacement_and_removal() {
@@ -362,10 +435,12 @@ int main() {
         parser_returns_clean_document();
         compact_attribute_list_behaves_like_small_map();
         append_and_remove_mark_tree_dirty();
+        durable_style_and_structure_generations_survive_dirty_consumption();
         insert_rejects_null_and_cycle_forming_nodes();
         attributes_and_text_mark_specific_dirty_bits();
         unchanged_text_content_stays_clean();
         text_content_replacement_detaches_nodes_before_destroy_observers();
+        text_content_replacement_invalidates_structure_before_destroy_observers();
         protected_lifetime_observers_survive_regular_replacement_and_removal();
         lifetime_registration_detaches_before_node_and_during_callback();
         lifetime_callbacks_cannot_rearm_a_destroying_node();
