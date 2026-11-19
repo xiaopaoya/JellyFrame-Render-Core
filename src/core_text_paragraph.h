@@ -50,7 +50,7 @@ struct CoreTextParagraphLine {
 struct CoreTextParagraphFragment {
     std::size_t owner = 0, line = 0, begin = 0, end = 0;
     // Packet X is Q1000 relative to the paragraph content origin. Its source
-    // byte ranges are local to this fragment's normalized ASCII substring.
+    // byte ranges are local to this fragment's normalized UTF-8 substring.
     std::string packet;
     CoreTextParagraphFragment() : packet(0,'\0') {}
 };
@@ -60,11 +60,21 @@ struct CoreTextParagraph {
     // its source range (cross-owner CRLF belongs to CR). None become glyphs.
     std::string normalized;
     std::vector<CoreTextParagraphSource> sources;
+    // ASCII uses identity offsets. Allocate only for a multibyte paragraph.
+    std::vector<std::uint16_t> byte_offsets;
     std::vector<CoreTextParagraphLine> lines;
     std::vector<CoreTextParagraphFragment> fragments;
     std::uint64_t revision = 0;
     int height = 0;
     CoreTextParagraph() : normalized(0,'\0'), sources(0), lines(0), fragments(0) {}
+    std::size_t byte_offset(std::size_t piece) const noexcept {
+        if (byte_offsets.empty()) return piece;
+        return piece == sources.size() ? normalized.size() : byte_offsets[piece];
+    }
+    std::string_view piece_text(std::size_t first, std::size_t end) const noexcept {
+        const auto offset = byte_offset(first);
+        return {normalized.data() + offset, byte_offset(end) - offset};
+    }
 };
 struct CoreTextParagraphUsage {
     std::size_t queries = 0, query_bytes = 0, work = 0, capacity = 0;
