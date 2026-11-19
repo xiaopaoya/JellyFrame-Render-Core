@@ -78,8 +78,8 @@ struct IntrinsicSourceQueryUsage {
     }
 };
 
-// Initial admission is one ordinary horizontal block with an ASCII inline
-// source. ASCII overflow-wrap:anywhere adds per-character min-content breaks;
+// The ordinary horizontal block path admits ASCII inline text and U+00A0.
+// Overflow-wrap:anywhere adds per-scalar min-content breaks in this profile.
 // ASCII uppercase/lowercase transforms are applied before measurement. Non-ASCII
 // simple CJK ideographs are also admitted with per-codepoint opportunities;
 // mixed scripts, Han segment breaks, punctuation and combining sequences still refuse.

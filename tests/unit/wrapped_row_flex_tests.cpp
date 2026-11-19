@@ -56,9 +56,10 @@ struct FontAsset {
 };
 
 FontAsset make_font() {
-    std::array<std::pair<unsigned, unsigned>, 95> glyphs{};
-    for (unsigned i = 0; i < glyphs.size(); ++i)
+    std::array<std::pair<unsigned, unsigned>, 96> glyphs{};
+    for (unsigned i = 0; i + 1 < glyphs.size(); ++i)
         glyphs[i] = {32 + i, i == 0 ? 250U : 500U};
+    glyphs.back() = {0xa0, 250};
     FontAsset asset;
     const auto bitmap = 128 + glyphs.size() * 40;
     asset.bytes.resize(bitmap, 0);
@@ -75,7 +76,7 @@ FontAsset make_font() {
         const auto at = 128 + i * 40;
         put32(bytes, at, glyphs[i].first); put32(bytes, at + 4, static_cast<std::uint32_t>(i + 1));
         put32(bytes, at + 8, glyphs[i].second); put32(bytes, at + 28, static_cast<std::uint32_t>(bytes.size() - bitmap));
-        if (glyphs[i].first != 32) {
+        if (glyphs[i].first != 32 && glyphs[i].first != 0xa0) {
             put32(bytes, at + 12, static_cast<std::uint32_t>(-1));
             put32(bytes, at + 16, static_cast<std::uint32_t>(-2));
             put16(bytes, at + 20, 1); put16(bytes, at + 22, 2); put32(bytes, at + 24, 1);
@@ -170,6 +171,18 @@ int main() {
         expect(*exact.tree, "b", 16, 0, 16, 20);
         expect(*exact.tree, "p", 0, 0, 32, 20); std::cout << '\n';
         check_core_cache(*exact.tree, system);
+        const std::string nbsp_items =
+            "<div id='a'>A&nbsp;B</div><div id='b'>C</div><div id='c'>D</div>";
+        const std::string nbsp_rules = "#p{width:26px}div{flex:0 0 13px;min-width:0}";
+        const auto nbsp_rows = layout(nbsp_items, nbsp_rules, system, true);
+        expect(*nbsp_rows.tree, "a", 0, 0, 13, 20);
+        expect(*nbsp_rows.tree, "b", 13, 0, 13, 20);
+        expect(*nbsp_rows.tree, "c", 0, 20, 13, 20);
+        const auto anywhere_rows = layout(
+            nbsp_items, nbsp_rules + "#a{overflow-wrap:anywhere}", system, true);
+        expect(*anywhere_rows.tree, "a", 0, 0, 13, 40);
+        expect(*anywhere_rows.tree, "b", 13, 0, 13, 20);
+        expect(*anywhere_rows.tree, "c", 0, 40, 13, 20);
         auto legacy_pair = layout(pair, "", system, false);
         require(find(*legacy_pair.tree, "a").rect.width == 32 &&
                 find(*legacy_pair.tree, "b").rect.y == 20,
