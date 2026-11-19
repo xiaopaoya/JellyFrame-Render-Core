@@ -2724,7 +2724,9 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
                 if (box.style.overflow_wrap_anywhere && token.advance > static_cast<std::int64_t>(usable_text_width) * 1000) {
                     for (std::size_t glyph_index = token.first_glyph; glyph_index < token.end_glyph; ++glyph_index) {
                         const auto& glyph = glyphs[glyph_index];
-                        const auto glyph_advance = static_cast<std::int64_t>(glyph.geometry.advance) + spacing_q1000;
+                        const auto glyph_advance = static_cast<std::int64_t>(glyph.geometry.advance) +
+                            spacing_q1000 + (detail::is_word_spacing_separator(glyph.source_codepoint)
+                                ? word_spacing_q1000 : 0);
                         if (!line.text.empty() && line.advance + glyph_advance > static_cast<std::int64_t>(usable_text_width) * 1000)
                             emit_line();
                         line.text.append(text.data() + glyph.source_begin, glyph.source_end - glyph.source_begin);
@@ -2754,7 +2756,8 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
                 if (token.text.empty()) token.first_glyph = glyph_index;
                 token.end_glyph = glyph_index + 1;
                 token.text.append(text.data() + glyph.source_begin, byte_count);
-                token.advance += static_cast<std::int64_t>(glyph.geometry.advance) + spacing_q1000;
+                token.advance += static_cast<std::int64_t>(glyph.geometry.advance) + spacing_q1000 +
+                    (detail::is_word_spacing_separator(cp) ? word_spacing_q1000 : 0);
                 if (is_cjk_codepoint(cp) || cp == '-' || cp == '/' || cp == 0x3001U || cp == 0x3002U) {
                     if (!append_token()) return refuse("line token could not be prepared");
                 }
@@ -2804,7 +2807,7 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
                     return refuse("text spacing exceeds the prepared glyph position range");
                 glyph.x = static_cast<std::int32_t>(positioned_x);
                 glyph_spacing_offset += static_cast<std::int64_t>(spacing_q1000) +
-                    (glyph.source_codepoint == ' ' ? word_spacing_q1000 : 0);
+                    (detail::is_word_spacing_separator(glyph.source_codepoint) ? word_spacing_q1000 : 0);
             }
             PreparedTextLine prepared_line;
             const int line_width = ceil_px(static_cast<std::int32_t>(std::min<std::int64_t>(line.advance,

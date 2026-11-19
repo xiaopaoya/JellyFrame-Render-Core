@@ -427,7 +427,7 @@ void word_spacing_widths(const TextSystem& text_system) {
         fixture.root_box, fixture.root_node, "span", Display::Inline);
     fixture.append_text(span, node, " B");
     fixture.append_text(fixture.root_box, fixture.root_node, "\xc2\xa0" "A ");
-    expect_widths(fixture, text_system, 21600, 36600);
+    expect_widths(fixture, text_system, 24600, 39600);
 
     Fixture negative;
     negative.root_box.style.word_spacing = -5;

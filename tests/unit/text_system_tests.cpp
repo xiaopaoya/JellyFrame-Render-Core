@@ -1062,15 +1062,16 @@ void core_prepared_text_applies_bounded_letter_spacing() {
     assert(changed);
 }
 void core_prepared_text_applies_word_spacing() {
-    auto font = asset();
+    auto font = asset(400, 16, 4, 1, {{32,250},{65,500},{66,600},{0xa0,250}});
     TextFontFace face{101, 0, font.font};
     TextSystem system;
     assert(system.bind(&face, 1) == S::Ok);
     LayoutEngineOptions options;
     options.text_system = &system;
     options.shared_inline.max_attempts = 0;
-    const auto run = [&](const char* extra, int width, const std::vector<std::string>& expected) {
-        auto document = HtmlParser().parse("<div>A  B</div>");
+    const auto run = [&](const char* text_source, const char* extra, int width,
+                         const std::vector<std::string>& expected) {
+        auto document = HtmlParser().parse("<div>" + std::string(text_source) + "</div>");
         StyleResolver resolver(CssParser().parse(
             "body,div{margin:0}div{font-size:16px;line-height:20px;word-spacing:4px;" +
             std::string(extra) + "}"));
@@ -1084,11 +1085,15 @@ void core_prepared_text_applies_word_spacing() {
             PreparedTextGlyph space, last;
             assert(decode_prepared_text(line.packet, packet) && packet.size() == 3);
             assert(packet.read(1, space) && packet.read(2, last));
+            assert(space.source_codepoint == (expected.front()[1] == ' ' ? ' ' : 0xa0));
             assert(space.x == 8000 && last.x == 16000 && line.width == 26);
         }
     };
-    run("", 24, {"A", "B"});
-    run("white-space:nowrap", 24, {"A B"});
+    run("A  B", "", 24, {"A", "B"});
+    run("A  B", "white-space:nowrap", 24, {"A B"});
+    run("A&nbsp;B", "", 24, {"A\xc2\xa0" "B"});
+    run("A&nbsp;B", "white-space:nowrap", 24, {"A\xc2\xa0" "B"});
+    run("A&nbsp;B A", "", 24, {"A\xc2\xa0" "B", "A"});
 }
 
 void core_layout_refusals_are_explicit() {

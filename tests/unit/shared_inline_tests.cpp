@@ -917,7 +917,7 @@ void nonbreaking_space_stays_in_shared_paragraph() {
     options.text_system = &system;
     LayerTreeBuilderOptions layers;
     layers.text_system = &system;
-    StyleResolver styles(CssParser{}.parse("*{margin:0;padding:0;border:0;font-size:16px}"));
+    StyleResolver styles(CssParser{}.parse("*{margin:0;padding:0;border:0;font-size:16px}div{word-spacing:4px}"));
     auto document = HtmlParser{}.parse(
         "<div id='normal' style='width:12px'>A<span>&nbsp;</span>B</div>"
         "<div id='nowrap' style='width:12px;white-space:nowrap'>&nbsp;<span>A</span>&nbsp;</div>"
@@ -937,8 +937,12 @@ void nonbreaking_space_stays_in_shared_paragraph() {
     const auto control = laid_out_glyphs("control");
     check(normal.size() == 3 && std::get<0>(normal[1]) == 0xa0 &&
           std::get<2>(normal[0]) == std::get<2>(normal[2]), "NBSP prevents wrapping across owners");
+    check(std::get<1>(normal[2]) == 16000, "NBSP adds word spacing before the following glyph");
     check(nowrap.size() == 3 && std::get<0>(nowrap[0]) == 0xa0 && std::get<0>(nowrap[2]) == 0xa0,
           "nowrap retains edge NBSP");
+    const auto& nowrap_line = find(*layout, "nowrap").text_layout_cache.shared_inline->snapshot->paragraph.lines.front();
+    check(std::get<1>(nowrap[1]) == 8000 && nowrap_line.advance == 24000,
+          "leading and trailing NBSP contribute word spacing in nowrap");
     check(control.size() == 2 && std::get<2>(control[0]) != std::get<2>(control[1]), "ordinary space still wraps");
 }
 
@@ -975,6 +979,10 @@ void nonbreaking_space_packet_source_ranges() {
     const CoreTextParagraphSpan unbreakable{"A\xc2\xa0" "B", request};
     check(measure_core_text_intrinsic(system, &unbreakable, 1, {}, sizes) == TextSystemStatus::Ok &&
         sizes.min_content == 21600 && sizes.max_content == 21600, "NBSP contributes advance without a min-content break");
+    auto spaced = unbreakable;
+    spaced.font.words = 4000;
+    check(measure_core_text_intrinsic(system, &spaced, 1, {}, sizes) == TextSystemStatus::Ok &&
+        sizes.min_content == 25600 && sizes.max_content == 25600, "NBSP word spacing raises both intrinsic widths");
 }
 
 void contents_whitespace_joins_shared_paragraph() {

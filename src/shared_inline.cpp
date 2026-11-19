@@ -642,7 +642,7 @@ Rect fragment_bounds(const CoreTextParagraphFragment& fragment, const CoreTextPa
         left = std::min(left, static_cast<std::int64_t>(glyph.x));
         right = std::max(right, static_cast<std::int64_t>(glyph.x) +
             std::max<std::int64_t>(0, static_cast<std::int64_t>(glyph.geometry.advance) + fragment.letter_spacing +
-                (glyph.source_codepoint == ' ' ? fragment.word_spacing : 0)));
+                (is_word_spacing_separator(glyph.source_codepoint) ? fragment.word_spacing : 0)));
     }
     if (!packet.size()) return {};
     const auto x = floor_pixel(left), edge = ceil_pixel(right);

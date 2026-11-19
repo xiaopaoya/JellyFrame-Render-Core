@@ -27,8 +27,8 @@ start/center/end alignment, first-line indent, nowrap and anywhere wrapping.
 Bounded integer `letter-spacing` contributes to each scalar's advance, including
 the last glyph on a line and the glyph before a different inline owner or image.
 Collapsed spaces contribute their own spacing only when kept on the line.
-Bounded `word-spacing` adjusts retained ASCII spaces in scalar paragraphs and
-in admitted source-only intrinsic measurements.
+Bounded `word-spacing` adjusts retained ASCII and nonbreaking spaces in scalar
+paragraphs and in admitted source-only intrinsic measurements.
 The logical advance includes spacing while glyph ink uses the original metrics.
 Collapsing scalar paragraphs also accept U+00A0 in normal and nowrap mode.
 The intrinsic source queries accept U+00A0 with ASCII text and retain its
