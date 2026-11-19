@@ -118,6 +118,8 @@ struct Node : public EventTarget {
     // DOM mutation advances that root value, even after dirty flags are
     // consumed for a frame.
     std::uint64_t mutation_generation = 0;
+    std::uint64_t local_style_mutation_generation() const noexcept { return style_mutation_generation_; }
+    std::uint64_t structural_mutation_generation() const noexcept { return structural_mutation_generation_; }
 
     Node& append_child(std::unique_ptr<Node> child);
     Node& insert_child(std::unique_ptr<Node> child, std::size_t index);
@@ -157,6 +159,7 @@ struct Node : public EventTarget {
 
 private:
     friend void mark_dirty(Node& node, DomDirtyFlags flags);
+    void invalidate_structure_before_teardown() noexcept;
     struct DestroyObserverEntry {
         DestroyObserver observer = nullptr;
         void* context = nullptr;
@@ -165,6 +168,8 @@ private:
     std::vector<DestroyObserverEntry> destroy_observers_;
     MutationObserver mutation_observer_ = nullptr;
     void* mutation_observer_context_ = nullptr;
+    std::uint64_t style_mutation_generation_ = 0;
+    std::uint64_t structural_mutation_generation_ = 0;
 };
 
 std::unique_ptr<Node> make_element(std::string tag_name);

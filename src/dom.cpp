@@ -330,6 +330,7 @@ void Node::set_text_content(std::string value) {
         auto child = make_text(std::move(value));
         replacement_children.push_back(std::move(child));
     }
+    invalidate_structure_before_teardown();
     destroy_node_list_iterative(children);
     children.swap(replacement_children);
     if (!children.empty()) {
@@ -339,6 +340,18 @@ void Node::set_text_content(std::string value) {
     }
     form_control_state.reset();
     mark_dirty(*this, DomDirtyTree | DomDirtyText | DomDirtyLayout);
+}
+
+void Node::invalidate_structure_before_teardown() noexcept {
+    Node* root = this;
+    for (Node* current = this; current != nullptr; current = current->parent) {
+        current->dirty_flags |= DomDirtyTree | DomDirtyText | DomDirtyLayout;
+        root = current;
+    }
+    local_dirty_flags |= DomDirtyTree | DomDirtyText | DomDirtyLayout;
+    ++root->mutation_generation;
+    root->structural_mutation_generation_ = root->mutation_generation;
+    style_mutation_generation_ = root->mutation_generation;
 }
 
 std::string Node::text_content() const {
@@ -543,6 +556,10 @@ void mark_dirty(Node& node, DomDirtyFlags flags) {
         root = current;
     }
     ++root->mutation_generation;
+    if (flags & (DomDirtyAttributes | DomDirtyStyle | DomDirtyTree))
+        node.style_mutation_generation_ = root->mutation_generation;
+    if (flags & DomDirtyTree)
+        root->structural_mutation_generation_ = root->mutation_generation;
     // Snapshot the registration so reentrant changes affect subsequent writes.
     const auto observer = node.mutation_observer_;
     void* const context = node.mutation_observer_context_;

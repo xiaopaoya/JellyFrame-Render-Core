@@ -577,6 +577,234 @@ void render_tree_can_use_monotonic_arena() {
     check(find_first_text(*render_tree) != nullptr, "arena render tree contains text");
 }
 
+void tracked_style_reuse_preserves_values_and_invalidates_precisely() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse(
+        "<html><body><main><p id='first'>Alpha</p><p id='second'>Beta</p></main></body></html>");
+    StyleResolver resolver(css_parser.parse(
+        "p { color: #123456; } #first { font-size: 20px; } .changed { color: #aa2200; }"));
+    RenderTreeOptions options;
+    RenderTreeStyleReuse first_reuse;
+    check(first_reuse.prepare_tracked(*document, resolver, options),
+          "initial tracked style provenance is admitted");
+    options.style_reuse = &first_reuse;
+    RenderObjectPtr first_tree = RenderTreeBuilder(resolver, options).build(*document);
+    check(first_tree && first_reuse.complete(*first_tree),
+          "initial tracked tree publishes a complete reusable snapshot");
+
+    Node* first = const_cast<Node*>(find_first_by_id(*first_tree, "first")->node);
+    const auto structure = document->structural_mutation_generation();
+    clear_dirty_flags(*document);
+    first->set_text_content("A longer label");
+    check(document->structural_mutation_generation() == structure,
+          "text-only mutation retains structural provenance");
+
+    resolver.set_interaction_state(first, nullptr, nullptr);
+    RenderTreeStyleReuse text_reuse;
+    check(text_reuse.prepare_tracked(*document, resolver, options, &first_reuse),
+          "tracked provenance admits text and irrelevant pointer changes");
+    options.style_reuse = &text_reuse;
+    RenderObjectPtr text_tree = RenderTreeBuilder(resolver, options).build(*document);
+    check(text_tree && text_reuse.reused_styles() > 0,
+          "unchanged computed styles are reused after a text mutation");
+    check(text_reuse.complete(*text_tree), "text-updated tree completes the reuse state");
+    check(render_text_exists(*text_tree, "A longer label"), "text update reaches the new render tree");
+    const RenderObject* second_style = find_first_by_id(*text_tree, "second");
+    check(second_style && second_style->style.color.r == 0x12 &&
+          second_style->style.color.g == 0x34 && second_style->style.color.b == 0x56,
+          "reused sibling retains the computed style value");
+
+    first->set_attribute("class", "changed");
+    RenderTreeStyleReuse style_reuse;
+    check(style_reuse.prepare_tracked(*document, resolver, options, &text_reuse),
+          "tracked style mutation keeps the admitted document");
+    options.style_reuse = &style_reuse;
+    RenderObjectPtr style_tree = RenderTreeBuilder(resolver, options).build(*document);
+    check(style_tree && style_reuse.reused_styles() > 0,
+          "unaffected siblings remain reusable after a local style change");
+    const RenderObject* changed = find_first_by_id(*style_tree, "first");
+    check(changed && changed->style.color.r == 0xaa && changed->style.color.g == 0x22,
+          "changed node resolves its new style");
+    check(style_reuse.complete(*style_tree), "style-updated tree completes the reuse state");
+
+    const auto old_structure = document->structural_mutation_generation();
+    auto& main = *document->children.front()->children.front()->children.front();
+    main.append_child(make_element("p"));
+    check(document->structural_mutation_generation() > old_structure,
+          "tree mutations advance durable structural provenance");
+    RenderTreeStyleReuse structural_reuse;
+    check(structural_reuse.prepare_tracked(*document, resolver, options, &style_reuse),
+          "structural change restarts the tracked snapshot");
+    options.style_reuse = &structural_reuse;
+    RenderObjectPtr structural_tree = RenderTreeBuilder(resolver, options).build(*document);
+    check(structural_tree && structural_reuse.reused_styles() == 0,
+          "structural change never dereferences the prior cached render tree");
+    check(structural_reuse.complete(*structural_tree),
+          "rebuilt structure can seed the next tracked snapshot");
+
+    StyleResolver refused(css_parser.parse("p:hover { color: #f00; }"));
+    RenderTreeStyleReuse refused_reuse;
+    check(!refused_reuse.prepare_tracked(*document, refused, options),
+          "interaction-dependent selector rules refuse scoped style reuse");
+}
+
+void tracked_style_reuse_validates_public_node_mutations() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse(
+        "<html><body><main><p id='first'>Alpha</p><p id='second'>Beta</p></main></body></html>");
+    StyleResolver resolver(css_parser.parse(
+        "p { color: #123456; } .changed { color: #aa2200; }"));
+    RenderTreeOptions options;
+    RenderTreeStyleReuse first_reuse;
+    check(first_reuse.prepare_tracked(*document, resolver, options),
+          "tracked snapshot accepts the initial public DOM values");
+    options.style_reuse = &first_reuse;
+    RenderObjectPtr first_tree = RenderTreeBuilder(resolver, options).build(*document);
+    check(first_tree && first_reuse.complete(*first_tree),
+          "initial tracked snapshot completes before direct-field checks");
+
+    Node* first = const_cast<Node*>(find_first_by_id(*first_tree, "first")->node);
+    first->attributes["class"] = "changed";
+    RenderTreeStyleReuse attribute_reuse;
+    check(attribute_reuse.prepare_tracked(*document, resolver, options, &first_reuse),
+          "tracked reuse remains available after a direct public attribute write");
+    options.style_reuse = &attribute_reuse;
+    RenderObjectPtr attribute_tree = RenderTreeBuilder(resolver, options).build(*document);
+    const RenderObject* changed = find_first_by_id(*attribute_tree, "first");
+    check(changed && changed->style.color.r == 0xaa && changed->style.color.g == 0x22,
+          "direct public attribute writes cannot reuse stale computed styles");
+    check(attribute_reuse.complete(*attribute_tree),
+          "the directly-mutated tree publishes a fresh tracked snapshot");
+
+    Node* main = const_cast<Node*>(find_first_by_tag(*attribute_tree, "main")->node);
+    const auto removed = std::find_if(main->children.begin(), main->children.end(), [](const auto& child) {
+        return child->attribute("id") == "first";
+    });
+    check(removed != main->children.end(), "raw structural mutation target exists");
+    main->children.erase(removed);
+    RenderTreeStyleReuse structure_reuse;
+    check(structure_reuse.prepare_tracked(*document, resolver, options, &attribute_reuse),
+          "tracked reuse detects a public child-vector edit before reading prior node pointers");
+    options.style_reuse = &structure_reuse;
+    RenderObjectPtr structure_tree = RenderTreeBuilder(resolver, options).build(*document);
+    check(structure_tree && find_first_by_id(*structure_tree, "first") == nullptr &&
+          find_first_by_id(*structure_tree, "second") != nullptr,
+          "direct public child removal rebuilds the current render tree");
+    check(structure_reuse.reused_styles() == 0,
+          "direct public structural edits do not reuse objects from the old tree");
+}
+
+void tracked_style_reuse_invalidates_context_and_root_dependents() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse(
+        "<html id='root'><body><main><p id='first'>Alpha</p><p id='second'>Beta</p></main></body></html>");
+    StyleResolver resolver(css_parser.parse(
+        "#root { color: #123456; } #root.changed { color: #aa2200; }"));
+    RenderTreeOptions options;
+    RenderTreeStyleReuse first_reuse;
+    check(first_reuse.prepare_tracked(*document, resolver, options),
+          "tracked snapshot accepts a resolver with inherited root styles");
+    options.style_reuse = &first_reuse;
+    RenderObjectPtr first_tree = RenderTreeBuilder(resolver, options).build(*document);
+    check(first_tree && first_reuse.complete(*first_tree),
+          "initial inherited-style tree completes");
+
+    const RenderObject* second_before = find_first_by_id(*first_tree, "second");
+    check(second_before && second_before->style.color.r == 0x12,
+          "sibling initially inherits the root color");
+    Node* html = const_cast<Node*>(find_first_by_id(*first_tree, "root")->node);
+    html->attributes["class"] = "changed";
+    RenderTreeStyleReuse root_reuse;
+    check(root_reuse.prepare_tracked(*document, resolver, options, &first_reuse),
+          "tracked snapshot accepts a direct root attribute update");
+    options.style_reuse = &root_reuse;
+    RenderObjectPtr root_tree = RenderTreeBuilder(resolver, options).build(*document);
+    const RenderObject* second_after = find_first_by_id(*root_tree, "second");
+    check(second_after && second_after->style.color.r == 0xaa &&
+          second_after->style.color.g == 0x22,
+          "root style changes invalidate all inherited descendant styles");
+    check(root_reuse.complete(*root_tree), "root-updated tree completes its snapshot");
+
+    StyleResolver replacement(css_parser.parse("#root { color: #204080; }"));
+    resolver = std::move(replacement);
+    RenderTreeStyleReuse resolver_reuse;
+    check(resolver_reuse.prepare_tracked(*document, resolver, options, &root_reuse),
+          "tracked snapshot restarts after replacing resolver rules in place");
+    options.style_reuse = &resolver_reuse;
+    RenderObjectPtr resolver_tree = RenderTreeBuilder(resolver, options).build(*document);
+    second_after = find_first_by_id(*resolver_tree, "second");
+    check(second_after && second_after->style.color.r == 0x20 &&
+          second_after->style.color.g == 0x40 && second_after->style.color.b == 0x80,
+          "resolver context changes cannot reuse styles from the previous stylesheet");
+    check(resolver_reuse.reused_styles() == 0,
+          "resolver replacement starts a fresh style provenance snapshot");
+    check(resolver_reuse.complete(*resolver_tree), "resolver-updated tree completes its snapshot");
+}
+
+void style_reuse_rechecks_public_mutations_between_prepare_and_build() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse("<html><body><p id='target'>Label</p></body></html>");
+    StyleResolver resolver(css_parser.parse("p { color: #123456; } .changed { color: #aa2200; }"));
+    RenderTreeOptions options;
+    RenderTreeStyleReuse first_reuse;
+    check(first_reuse.prepare_tracked(*document, resolver, options),
+          "initial tracked snapshot prepares for the interleaved-mutation case");
+    options.style_reuse = &first_reuse;
+    RenderObjectPtr first_tree = RenderTreeBuilder(resolver, options).build(*document);
+    check(first_tree && first_reuse.complete(*first_tree),
+          "initial snapshot completes before the interleaved mutation");
+
+    RenderTreeStyleReuse next_reuse;
+    check(next_reuse.prepare_tracked(*document, resolver, options, &first_reuse),
+          "next tracked snapshot prepares before the public-field write");
+    Node* target = const_cast<Node*>(find_first_by_id(*first_tree, "target")->node);
+    target->attributes["class"] = "changed";
+    options.style_reuse = &next_reuse;
+    RenderObjectPtr updated_tree = RenderTreeBuilder(resolver, options).build(*document);
+    const RenderObject* updated = find_first_by_id(*updated_tree, "target");
+    check(updated && updated->style.color.r == 0xaa && updated->style.color.g == 0x22,
+          "builder revalidates public style inputs after prepare");
+    check(next_reuse.reused_styles() == 0,
+          "interleaved public mutation falls back instead of reusing the prepared snapshot");
+    check(!next_reuse.complete(*updated_tree),
+          "a snapshot invalidated between prepare and build cannot be published");
+
+    RenderTreeStyleReuse structural_reuse;
+    check(structural_reuse.prepare_tracked(*document, resolver, options, &first_reuse),
+          "structural snapshot prepares before the public child-vector edit");
+    Node* body = const_cast<Node*>(find_first_by_tag(*updated_tree, "body")->node);
+    body->children.clear();
+    options.style_reuse = &structural_reuse;
+    RenderObjectPtr current_tree = RenderTreeBuilder(resolver, options).build(*document);
+    check(current_tree && find_first_by_id(*current_tree, "target") == nullptr,
+          "builder never traverses stale cached nodes after an interleaved child deletion");
+    check(structural_reuse.reused_styles() == 0,
+          "interleaved structural mutation also triggers a full style fallback");
+}
+
+void style_reuse_rejects_a_tree_from_a_different_builder() {
+    HtmlParser html_parser;
+    CssParser css_parser;
+    auto document = html_parser.parse("<html><body><p>Label</p></body></html>");
+    StyleResolver resolver(css_parser.parse("p { color: #123456; }"));
+    RenderTreeOptions options;
+    RenderTreeStyleReuse reuse;
+    check(reuse.prepare_tracked(*document, resolver, options),
+          "tracked snapshot prepares for its matching builder");
+
+    options.style_reuse = &reuse;
+    RenderObjectPtr expected_tree = RenderTreeBuilder(resolver, options).build(*document);
+    check(expected_tree != nullptr, "matching builder produces the expected tree");
+    RenderObjectPtr unrelated_tree = RenderTreeBuilder(resolver).build(*document);
+    check(unrelated_tree != nullptr, "independent builder produces an unrelated tree");
+    check(!reuse.complete(*unrelated_tree),
+          "reuse completion rejects a tree from another builder invocation");
+}
+
 } // namespace
 
 int main() {
@@ -597,6 +825,11 @@ int main() {
         render_tree_respects_object_budget();
         render_tree_reports_object_budget_diagnostic();
         render_tree_can_use_monotonic_arena();
+        tracked_style_reuse_preserves_values_and_invalidates_precisely();
+        tracked_style_reuse_validates_public_node_mutations();
+        tracked_style_reuse_invalidates_context_and_root_dependents();
+        style_reuse_rechecks_public_mutations_between_prepare_and_build();
+        style_reuse_rejects_a_tree_from_a_different_builder();
     } catch (const std::exception& error) {
         std::cerr << "render tree test failed: " << error.what() << '\n';
         return 1;

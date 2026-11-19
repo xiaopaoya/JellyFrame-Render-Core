@@ -564,6 +564,8 @@ public:
     StyleResolverStatistics statistics() const;
     InteractionInvalidationHints interaction_invalidation_hints() const;
     void set_interaction_state(const Node* hovered_node, const Node* active_node, const Node* focused_node);
+    bool permits_scoped_style_reuse() const;
+    std::uint64_t scoped_style_context_generation() const noexcept { return scoped_style_context_generation_; }
 
 private:
     friend struct detail::BackgroundResourceTransaction;
@@ -586,6 +588,7 @@ private:
     mutable std::unique_ptr<detail::ScalarCascadeCache> scalar_cache_;
     InteractionInvalidationHints interaction_hints_;
     std::uint64_t interaction_state_generation_ = 0;
+    std::uint64_t scoped_style_context_generation_ = 0;
     bool has_custom_property_declarations_ = false;
     // Lazily populated only by a supported CSS url(). The id is packed in the
     // existing optional background overlay word, so pages without url() do not
