@@ -216,7 +216,8 @@ struct LayoutEngineOptions {
     LayoutIntrinsicQueryStatistics* intrinsic_query_statistics = nullptr;
     // Bounded consumers: empty static block img in an ordinary block ancestor
     // chain, admitted shared-inline paragraphs, and start-aligned static leaf
-    // img items with integer width and auto height in a single fixed-column Grid.
+    // img items with auto height and integer width or unconstrained, undecorated
+    // auto width in a single fixed-column Grid.
     // Provider/context are borrowed through each layout call.
     NaturalImageSizingOptions natural_image_sizing;
     SharedInlineLayoutOptions shared_inline;
