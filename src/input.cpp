@@ -177,14 +177,17 @@ InputController::InputController(const LayerNode& layer_tree,
     : layer_tree_(layer_tree),
       invalidation_options_(invalidation_options) {
     if (dispatch_initial_autofocus && layer_tree_.box != nullptr) {
-        set_focused_node(find_autofocus_node(*layer_tree_.box));
+        try {
+            set_focused_node(find_autofocus_node(*layer_tree_.box));
+        } catch (...) {
+            remove_observers_from(0);
+            throw;
+        }
     }
 }
 
 InputController::~InputController() {
-    for (Node* node : observed_nodes_) {
-        if (node != nullptr) node->remove_destroy_observer(observed_node_destroyed, this);
-    }
+    remove_observers_from(0);
 }
 
 const Node* InputController::hovered_node() const {
@@ -213,8 +216,8 @@ void InputController::set_focused_node(const Node* node) {
     const Node* previous = focused_node_;
     mark_interaction_style_dirty(previous, invalidation_options_.focus_style);
     mark_interaction_style_dirty(node, invalidation_options_.focus_style);
-    focused_node_ = node;
     observe_node(node);
+    focused_node_ = node;
     if (previous != nullptr) {
         Event blur("blur", false, false);
         dispatch_event(*mutable_node(previous), blur);
@@ -228,13 +231,22 @@ void InputController::set_focused_node(const Node* node) {
 void InputController::set_interaction_state(const Node* hovered_node,
                                             const Node* active_node,
                                             const Node* focused_node) {
-    hovered_node_ = accepts_node(hovered_node) && visible_node(hovered_node) ? hovered_node : nullptr;
-    active_node_ = accepts_node(active_node) && visible_node(active_node) ? active_node : nullptr;
-    focused_node_ = accepts_node(focused_node) && visible_node(focused_node) ? focused_node : nullptr;
+    hovered_node = accepts_node(hovered_node) && visible_node(hovered_node) ? hovered_node : nullptr;
+    active_node = accepts_node(active_node) && visible_node(active_node) ? active_node : nullptr;
+    focused_node = accepts_node(focused_node) && visible_node(focused_node) ? focused_node : nullptr;
+    const std::size_t prior_observers = observed_nodes_.size();
+    try {
+        observe_node(hovered_node);
+        observe_node(active_node);
+        observe_node(focused_node);
+    } catch (...) {
+        remove_observers_from(prior_observers);
+        throw;
+    }
+    hovered_node_ = hovered_node;
+    active_node_ = active_node;
+    focused_node_ = focused_node;
     active_box_ = find_layout_box_for_node(layer_tree_.box, active_node_);
-    observe_node(hovered_node_);
-    observe_node(active_node_);
-    observe_node(focused_node_);
     unobserve_unused_nodes();
 }
 
@@ -242,8 +254,9 @@ void InputController::set_modal_root(const Node* node) {
     if (node == modal_root_) {
         return;
     }
-    modal_root_ = visible_node(node) ? node : nullptr;
-    observe_node(modal_root_);
+    node = visible_node(node) ? node : nullptr;
+    observe_node(node);
+    modal_root_ = node;
     clear_pointer_state();
     if (modal_root_ == nullptr) {
         return;
@@ -708,8 +721,8 @@ void InputController::set_hovered_node(const Node* node) {
         mark_interaction_style_dirty(hovered_node_, invalidation_options_.hover_style);
         mark_interaction_style_dirty(node, invalidation_options_.hover_style);
     }
-    hovered_node_ = node;
     observe_node(node);
+    hovered_node_ = node;
     unobserve_unused_nodes();
 }
 
@@ -718,9 +731,9 @@ void InputController::set_active_node(const Node* node, const LayoutBox* box) {
         mark_interaction_style_dirty(active_node_, invalidation_options_.active_style);
         mark_interaction_style_dirty(node, invalidation_options_.active_style);
     }
+    observe_node(node);
     active_node_ = node;
     active_box_ = box;
-    observe_node(node);
     unobserve_unused_nodes();
 }
 
@@ -743,8 +756,21 @@ void InputController::observe_node(const Node* node) {
     if (node == nullptr) return;
     Node* mutable_node_ptr = const_cast<Node*>(node);
     if (std::find(observed_nodes_.begin(), observed_nodes_.end(), mutable_node_ptr) == observed_nodes_.end()) {
-        mutable_node_ptr->add_destroy_observer(observed_node_destroyed, this);
         observed_nodes_.push_back(mutable_node_ptr);
+        try {
+            mutable_node_ptr->add_destroy_observer(observed_node_destroyed, this);
+        } catch (...) {
+            observed_nodes_.pop_back();
+            throw;
+        }
+    }
+}
+
+void InputController::remove_observers_from(std::size_t first) noexcept {
+    while (observed_nodes_.size() > first) {
+        Node* node = observed_nodes_.back();
+        observed_nodes_.pop_back();
+        node->remove_destroy_observer(observed_node_destroyed, this);
     }
 }
 
