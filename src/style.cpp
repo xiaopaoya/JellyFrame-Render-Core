@@ -1362,7 +1362,7 @@ bool parse_simple_grid_template_columns(const std::string& raw_value,
         }
         ++parsed_count;
     }
-    if (parsed_count < 2) {
+    if (parsed_count == 0 || (parsed_count == 1 && parsed[0] <= 0)) {
         return false;
     }
     widths = parsed;
