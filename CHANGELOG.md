@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.1 / ABI11
+
+- Preserve intrinsic image dimensions for start-aligned block images with
+  auto height in a single fixed Grid column. This covers integer widths and
+  unconstrained, undecorated auto widths.
+- Publish input state only after DOM destruction observers are registered.
+  Roll back new registrations on failure and clean up observers if autofocus
+  throws during construction.
+
 ## 0.12.0 / ABI11
 
 ABI11 changes the public `Node` layout. Rebuild every Core consumer.
