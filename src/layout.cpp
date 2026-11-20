@@ -938,6 +938,7 @@ struct GridPlacement {
     int column_span = 1;
     int row_span = 1;
     bool fallback_block = false;
+    bool preserve_natural_width = false;
 };
 
 int grid_intrinsic_outer_width(const LayoutBox& box, const TextSystem* text_system,
@@ -3522,7 +3523,7 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
     const bool natural_image_column = natural_images_ && options_.natural_image_sizing.provider.intrinsic_size &&
         box.style.position_type == PositionType::Static && box.style.grid_template_column_count == 1 &&
         box.style.grid_template_column_widths[0] > 0 && depth < std::max<std::size_t>(1, options_.max_layout_depth);
-    for (const GridPlacement& placement : placements) {
+    for (GridPlacement& placement : placements) {
         LayoutBox& child = *placement.child;
         if (placement.fallback_block) {
             layout_box(child, 0, 0, content_width, 0, depth + 1);
@@ -3532,17 +3533,25 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
         const int row_span = placement.row_span;
         const int item_width = grid_item_width(columns, placement.column, column_span);
         const auto& style = child.style;
-        const bool natural_height_item = natural_image_column && style.grid_column_span == 1 && row_span == 1 &&
+        const bool natural_image_item = natural_image_column && style.grid_column_span == 1 && row_span == 1 &&
             style.position_type == PositionType::Static &&
             flex_cross_axis_alignment(child, box.style.align_items) == AlignItems::Start &&
-            style.display == Display::Block && style.width >= 0 && style.width_percent == -1 &&
+            style.display == Display::Block && style.width_percent == -1 &&
             style.height == -1 && style.height_percent == -1 && style.computed_sizes.empty() &&
             !has_aspect_ratio(style) && child.children.empty() && child.node && box.node &&
             child.node->parent == box.node && child.node->tag_name == "img" && child.node->children.empty() &&
             !child.node->attribute("src").empty();
+        const bool unconstrained_auto_width = natural_image_item && style.width == -1 &&
+            style.min_width == -1 && style.max_width == -1 && style.min_height == -1 && style.max_height == -1 &&
+            style.min_width_percent == -1 && style.max_width_percent == -1 &&
+            style.min_height_percent == -1 && style.max_height_percent == -1 &&
+            !style.margin_left_auto && !style.margin_right_auto &&
+            horizontal_edges(style.padding) == 0 && vertical_edges(style.padding) == 0 &&
+            horizontal_edges(style.border_width) == 0 && vertical_edges(style.border_width) == 0;
         // Reuse the per-layout metadata snapshot and precise replaced-size solver.
-        const bool has_natural_height = natural_height_item &&
+        const bool has_natural_size = natural_image_item && (style.width >= 0 || unconstrained_auto_width) &&
             natural_images_->metadata(*child.node).state == ImageIntrinsicSizeState::Known;
+        placement.preserve_natural_width = has_natural_size && unconstrained_auto_width;
         const PreciseBoxContext natural_context{static_cast<std::int64_t>(item_width) * 1000};
         SizeOverrideRestore restore(child.style, detail::SizeProperty::Width);
         const auto install_grid_mixed_width = [&](detail::SizeProperty property, int& scalar) {
@@ -3568,7 +3577,9 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
                 "Use a supported definite-width Grid item.");
             return 0;
         }
-        if (child.style.width < 0 && child.style.width_percent < 0) {
+        // An admitted auto-width image keeps its natural width, even past a fixed
+        // track edge. Unknown or refused metadata retains the track-width fallback.
+        if (!placement.preserve_natural_width && child.style.width < 0 && child.style.width_percent < 0) {
             child.style.computed_sizes.clear(detail::SizeProperty::Width);
             child.style.table_properties &= ~table_sizing_provenance_bit(detail::SizeProperty::Width);
             child.style.width = item_width;
@@ -3576,7 +3587,7 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
             child.style.box_sizing_border_box = true;
         }
         const int child_height = layout_box(child, 0, 0, item_width, 0, depth + 1,
-            has_natural_height ? &natural_context : nullptr);
+            has_natural_size ? &natural_context : nullptr);
         const int min_allocated_height = bounded_add(
             bounded_non_negative_multiply(box.style.grid_auto_row_min, row_span),
             bounded_non_negative_multiply(row_gap, row_span - 1));
@@ -3688,7 +3699,7 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
             authored_horizontal_size = authored_horizontal_size ||
                 placement.child->style.computed_sizes.read_typed(property, kind, value, percentage);
         }
-        if (!authored_horizontal_size)
+        if (!authored_horizontal_size && !placement.preserve_natural_width)
             placement.child->rect.width = grid_item_width(columns, placement.column, placement.column_span);
     }
 
