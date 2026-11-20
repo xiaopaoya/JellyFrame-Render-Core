@@ -2,6 +2,7 @@
 #include "render_core/dom.h"
 #include "render_core/feature_config.h"
 #include "render_core/form_control.h"
+#include "render_core/input.h"
 #if JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED
 #include "render_core/form_submission.h"
 #endif
@@ -51,6 +52,91 @@ namespace {
 void check(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
+
+struct InputFixture {
+    Node previous{NodeType::Element};
+    Node hovered{NodeType::Element};
+    Node active{NodeType::Element};
+    Node focused{NodeType::Element};
+    LayoutBox layout;
+    LayerNode layer;
+
+    InputFixture() {
+        for (Node* node : {&previous, &hovered, &active, &focused}) {
+            node->tag_name = "button";
+            LayoutBoxPtr box(new LayoutBox);
+            box->node = node;
+            layout.children.push_back(std::move(box));
+        }
+        layer.box = &layout;
+    }
+};
+
+void input_focus_admission_preserves_state_on_allocation_failure() {
+    for (long fail_after : {0L, 1L}) {
+        InputFixture fixture;
+        InputController input(fixture.layer, {false, false, false}, false);
+        allocation_countdown = fail_after;
+        bool threw = false;
+        try {
+            input.set_focused_node(&fixture.focused);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        allocation_countdown = -1;
+        check(threw && input.focused_node() == nullptr, "failed focus observation preserves focus state");
+        input.set_focused_node(&fixture.focused);
+        check(input.focused_node() == &fixture.focused, "focus admits retry after allocation failure");
+    }
+}
+
+void input_interaction_restore_preserves_all_prior_state_on_allocation_failure() {
+    long restore_requests = 0;
+    {
+        InputFixture fixture;
+        InputController input(fixture.layer, {false, false, false}, false);
+        input.set_interaction_state(&fixture.previous, &fixture.previous, &fixture.previous);
+        allocation_requests = 0;
+        count_allocation_requests = true;
+        input.set_interaction_state(&fixture.hovered, &fixture.active, &fixture.focused);
+        count_allocation_requests = false;
+        restore_requests = allocation_requests;
+    }
+    check(restore_requests >= 3, "restoring three new nodes admits three observers");
+    for (long fail_after = 0; fail_after < restore_requests; ++fail_after) {
+        InputFixture fixture;
+        InputController input(fixture.layer, {false, false, false}, false);
+        input.set_interaction_state(&fixture.previous, &fixture.previous, &fixture.previous);
+        allocation_countdown = fail_after;
+        bool threw = false;
+        try {
+            input.set_interaction_state(&fixture.hovered, &fixture.active, &fixture.focused);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        allocation_countdown = -1;
+        check(threw && input.hovered_node() == &fixture.previous &&
+              input.active_node() == &fixture.previous && input.focused_node() == &fixture.previous,
+              "failed interaction restore retains all prior state");
+        input.set_interaction_state(&fixture.hovered, &fixture.active, &fixture.focused);
+        check(input.hovered_node() == &fixture.hovered && input.active_node() == &fixture.active &&
+              input.focused_node() == &fixture.focused, "interaction restore admits a retry");
+    }
+}
+
+void input_autofocus_constructor_detaches_observer_when_callback_throws() {
+    InputFixture fixture;
+    fixture.focused.set_attribute("autofocus", "");
+    fixture.focused.add_event_listener("focus", [](Event&) { throw std::runtime_error("focus callback"); });
+    bool threw = false;
+    try {
+        InputController input(fixture.layer, {false, false, false});
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    check(threw, "autofocus callback exceptions reach the caller");
+}
+
 struct Record {
     Node* owner;
     DomDirtyFlags flags;
@@ -319,6 +405,9 @@ int main() {
     try {
         exact_values_inheritance_and_matching_clear();
         registration_allocation_failure_is_atomic_and_clear_is_noexcept();
+        input_focus_admission_preserves_state_on_allocation_failure();
+        input_interaction_restore_preserves_all_prior_state_on_allocation_failure();
+        input_autofocus_constructor_detaches_observer_when_callback_throws();
         deep_tree_and_wide_tree_cleanup_survive_allocation_failure();
         callback_reentrance_exceptions_and_destroy_observers_are_independent();
         attachment_return_survives_reentrant_sibling_insertions();

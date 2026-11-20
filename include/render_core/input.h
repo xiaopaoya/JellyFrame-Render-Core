@@ -4,6 +4,7 @@
 #include "render_core/hit_test.h"
 #include "render_core/layer_tree.h"
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -117,6 +118,7 @@ private:
     void update_hover(const Node* next_hover, const PointerInput& input);
     static void observed_node_destroyed(Node& node, void* context);
     void observe_node(const Node* node);
+    void remove_observers_from(std::size_t first) noexcept;
     bool observes_node(const Node* node) const;
     void unobserve_unused_nodes();
     std::vector<Node*> observed_nodes_;
