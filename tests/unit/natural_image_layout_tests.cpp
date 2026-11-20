@@ -214,6 +214,72 @@ bool paint(FrameBuffer& target, const ImagePaintRequest& request, void* context)
                 target.pixel(x,y) = {220,30,40,255};
     return true;
 }
+void grid_item_natural_height() {
+    auto dom = HtmlParser{}.parse("<div id='parent'><img id='i' src='image'></div>");
+    const std::string css = "html,body{margin:0;padding:0}"
+        "#parent{width:400px;height:300px;display:grid;grid-template-columns:200px;align-items:start}"
+        "#i{display:block;margin:0;padding:0;border:0;box-sizing:content-box;width:120px;height:auto}";
+    StyleResolver styles(CssParser{}.parse(css));
+    Snapshot snapshot;
+    snapshot.size = {ImageIntrinsicSizeState::Known, 320, 160};
+    NaturalImageSizingStatistics stats;
+    MonotonicArena arena(256);
+    auto tree = LayoutEngine(styles, options(snapshot, stats)).layout(*dom, 500, 400, arena);
+    const auto& image = find(*tree, "i");
+    check(image.rect.width == 120 && image.rect.height == 60 &&
+          image.content_geometry.width == 120000 && image.content_geometry.height() == 60000,
+          "grid-width fixture preserves 120x60 natural-ratio geometry");
+    check(stats.queries == 1 && snapshot.metadata_calls == 1, "image reads metadata once");
+    const auto& parent = find(*tree, "parent");
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    check(parent.style.display == Display::Grid && parent.style.grid_template_column_count == 1 &&
+          parent.style.grid_template_column_widths[0] == 200, "fixture uses an explicit fixed Grid track");
+
+    auto two_items = HtmlParser{}.parse("<div id='parent'><img id='i' src='image'><div id='next'></div></div>");
+    StyleResolver two_rows_styles(CssParser{}.parse(css + "#parent{height:auto}#next{display:block;height:10px}"));
+    Snapshot two_rows_snapshot;
+    two_rows_snapshot.size = snapshot.size;
+    auto two_rows = LayoutEngine(two_rows_styles, options(two_rows_snapshot, stats)).layout(*two_items, 500, 400);
+    const auto& next = find(*two_rows, "next");
+    check(next.rect.x == image.rect.x && next.rect.y == image.rect.y + image.rect.height,
+          "the second item starts below the natural-height image in the fixed column");
+
+    for (const char* override_css : {"#parent{grid-template-columns:1fr}", "#i{width:auto}",
+             "#i{width:120.5px}", "#i{height:20px}", "#i{height:25%}", "#i{position:relative}",
+             "#i{align-self:stretch}", "#i{grid-column:span 2}"}) {
+        StyleResolver rejected_styles(CssParser{}.parse(css + override_css));
+        auto rejected = LayoutEngine(rejected_styles, options(snapshot, stats)).layout(*dom, 500, 400);
+        check(rejected && stats.queries == 0 && snapshot.metadata_calls == 1,
+              "other Grid image contexts do not request metadata");
+    }
+    auto legacy = LayoutEngine(styles).layout(*dom, 500, 400);
+    const auto& legacy_rect = find(*legacy, "i").rect;
+    Snapshot unavailable;
+    unavailable.size = {};
+    auto limited_options = options(unavailable, stats);
+    auto unknown = LayoutEngine(styles, limited_options).layout(*dom, 500, 400);
+    const auto& unknown_rect = find(*unknown, "i").rect;
+    check(unavailable.metadata_calls == 1 && stats.unknown == 1 &&
+          unknown_rect.width == legacy_rect.width && unknown_rect.height == legacy_rect.height,
+          "unknown metadata uses existing Grid geometry");
+    limited_options.natural_image_sizing.max_queries = 0;
+    auto exhausted = LayoutEngine(styles, limited_options).layout(*dom, 500, 400);
+    const auto& exhausted_rect = find(*exhausted, "i").rect;
+    check(unavailable.metadata_calls == 1 && stats.limit_refusals == 1 &&
+          exhausted_rect.width == legacy_rect.width && exhausted_rect.height == legacy_rect.height,
+          "Grid image respects the metadata query budget");
+#else
+    check(parent.style.display == Display::Block && parent.style.grid_template_column_count == 0,
+          "Flex/Grid-off keeps ordinary block image sizing");
+#endif
+    LayerTreeBuilderOptions layer_options;
+    layer_options.image_resolver = {resolve, &snapshot};
+    auto layers = LayerTreeBuilder(layer_options).build(*tree);
+    auto frame = SoftwareCompositor(ImagePainter{paint, &snapshot}).render(*layers, 500, 400, {255,255,255,255});
+    check(frame.pixel(2,59).g == 30 && frame.pixel(2,60).g == 255 &&
+          snapshot.metadata_calls == 1 && snapshot.resolve_calls == 1 && snapshot.paint_calls == 1,
+          "paint uses resolved image geometry without requesting metadata again");
+}
 void lifetime_and_fractional_paint() {
     auto dom = HtmlParser{}.parse("<div id='p'><img id='i' src='image'><img id='j' src='image'></div>");
     StyleResolver styles(CssParser{}.parse("*{margin:0;padding:0;border:0}#p{width:100.25px}img{display:block;width:37.5%}"));
@@ -252,6 +318,7 @@ void lifetime_and_fractional_paint() {
 int main() {
     try {
         sizing(); refusal_and_budgets(); arithmetic_bounds(); unsupported_contexts(); typed_mixed_geometry(); lifetime_and_fractional_paint();
+        grid_item_natural_height();
         std::cout << "Natural image block foundation passed; LayoutBox=" << sizeof(LayoutBox)
                   << " MemoEntry=" << sizeof(detail::NaturalImageSizingFrame::Entry) << '\n';
     } catch (const std::exception& error) {
