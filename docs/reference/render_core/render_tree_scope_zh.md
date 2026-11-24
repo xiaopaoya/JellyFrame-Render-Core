@@ -64,6 +64,8 @@ DOM + computed style
   `inline`、`initial` 和 `unset` 恢复默认显示方式。
 - 在标量 Flex/Grid 布局中，`display: contents` 元素上默认的
   `::before` 和 `::after` 生成纯文本时，各自形成独立项。
+- 这些伪元素显式指定 `display: contents` 时，生成的纯文本并入相邻匿名文本，
+  在共享段落支持范围内统一处理空白和换行。
 
 ## 明确延后
 

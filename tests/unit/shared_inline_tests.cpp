@@ -2262,6 +2262,64 @@ void generated_flex_grid_items_from_contents() {
 #endif
 }
 
+void flattened_generated_flex_grid_text() {
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    Fixture fixture;
+    for (const std::string display : {"flex", "grid"}) {
+        StyleResolver styles(CssParser{}.parse(
+            "*{margin:0;padding:0}#parent{display:" + display +
+            ";width:180px;grid-template-columns:40px 40px 40px;gap:4px;font-size:16px}"
+            "#tail{display:block;width:10px;height:12px}"
+            "#origin{display:contents}"
+            "#origin::before{display:contents;content:'B ';color:#ff0000}"
+            "#origin::after{display:contents;content:' '}"
+            "#empty{display:contents}#empty::before{display:contents;content:''}"));
+        auto dom = HtmlParser{}.parse(
+            "<div id=parent><span id=origin>A</span><span id=empty></span>B<i id=tail></i></div>");
+        auto reference = HtmlParser{}.parse("<div id=parent>B A B<i id=tail></i></div>");
+        const auto& source = find_node(*dom, "origin");
+        LayoutBoxPtr layout;
+        {
+            MonotonicArena arena;
+            auto render = RenderTreeBuilder(styles).build(*dom, arena);
+            layout = LayoutEngine(styles, fixture.options).layout(*render, 200, 100);
+        }
+        const auto& parent = find(*layout, "parent");
+        const auto reference_layout = LayoutEngine(styles, fixture.options).layout(*reference, 200, 100);
+        check(parent.children.size() == 2 && parent.children[0]->text_layout_cache.shared_inline &&
+              find(*layout, "tail").rect.x == find(*reference_layout, "tail").rect.x,
+              "flattened pseudo text joins one item and uses the same space as continuous text");
+
+        auto paint = fixture.layers;
+        paint.trace_owner_resolver.resolve = [](const Node& node, void*) -> std::uint32_t {
+            return node.attribute("id") == "origin" ? 42 : 0;
+        };
+        LayerTreeBuilder painter(paint);
+        const auto layers = painter.build(*layout);
+        const auto reference_layers = painter.build(*reference_layout);
+        check(glyphs(*layers) == glyphs(*reference_layers) && !glyphs(*layers).empty(),
+              "flattened generated fragments preserve continuous text positions and whitespace");
+        const auto commands = painter.flatten(*layers);
+        check(std::any_of(commands.begin(), commands.end(), [](const auto& command) {
+            return command.type() == DisplayCommandType::PreparedText &&
+                command.trace_owner_token == 42 && command.color.r == 255;
+        }), "flattened generated text traces its styled fragment to the DOM origin");
+        const auto& generated = *parent.children[0]->children.front();
+        check(HitTester{}.hit_test(*layers, generated.rect.x + 1, generated.rect.y + 1).node == &source,
+              "flattened generated text still hits its origin after render arena destruction");
+
+        auto only = HtmlParser{}.parse("<div id=parent><span id=origin></span><i id=tail></i></div>");
+        const auto only_layout = LayoutEngine(styles, fixture.options).layout(*only, 200, 100);
+        check(find(*only_layout, "parent").children.size() == 2 &&
+              !glyphs(*painter.build(*only_layout)).empty(), "a sole generated source creates an item");
+        auto& only_parent = find_node(*only, "parent");
+        check(only_parent.remove_child(find_node(*only, "origin")), "remove the sole generator");
+        check(glyphs(*painter.build(*only_layout)).empty(),
+              "a removed source no longer paints from its retained layout");
+    }
+#endif
+}
+
 void fractional_alignment() {
     Fixture f;
     for (const char* alignment : {"center", "end"}) {
@@ -2414,6 +2472,7 @@ int main() {
         flex_override_and_budget_fallback();
         anonymous_flex_grid_text();
         generated_flex_grid_items_from_contents();
+        flattened_generated_flex_grid_text();
         fractional_alignment();
         fractional_flex_allocations_preserve_text_wrap();
         partition_matrix_and_events();

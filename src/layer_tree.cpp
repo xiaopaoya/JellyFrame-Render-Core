@@ -660,7 +660,7 @@ TextCommandAlign text_command_align(TextAlign align) {
 Rect content_rect_for(const LayoutBox& box);
 
 std::string generated_before_text(const LayoutBox& box) {
-    if (box.style.before_content_kind == GeneratedContentKind::Text) {
+    if (is_generated_text(box.style.before_content_kind)) {
         return box.style.before_content_text;
     }
     if (box.style.before_content_kind == GeneratedContentKind::Counter && box.node != nullptr) {
@@ -670,7 +670,7 @@ std::string generated_before_text(const LayoutBox& box) {
 }
 
 std::string generated_after_text(const LayoutBox& box) {
-    if (box.style.after_content_kind == GeneratedContentKind::Text) {
+    if (is_generated_text(box.style.after_content_kind)) {
         return box.style.after_content_text;
     }
     if (box.style.after_content_kind == GeneratedContentKind::Counter && box.node != nullptr) {
