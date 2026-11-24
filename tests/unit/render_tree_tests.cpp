@@ -170,6 +170,7 @@ void html_dimension_attributes_are_low_priority_sizing_hints() {
     check(suffix && suffix->style.width == 80 && suffix->style.height == 24,
           "dimension attributes consume the HTML numeric prefix");
 
+    const std::string canvas_width_padding(61, '0');
     auto fractional_document = html_parser.parse(
         "<body><img id='fraction' width='64.5' height='32.25'>"
         "<object id='percent' width='37.5%garbage'></object>"
@@ -179,7 +180,9 @@ void html_dimension_attributes_are_low_priority_sizing_hints() {
         "<img id='tiny' width='0.0001' height='0.0002'>"
         "<img id='large' width='2147483648' height='1073741824'>"
         "<img id='clear' width='80' height='40' style='width:initial;height:unset;aspect-ratio:auto'>"
-        "<img id='priority' width='80' height='40' style='height:7px!important;height:9px'></body>");
+        "<img id='priority' width='80' height='40' style='height:7px!important;height:9px'>"
+        "<canvas id='long-canvas' width='+" + canvas_width_padding +
+        "24' height='12'></canvas></body>");
     auto fractional_tree = RenderTreeBuilder(resolver).build(*fractional_document);
     const auto find_fractional = [&](const RenderObject& root, const char* id) {
         const RenderObject* result = nullptr;
@@ -196,6 +199,7 @@ void html_dimension_attributes_are_low_priority_sizing_hints() {
     const auto* fraction = find_fractional(*fractional_tree, "fraction");
     const auto* percent = find_fractional(*fractional_tree, "percent");
     const auto* canvas = find_fractional(*fractional_tree, "canvas");
+    const auto* long_canvas = find_fractional(*fractional_tree, "long-canvas");
     const auto* negative = find_fractional(*fractional_tree, "negative");
     const auto* zero = find_fractional(*fractional_tree, "zero");
     check(fraction && fraction->style.width == 65 && fraction->style.height == 32 &&
@@ -206,6 +210,9 @@ void html_dimension_attributes_are_low_priority_sizing_hints() {
     check(canvas && canvas->style.aspect_ratio_width == 2 && canvas->style.aspect_ratio_height == 1 &&
               canvas->style.width == -1 && canvas->style.height == -1,
           "canvas dimensions contribute a ratio without becoming CSS sizes");
+    check(long_canvas && long_canvas->style.aspect_ratio_width == 2 &&
+              long_canvas->style.aspect_ratio_height == 1 && long_canvas->style.aspect_ratio_auto,
+          "long signed canvas dimensions contribute the expected ratio");
     check(negative && negative->style.aspect_ratio_width == 0 && negative->style.aspect_ratio_height == 0,
           "negative canvas dimensions are rejected");
     check(zero && zero->style.aspect_ratio_width == 0 && zero->style.aspect_ratio_height == 1,
