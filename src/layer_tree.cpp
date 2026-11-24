@@ -1547,8 +1547,17 @@ void paint_canonical_background(const LayoutBox& box, DisplayList& display_list,
     }
 }
 
+void report_retained_display_budget(const LayerTreeBuilderOptions& options, bool& reported) {
+    if (reported) return;
+    report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
+                      "display-command-limit", "Retained-tree display command budget was reached",
+                      "Increase max_display_commands for complex pages.");
+    reported = true;
+}
+
 void paint_box_self(const LayoutBox& box, DisplayList& display_list,
                     const LayerTreeBuilderOptions& options, std::size_t remaining_commands,
+                    bool& display_budget_reported,
                     bool suppress_ellipsis_generated = false) {
     const std::size_t box_command_begin = display_list.size();
     const Rect paint_rect = paint_rect_for(box);
@@ -1618,6 +1627,10 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
         const auto available = remaining_commands-std::min(used, remaining_commands);
         const auto image_count = binding.snapshot->atomic_placements.size();
         const auto required_commands = detail::shared_inline_command_count(binding, options.text_system);
+        if (required_commands > available) {
+            report_retained_display_budget(options, display_budget_reported);
+            return;
+        }
         if (binding.member == 0 && required_commands <= available &&
             image_count <= required_commands && detail::shared_inline_current(binding, options.text_system)) {
             struct SharedImageContext { const LayerTreeBuilderOptions* options; } image_context{&options};
@@ -2141,7 +2154,7 @@ LayerNodePtr LayerTreeBuilder::build_with_arena(const LayoutBox& root, Monotonic
 
     if (!root.style.visibility_hidden) {
         const std::size_t command_begin = root_layer->display_list.size();
-        paint_box_self(root, root_layer->display_list, options_, remaining_commands);
+        paint_box_self(root, root_layer->display_list, options_, remaining_commands, display_budget_reported);
         trim_display_list(root_layer->display_list, command_begin, remaining_commands, display_budget_reported);
         stamp_trace_owner(root_layer->display_list, command_begin, trace_owner_token_for(root, options_));
     }
@@ -2207,15 +2220,7 @@ void LayerTreeBuilder::trim_display_list(DisplayList& display_list,
     const std::size_t kept_commands = std::min(added_commands, remaining_commands);
     if (kept_commands < added_commands) {
         display_list.resize(command_begin + kept_commands);
-        if (!budget_reported) {
-        report_diagnostic(options_.diagnostics,
-                          DiagnosticStage::LayerTree,
-                          DiagnosticSeverity::Warning,
-                          "display-command-limit",
-                          "Retained-tree display command budget was reached; later commands were clipped",
-                          "Increase max_display_commands for complex pages.");
-            budget_reported = true;
-        }
+        report_retained_display_budget(options_, budget_reported);
     }
     remaining_commands -= kept_commands;
 }
@@ -2394,7 +2399,7 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
 
         if (!current_box->style.visibility_hidden) {
             const std::size_t command_begin = target_layer->display_list.size();
-            paint_box_self(*current_box, target_layer->display_list, options_, remaining_commands,
+            paint_box_self(*current_box, target_layer->display_list, options_, remaining_commands, display_budget_reported,
                 current.suppress_ellipsis_generated);
             if (target_layer == &current_layer) {
                 translate_display_commands(target_layer->display_list, command_begin, 0, -current.scroll_y);

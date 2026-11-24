@@ -1995,7 +1995,12 @@ void scrolling_topology_and_packet_refusal() {
     check(complete && failed>2,"paint transactional packet sweep reaches success");
 #endif
     auto low=f.layers;low.max_display_commands=1;
+    VectorDiagnosticSink budget_diagnostics;
+    low.diagnostics = &budget_diagnostics;
     check(glyphs(*LayerTreeBuilder(low).build(*layout)).empty(),"command budget refuses complete shared paragraph atomically");
+    check(budget_diagnostics.size() == 1 &&
+          budget_diagnostics.diagnostics().front().code == "display-command-limit",
+          "shared paragraph refusal reports the display command limit");
     // Replace a same-tag/same-count child and free the old Node. Whole membership
     // proof must fail before it can touch the freed descendant source pointer.
     auto* span=const_cast<Node*>(find(*layout,"a").node);
