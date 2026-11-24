@@ -2001,6 +2001,37 @@ void scrolling_topology_and_packet_refusal() {
     check(budget_diagnostics.size() == 1 &&
           budget_diagnostics.diagnostics().front().code == "display-command-limit",
           "shared paragraph refusal reports the display command limit");
+    auto exact = f.layers;
+    exact.max_layers = count_layers(*layers);
+    exact.max_display_commands = count_layer_display_commands(*layers);
+    LayerNodePtr strict;
+    check(LayerTreeBuilder(exact).build_strict(*layout, strict) == LayerTreeBuildStatus::Success &&
+              count_layer_display_commands(*strict) == exact.max_display_commands,
+          "strict shared paragraph accepts exact layer and command limits");
+    const auto* accepted = strict.get();
+    --exact.max_display_commands;
+    check(LayerTreeBuilder(exact).build_strict(*layout, strict) == LayerTreeBuildStatus::CommandLimit &&
+              strict.get() == accepted,
+          "strict shared paragraph rejects one missing command without replacing output");
+#if !defined(_MSC_VER) || !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
+    ++exact.max_display_commands;
+    LayerTreeBuilder strict_builder(exact);
+    bool built = false;
+    for (int allocation = 0; allocation < 200; ++allocation) {
+        allocations_until_failure = allocation;
+        const auto status = strict_builder.build_strict(*layout, strict);
+        allocations_until_failure = -1;
+        if (status == LayerTreeBuildStatus::Success) {
+            check(count_layer_display_commands(*strict) == exact.max_display_commands,
+                  "strict allocation sweep publishes the whole tree on success");
+            built = true;
+            break;
+        }
+        check(status == LayerTreeBuildStatus::AllocationFailure && strict.get() == accepted,
+              "strict allocation sweep keeps the previous tree on each failure");
+    }
+    check(built, "strict allocation sweep reaches success");
+#endif
     // Replace a same-tag/same-count child and free the old Node. Whole membership
     // proof must fail before it can touch the freed descendant source pointer.
     auto* span=const_cast<Node*>(find(*layout,"a").node);

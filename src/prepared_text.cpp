@@ -1,4 +1,4 @@
-#include "render_core/prepared_text.h"
+#include "prepared_text_internal.h"
 
 #include <limits>
 #include <new>
@@ -70,26 +70,32 @@ bool PreparedTextView::read(std::size_t index, PreparedTextGlyph& output) const 
 namespace {
 bool encode_packet(const PreparedTextGlyph* glyphs, std::size_t count,
                    std::int32_t size, std::uint32_t source_bytes, std::string& output,
-                   std::int32_t initial_x, bool positioned) noexcept {
+                   std::int32_t initial_x, bool positioned) {
     if (count > kMaxPreparedTextGlyphs || (count && !glyphs) || size < 0) return false;
     std::uint32_t byte = 0;
     std::int64_t x = initial_x;
     for (std::size_t i = 0; i < count; ++i)
         if (!record_valid(glyphs[i], byte, x, !positioned)) return false;
     if (byte != source_bytes) return false;
+    std::string draft(kPreparedTextHeaderBytes + count * kPreparedTextRecordBytes, '\0');
+    draft[0] = 'J'; draft[1] = 'F'; draft[2] = 'T'; draft[3] = 'P';
+    draft[4] = positioned ? 3 : (initial_x == 0 ? 1 : 2);
+    draft[6] = static_cast<char>(kPreparedTextRecordBytes);
+    put(draft, 8, static_cast<std::uint32_t>(count));
+    put(draft, 12, static_cast<std::uint32_t>(draft.size()));
+    put(draft, 16, static_cast<std::uint32_t>(size)); put(draft, 20, source_bytes);
+    if (initial_x) put(draft, 24, static_cast<std::uint32_t>(initial_x));
+    for (std::size_t i = 0; i < count; ++i)
+        write_record(draft, kPreparedTextHeaderBytes + i * kPreparedTextRecordBytes, glyphs[i]);
+    output.swap(draft);
+    return true;
+}
+
+bool try_encode_packet(const PreparedTextGlyph* glyphs, std::size_t count,
+                       std::int32_t size, std::uint32_t source_bytes, std::string& output,
+                       std::int32_t initial_x, bool positioned) noexcept {
     try {
-        std::string draft(kPreparedTextHeaderBytes + count * kPreparedTextRecordBytes, '\0');
-        draft[0] = 'J'; draft[1] = 'F'; draft[2] = 'T'; draft[3] = 'P';
-        draft[4] = positioned ? 3 : (initial_x == 0 ? 1 : 2);
-        draft[6] = static_cast<char>(kPreparedTextRecordBytes);
-        put(draft, 8, static_cast<std::uint32_t>(count));
-        put(draft, 12, static_cast<std::uint32_t>(draft.size()));
-        put(draft, 16, static_cast<std::uint32_t>(size)); put(draft, 20, source_bytes);
-        if (initial_x) put(draft, 24, static_cast<std::uint32_t>(initial_x));
-        for (std::size_t i = 0; i < count; ++i)
-            write_record(draft, kPreparedTextHeaderBytes + i * kPreparedTextRecordBytes, glyphs[i]);
-        output.swap(draft);
-        return true;
+        return encode_packet(glyphs, count, size, source_bytes, output, initial_x, positioned);
     } catch (const std::bad_alloc&) { return false; }
       catch (const std::length_error&) { return false; }
 }
@@ -98,12 +104,17 @@ bool encode_packet(const PreparedTextGlyph* glyphs, std::size_t count,
 bool encode_prepared_text(const PreparedTextGlyph* glyphs, std::size_t count,
                           std::int32_t size, std::uint32_t source_bytes,
                           std::string& output, std::int32_t initial_x) noexcept {
-    return encode_packet(glyphs, count, size, source_bytes, output, initial_x, false);
+    return try_encode_packet(glyphs, count, size, source_bytes, output, initial_x, false);
 }
 
 bool encode_positioned_prepared_text(const PreparedTextGlyph* glyphs, std::size_t count,
                                      std::int32_t size, std::uint32_t source_bytes,
                                      std::string& output) noexcept {
+    return try_encode_packet(glyphs, count, size, source_bytes, output, 0, true);
+}
+
+bool detail::encode_positioned_prepared_text_or_throw(const PreparedTextGlyph* glyphs,
+    std::size_t count, std::int32_t size, std::uint32_t source_bytes, std::string& output) {
     return encode_packet(glyphs, count, size, source_bytes, output, 0, true);
 }
 

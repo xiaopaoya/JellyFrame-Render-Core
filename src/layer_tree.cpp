@@ -12,6 +12,7 @@
 #include "background_gradient_geometry.h"
 #include "background_repeat_geometry.h"
 #include "generated_flex_grid_text.h"
+#include "prepared_text_internal.h"
 #if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
 #include "contextual_text_layout_internal.h"
 #endif
@@ -24,9 +25,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
-#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+#include <new>
 #include <stdexcept>
-#endif
 #include <utility>
 
 namespace jellyframe {
@@ -376,6 +376,7 @@ bool background_color_clip(const LayoutBox& box, BackgroundBox clip,
 bool paint_background_gradient(const BackgroundPaint& paint, const LayoutBox& box,
                                DisplayList& display_list, const LayerTreeBuilderOptions& options,
                                std::size_t remaining_commands, std::size_t box_command_begin,
+                               LayerTreeBuildStatus* strict_status,
                                const BackgroundImageStyleValues* layer_style = nullptr) {
     if (paint.kind != BackgroundPaintKind::LinearGradient &&
         paint.kind != BackgroundPaintKind::ConicGradient &&
@@ -386,6 +387,7 @@ bool paint_background_gradient(const BackgroundPaint& paint, const LayoutBox& bo
     (void)options;
     (void)remaining_commands;
     (void)box_command_begin;
+    (void)strict_status;
     (void)layer_style;
     return false;
 #else
@@ -415,7 +417,8 @@ bool paint_background_gradient(const BackgroundPaint& paint, const LayoutBox& bo
         request.repeat_y = static_cast<detail::BackgroundAxisRepeat>(layer_style->repeat_y);
     }
     const std::size_t used = display_list.size() - box_command_begin;
-    request.max_tiles = used < remaining_commands ? remaining_commands - used : 0;
+    const std::size_t available = remaining_commands - std::min(used, remaining_commands);
+    request.max_tiles = strict_status ? detail::kMaxBackgroundImageTiles : available;
     detail::BackgroundGradientGeometry geometry;
     const auto status = detail::resolve_background_gradient_geometry(request, geometry);
     if (status == detail::BackgroundGradientGeometryStatus::Empty) return true;
@@ -461,6 +464,13 @@ bool paint_background_gradient(const BackgroundPaint& paint, const LayoutBox& bo
             return true;
         }
     }
+    if (strict_status) {
+        if (paint.color.a == 0 && paint.color2.a == 0) return true;
+        if (geometry.sampling_tiles.count > available) {
+            *strict_status = LayerTreeBuildStatus::CommandLimit;
+            return true;
+        }
+    }
     const std::size_t begin = display_list.size();
     try {
         display_list.reserve(begin + geometry.sampling_tiles.count);
@@ -483,6 +493,7 @@ bool paint_background_gradient(const BackgroundPaint& paint, const LayoutBox& bo
             }
         }
     } catch (const std::bad_alloc&) {
+        if (strict_status) throw;
         display_list.resize(begin);
         report_diagnostic(options.diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
                           "layer-background-gradient-limit",
@@ -710,10 +721,10 @@ bool push_core_generated_text(const LayoutBox& box, DisplayList& display_list,
                               const TextSystem& system, const std::string& text,
                               Rect rect, Color color, int font_weight, TextCommandAlign align,
                               DiagnosticSink* diagnostics, const char* diagnostic_code,
-                              const char* source_name);
+                              const char* source_name, bool strict);
 
 void paint_list_marker(const LayoutBox& box, DisplayList& display_list, const TextSystem* text_system,
-                       DiagnosticSink* diagnostics) {
+                       DiagnosticSink* diagnostics, bool strict) {
     if (refused_core_ellipsis_generated_owner(box, text_system)) return;
     if (box.node == nullptr || box.node->type != NodeType::Element || box.node->tag_name != "li") {
         return;
@@ -751,7 +762,7 @@ void paint_list_marker(const LayoutBox& box, DisplayList& display_list, const Te
     if (text_system != nullptr) {
         push_core_generated_text(box, display_list, *text_system, marker, marker_rect, color,
                                  font_weight, TextCommandAlign::Start, diagnostics,
-                                 "layer-core-list-marker-text-refused", "A list marker");
+                                 "layer-core-list-marker-text-refused", "A list marker", strict);
     } else {
         report_diagnostic(diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
                           "layer-core-list-marker-text-refused",
@@ -764,7 +775,7 @@ void paint_generated_inline_content(const LayoutBox& box,
                                     DisplayList& display_list,
                                     CssPseudoElement pseudo_element,
                                     const TextSystem* text_system,
-                                    DiagnosticSink* diagnostics) {
+                                    DiagnosticSink* diagnostics, bool strict) {
     // Layout refuses this complete generated-owner context. Do not publish a
     // legacy pseudo fragment after its ordinary Core text has been refused.
     if (refused_core_ellipsis_generated_owner(box, text_system)) return;
@@ -812,7 +823,7 @@ void paint_generated_inline_content(const LayoutBox& box,
             push_core_generated_text(box, display_list, *text_system, text, rect, color,
                                      font_weight, align, diagnostics,
                                      "layer-core-generated-inline-text-refused",
-                                     "Generated pseudo-element text");
+                                     "Generated pseudo-element text", strict);
         } else {
             report_diagnostic(diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
                               "layer-core-generated-inline-text-refused",
@@ -992,7 +1003,7 @@ int range_state_value(const FormControlState& state) {
 bool prepare_control_label(const LayoutBox& box, const TextSystem& system,
                            const std::string& text, Rect rect, Color color,
                            TextCommandAlign align, DisplayCommand& command,
-                           std::size_t& remaining_glyphs, int font_weight_override = -1) {
+                           std::size_t& remaining_glyphs, bool strict, int font_weight_override = -1) {
     if (box.style.font_size < 0 || box.style.font_size > std::numeric_limits<std::int32_t>::max()/1000 ||
         box.style.letter_spacing != 0)
         return false;
@@ -1022,8 +1033,10 @@ bool prepare_control_label(const LayoutBox& box, const TextSystem& system,
     command.set_type(DisplayCommandType::PreparedText);
     command.rect = rect; command.color = color;
     set_prepared_text_origin(command,static_cast<int>(origin),static_cast<int>(baseline));
-    if (!encode_positioned_prepared_text(glyphs.data(),glyphs.size(),request.size_q1000,
-                                        static_cast<std::uint32_t>(text.size()),command.text)) return false;
+    const auto encode = strict ? detail::encode_positioned_prepared_text_or_throw
+                               : encode_positioned_prepared_text;
+    if (!encode(glyphs.data(), glyphs.size(), request.size_q1000,
+                static_cast<std::uint32_t>(text.size()), command.text)) return false;
     remaining_glyphs -= glyphs.size();
     return true;
 }
@@ -1032,13 +1045,13 @@ bool push_core_generated_text(const LayoutBox& box, DisplayList& display_list,
                               const TextSystem& system, const std::string& text,
                               Rect rect, Color color, int font_weight, TextCommandAlign align,
                               DiagnosticSink* diagnostics, const char* diagnostic_code,
-                              const char* source_name) {
+                              const char* source_name, bool strict) {
     if (text.empty() || rect.width <= 0 || rect.height <= 0 || color.a == 0) return true;
     constexpr std::size_t max_generated_glyphs = 128;
     std::size_t remaining_glyphs = max_generated_glyphs;
     DisplayCommand command;
     if (!prepare_control_label(box, system, text, rect, color, align, command,
-                               remaining_glyphs, font_weight)) {
+                               remaining_glyphs, strict, font_weight)) {
         report_diagnostic(diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
                           diagnostic_code,
                           "Core TextSystem could not prepare generated text",
@@ -1050,7 +1063,8 @@ bool push_core_generated_text(const LayoutBox& box, DisplayList& display_list,
 }
 
 void paint_form_control(const LayoutBox& box, DisplayList& display_list,
-                        const LayerTreeBuilderOptions& options, std::size_t remaining_commands) {
+                        const LayerTreeBuilderOptions& options, std::size_t remaining_commands,
+                        LayerTreeBuildStatus* strict_status) {
     if (box.node == nullptr || box.node->type != NodeType::Element || !is_form_control(*box.node)) {
         return;
     }
@@ -1128,15 +1142,19 @@ void paint_form_control(const LayoutBox& box, DisplayList& display_list,
             std::size_t glyph_budget = max_control_glyphs;
             DisplayCommand label, arrow;
             const std::size_t command_count = state.kind == FormControlKind::Select ? 2 : 1;
-            if (remaining_commands < command_count ||
+            if ((!strict_status && remaining_commands < command_count) ||
                 !prepare_control_label(box,*options.text_system,text,label_rect,text_color,
-                    text_command_align(box.style.text_align),label,glyph_budget) ||
+                    text_command_align(box.style.text_align),label,glyph_budget,strict_status != nullptr) ||
                 (state.kind == FormControlKind::Select &&
                  !prepare_control_label(box,*options.text_system,"v",arrow_rect,Color{15,23,42,255},
-                    TextCommandAlign::Center,arrow,glyph_budget))) {
+                    TextCommandAlign::Center,arrow,glyph_budget,strict_status != nullptr))) {
                 report_diagnostic(options.diagnostics,DiagnosticStage::LayerTree,DiagnosticSeverity::Warning,
                     "layer-core-control-text-refused","Core TextSystem could not prepare the complete control label",
                     "A native label/select pair must fit scalar, glyph, position and display-command budgets.");
+                return;
+            }
+            if (strict_status && remaining_commands < command_count) {
+                *strict_status = LayerTreeBuildStatus::CommandLimit;
                 return;
             }
             // Reserve before either publication so allocation failure cannot
@@ -1309,7 +1327,7 @@ bool paint_select_popup(const LayoutBox& box,
                         int scroll_y,
                         const LayerTreeBuilderOptions& options,
                         DisplayList& display_list,
-                        Rect& popup_bounds) {
+                        Rect& popup_bounds, bool strict) {
     if (box.node == nullptr || !select_popup_is_open(*box.node)) {
         return false;
     }
@@ -1357,7 +1375,7 @@ bool paint_select_popup(const LayoutBox& box,
                            geometry.row_height};
             DisplayCommand command;
             if (!prepare_control_label(box, *options.text_system, text, row, text_color,
-                                       TextCommandAlign::Start, command, popup_glyph_budget)) {
+                                       TextCommandAlign::Start, command, popup_glyph_budget, strict)) {
                 report_diagnostic(options.diagnostics,
                                   DiagnosticStage::LayerTree,
                                   DiagnosticSeverity::Warning,
@@ -1410,7 +1428,8 @@ void paint_background_image(const LayoutBox& box, const BackgroundImageStyleValu
                             const detail::BackgroundBoxAreas& background_areas,
                             detail::BackgroundBoxAreasStatus background_areas_status,
                             DisplayList& display_list, const LayerTreeBuilderOptions& options,
-                            std::size_t remaining_commands, std::size_t box_command_begin) {
+                            std::size_t remaining_commands, std::size_t box_command_begin,
+                            LayerTreeBuildStatus* strict_status) {
     ResolvedImageResource background_resource;
     if (resolve_image_handle(box,
                              ImageResolveKind::Background,
@@ -1440,8 +1459,8 @@ void paint_background_image(const LayoutBox& box, const BackgroundImageStyleValu
         repeat_request.repeat_x = static_cast<detail::BackgroundAxisRepeat>(background_style.repeat_x);
         repeat_request.repeat_y = static_cast<detail::BackgroundAxisRepeat>(background_style.repeat_y);
         const auto prior_commands = display_list.size() - box_command_begin;
-        repeat_request.max_tiles = prior_commands < remaining_commands
-            ? remaining_commands - prior_commands : 0;
+        const std::size_t available = remaining_commands - std::min(prior_commands, remaining_commands);
+        repeat_request.max_tiles = strict_status ? detail::kMaxBackgroundImageTiles : available;
         detail::BackgroundRepeatPlan plan;
         auto status = background_areas_status == detail::BackgroundBoxAreasStatus::Ready && intrinsic_state_valid
             ? detail::plan_background_image_tiles(repeat_request, plan)
@@ -1453,6 +1472,10 @@ void paint_background_image(const LayoutBox& box, const BackgroundImageStyleValu
                 status = detail::BackgroundRepeatStatus::CoordinateOverflow;
         }
         if (status == detail::BackgroundRepeatStatus::Ready) {
+            if (strict_status && plan.count > available) {
+                *strict_status = LayerTreeBuildStatus::CommandLimit;
+                return;
+            }
             const auto image_begin = display_list.size();
             try {
                 display_list.reserve(image_begin + plan.count);
@@ -1465,6 +1488,7 @@ void paint_background_image(const LayoutBox& box, const BackgroundImageStyleValu
                     display_list.back().image_paint().background_paint_clip = clip;
                 }
             } catch (const std::bad_alloc&) {
+                if (strict_status) throw;
                 display_list.resize(image_begin);
                 status = detail::BackgroundRepeatStatus::TileLimit;
             }
@@ -1496,7 +1520,8 @@ bool canonical_background_color_area(const LayoutBox& box, BackgroundBox clip,
 
 void paint_canonical_background(const LayoutBox& box, DisplayList& display_list,
                                 const LayerTreeBuilderOptions& options,
-                                std::size_t remaining_commands, std::size_t box_command_begin) {
+                                std::size_t remaining_commands, std::size_t box_command_begin,
+                                LayerTreeBuildStatus* strict_status) {
     const bool valid_count = box.style.background_layer_count <= kMaxBackgroundLayers;
     const std::size_t count = valid_count ? box.style.background_layer_count : 0;
     if (!valid_count) {
@@ -1537,16 +1562,17 @@ void paint_canonical_background(const LayoutBox& box, DisplayList& display_list,
             background_box_request(box, layer.image), areas);
         if (layer.kind == BackgroundLayerKind::Url) {
             paint_background_image(box, layer.image, areas, status, display_list,
-                                   options, remaining_commands, box_command_begin);
+                                   options, remaining_commands, box_command_begin, strict_status);
         } else if (layer.kind == BackgroundLayerKind::Gradient) {
             if (!paint_background_gradient(layer.paint, box, display_list, options,
-                                           remaining_commands, box_command_begin, &layer.image)) {
+                                           remaining_commands, box_command_begin, strict_status, &layer.image)) {
                 // Cropped modern-paint profiles retain their existing solid fallback.
                 if (status == detail::BackgroundBoxAreasStatus::Ready)
                     paint_background_paint(layer.paint, areas.painting_area, areas.painting_radius,
                                            display_list, options, areas.painting_radius_y);
             }
         }
+        if (strict_status && *strict_status != LayerTreeBuildStatus::Success) return;
     }
 }
 
@@ -1561,6 +1587,7 @@ void report_retained_display_budget(const LayerTreeBuilderOptions& options, bool
 void paint_box_self(const LayoutBox& box, DisplayList& display_list,
                     const LayerTreeBuilderOptions& options, std::size_t remaining_commands,
                     bool& display_budget_reported,
+                    LayerTreeBuildStatus* strict_status,
                     bool suppress_ellipsis_generated = false) {
     const std::size_t box_command_begin = display_list.size();
     const Rect paint_rect = paint_rect_for(box);
@@ -1588,7 +1615,8 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
         box.text_layout_cache.shared_inline->member != 0 &&
         detail::shared_inline_current(*box.text_layout_cache.shared_inline, options.text_system);
     if (!shared_inline_scope)
-        paint_canonical_background(box, display_list, options, remaining_commands, box_command_begin);
+        paint_canonical_background(box, display_list, options, remaining_commands, box_command_begin, strict_status);
+    if (strict_status && *strict_status != LayerTreeBuildStatus::Success) return;
 
     if (has_border(box.style.border_width)) {
         push_border_rects(display_list,
@@ -1602,11 +1630,12 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
     paint_meter_bar(box, display_list);
     const auto used_commands = display_list.size()-box_command_begin;
     paint_form_control(box, display_list, options,
-        used_commands >= remaining_commands ? 0 : remaining_commands-used_commands);
+        used_commands >= remaining_commands ? 0 : remaining_commands-used_commands, strict_status);
+    if (strict_status && *strict_status != LayerTreeBuildStatus::Success) return;
     if (!suppress_ellipsis_generated) {
-        paint_list_marker(box, display_list, options.text_system, options.diagnostics);
+        paint_list_marker(box, display_list, options.text_system, options.diagnostics, strict_status != nullptr);
         paint_generated_inline_content(box, display_list, CssPseudoElement::Before,
-                                       options.text_system, options.diagnostics);
+                                       options.text_system, options.diagnostics, strict_status != nullptr);
     }
 
     ResolvedImageResource content_resource;
@@ -1630,11 +1659,11 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
         const auto available = remaining_commands-std::min(used, remaining_commands);
         const auto image_count = binding.snapshot->atomic_placements.size();
         const auto required_commands = detail::shared_inline_command_count(binding, options.text_system);
-        if (required_commands > available) {
+        if (!strict_status && required_commands > available) {
             report_retained_display_budget(options, display_budget_reported);
             return;
         }
-        if (binding.member == 0 && required_commands <= available &&
+        if (binding.member == 0 && (strict_status || required_commands <= available) &&
             image_count <= required_commands && detail::shared_inline_current(binding, options.text_system)) {
             struct SharedImageContext { const LayerTreeBuilderOptions* options; } image_context{&options};
             const auto emit_image = [](const LayoutBox& image_box, DisplayList& draft, void* context) -> bool {
@@ -1653,7 +1682,7 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
             };
             const auto& trace = options.trace_owner_resolver;
             detail::emit_shared_inline(box, display_list, emit_image, &image_context,
-                box.node == nullptr ? trace.resolve : nullptr, trace.context);
+                box.node == nullptr ? trace.resolve : nullptr, trace.context, strict_status != nullptr);
         }
         return;
     }
@@ -2127,10 +2156,31 @@ LayerNodePtr LayerTreeBuilder::build(const LayoutBox& root, MonotonicArena& aren
     return build_with_arena(root, &arena);
 }
 
-LayerNodePtr LayerTreeBuilder::build_with_arena(const LayoutBox& root, MonotonicArena* arena) const {
+LayerTreeBuildStatus LayerTreeBuilder::build_strict(const LayoutBox& root, LayerNodePtr& output) const {
+    try {
+        LayerTreeBuildStatus status = LayerTreeBuildStatus::Success;
+        auto draft = build_with_arena(root, nullptr, &status);
+        if (status == LayerTreeBuildStatus::Success) output = std::move(draft);
+        return status;
+    } catch (const std::bad_alloc&) {
+        return LayerTreeBuildStatus::AllocationFailure;
+    } catch (const std::length_error&) {
+        return LayerTreeBuildStatus::AllocationFailure;
+    }
+}
+
+LayerNodePtr LayerTreeBuilder::build_with_arena(const LayoutBox& root, MonotonicArena* arena,
+                                                LayerTreeBuildStatus* strict_status) const {
 #if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
-    if (detail::is_contextual_layout_box(root)) return {};
+    if (detail::is_contextual_layout_box(root)) {
+        if (strict_status) *strict_status = LayerTreeBuildStatus::InvalidLayout;
+        return {};
+    }
 #endif
+    if (strict_status && options_.max_layers == 0) {
+        *strict_status = LayerTreeBuildStatus::LayerLimit;
+        return {};
+    }
     ImageResolutionBuildState image_resolution_state;
     ImageResolutionBuildState* previous_image_resolution_state = active_image_resolution_state;
     active_image_resolution_state = &image_resolution_state;
@@ -2140,7 +2190,8 @@ LayerNodePtr LayerTreeBuilder::build_with_arena(const LayoutBox& root, Monotonic
         ~RestoreImageResolutionState() { active = previous; }
     } restore_image_resolution_state{active_image_resolution_state, previous_image_resolution_state};
 
-    std::size_t remaining_commands = std::max<std::size_t>(1, options_.max_display_commands);
+    std::size_t remaining_commands = strict_status
+        ? options_.max_display_commands : std::max<std::size_t>(1, options_.max_display_commands);
     bool display_budget_reported = false;
     auto root_layer = make_layer_node(arena);
     root_layer->type = LayerType::Root;
@@ -2163,16 +2214,27 @@ LayerNodePtr LayerTreeBuilder::build_with_arena(const LayoutBox& root, Monotonic
 
     if (!root.style.visibility_hidden) {
         const std::size_t command_begin = root_layer->display_list.size();
-        paint_box_self(root, root_layer->display_list, options_, remaining_commands, display_budget_reported);
+        paint_box_self(root, root_layer->display_list, options_, remaining_commands, display_budget_reported,
+                       strict_status);
+        if (strict_status && *strict_status != LayerTreeBuildStatus::Success) return {};
         trim_display_list(root_layer->display_list, command_begin, remaining_commands, display_budget_reported);
+        if (strict_status && display_budget_reported) {
+            *strict_status = LayerTreeBuildStatus::CommandLimit;
+            return {};
+        }
         stamp_trace_owner(root_layer->display_list, command_begin, trace_owner_token_for(root, options_));
     }
-    build_children(root, *root_layer, arena, root.rect, remaining_commands, display_budget_reported);
+    build_children(root, *root_layer, arena, root.rect, remaining_commands, display_budget_reported, strict_status);
+    if (strict_status && *strict_status != LayerTreeBuildStatus::Success) return {};
     if (!root.style.visibility_hidden) {
         const std::size_t command_begin = root_layer->display_list.size();
         paint_generated_inline_content(root, root_layer->display_list, CssPseudoElement::After,
-                                      options_.text_system, options_.diagnostics);
+                                      options_.text_system, options_.diagnostics, strict_status != nullptr);
         trim_display_list(root_layer->display_list, command_begin, remaining_commands, display_budget_reported);
+        if (strict_status && display_budget_reported) {
+            *strict_status = LayerTreeBuildStatus::CommandLimit;
+            return {};
+        }
         stamp_trace_owner(root_layer->display_list, command_begin, trace_owner_token_for(root, options_));
     }
     sort_layer_children(*root_layer);
@@ -2239,7 +2301,8 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
                                       MonotonicArena* arena,
                                       const Rect& viewport,
                                       std::size_t& remaining_commands,
-                                      bool& display_budget_reported) const {
+                                      bool& display_budget_reported,
+                                      LayerTreeBuildStatus* strict_status) const {
 #if !JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED
     (void)viewport;
 #endif
@@ -2255,6 +2318,12 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
     std::size_t layer_count = 1;
     bool layer_budget_reported = false;
     const std::size_t max_layers = std::max<std::size_t>(1, options_.max_layers);
+    const auto trim_commands = [&](DisplayList& list, std::size_t begin) {
+        trim_display_list(list, begin, remaining_commands, display_budget_reported);
+        if (!strict_status || !display_budget_reported) return true;
+        *strict_status = LayerTreeBuildStatus::CommandLimit;
+        return false;
+    };
 
     std::vector<PendingBox> pending;
     pending.reserve(box.children.size());
@@ -2293,18 +2362,15 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
                 const std::size_t command_begin = current_layer.display_list.size();
                 if (!current.suppress_ellipsis_generated)
                     paint_generated_inline_content(*current_box, current_layer.display_list,
-                        CssPseudoElement::After, options_.text_system, options_.diagnostics);
+                        CssPseudoElement::After, options_.text_system, options_.diagnostics, strict_status != nullptr);
                 translate_display_commands(current_layer.display_list, command_begin, 0, -current.scroll_y);
-                trim_display_list(current_layer.display_list,
-                                  command_begin,
-                                  remaining_commands,
-                                  display_budget_reported);
+                if (!trim_commands(current_layer.display_list, command_begin)) return;
                 stamp_trace_owner(current_layer.display_list,
                                   command_begin,
                                   trace_owner_token_for(*current_box, options_));
             }
 #if JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED
-            if (layer_count < max_layers && current_box->node != nullptr &&
+            if ((layer_count < max_layers || strict_status) && current_box->node != nullptr &&
                 form_control_kind(*current_box->node) == FormControlKind::Select &&
                 select_popup_is_open(*current_box->node)) {
                 DisplayList popup_commands;
@@ -2316,7 +2382,12 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
                                        current.scroll_y,
                                        options_,
                                        popup_commands,
-                                       popup_bounds)) {
+                                       popup_bounds,
+                                       strict_status != nullptr)) {
+                    if (layer_count == max_layers) {
+                        *strict_status = LayerTreeBuildStatus::LayerLimit;
+                        return;
+                    }
                     auto popup_layer = make_layer_node(arena);
                     popup_layer->type = LayerType::Stacking;
                     popup_layer->reasons = LayerReasonZIndex | LayerReasonTransientOverlay;
@@ -2326,10 +2397,7 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
                     popup_layer->z_index = current_layer.z_index;
                     popup_layer->source_order = next_source_order++;
                     popup_layer->display_list = std::move(popup_commands);
-                    trim_display_list(popup_layer->display_list,
-                                      0,
-                                      remaining_commands,
-                                      display_budget_reported);
+                    if (!trim_commands(popup_layer->display_list, 0)) return;
                     stamp_trace_owner(popup_layer->display_list,
                                       0,
                                       trace_owner_token_for(*current_box, options_));
@@ -2341,13 +2409,17 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
             if (options_.paint_scroll_indicators &&
                 current_layer.box == current_box &&
                 current_layer.max_scroll_y > 0 &&
-                layer_count < max_layers) {
+                (layer_count < max_layers || strict_status)) {
                 DisplayList indicator_commands;
                 indicator_commands.reserve(2);
                 if (paint_scroll_indicator(*current_box,
                                            current_layer.scroll_y,
                                            current_layer.max_scroll_y,
                                            indicator_commands)) {
+                    if (layer_count == max_layers) {
+                        *strict_status = LayerTreeBuildStatus::LayerLimit;
+                        return;
+                    }
                     auto indicator_layer = make_layer_node(arena);
                     indicator_layer->type = LayerType::Paint;
                     indicator_layer->box = nullptr;
@@ -2355,10 +2427,7 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
                     indicator_layer->opacity = 1.0F;
                     indicator_layer->source_order = next_source_order++;
                     indicator_layer->display_list = std::move(indicator_commands);
-                    trim_display_list(indicator_layer->display_list,
-                                      0,
-                                      remaining_commands,
-                                      display_budget_reported);
+                    if (!trim_commands(indicator_layer->display_list, 0)) return;
                     current_layer.children.push_back(std::move(indicator_layer));
                     ++layer_count;
                 }
@@ -2397,6 +2466,10 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
             child_layer->source_order = next_source_order++;
             current_layer.children.push_back(std::move(child_layer));
         } else if (needs_own_layer(reasons) && !layer_budget_reported) {
+            if (strict_status) {
+                *strict_status = LayerTreeBuildStatus::LayerLimit;
+                return;
+            }
             report_diagnostic(options_.diagnostics,
                               DiagnosticStage::LayerTree,
                               DiagnosticSeverity::Warning,
@@ -2409,14 +2482,12 @@ void LayerTreeBuilder::build_children(const LayoutBox& box,
         if (!current_box->style.visibility_hidden) {
             const std::size_t command_begin = target_layer->display_list.size();
             paint_box_self(*current_box, target_layer->display_list, options_, remaining_commands, display_budget_reported,
-                current.suppress_ellipsis_generated);
+                strict_status, current.suppress_ellipsis_generated);
+            if (strict_status && *strict_status != LayerTreeBuildStatus::Success) return;
             if (target_layer == &current_layer) {
                 translate_display_commands(target_layer->display_list, command_begin, 0, -current.scroll_y);
             }
-            trim_display_list(target_layer->display_list,
-                              command_begin,
-                              remaining_commands,
-                              display_budget_reported);
+            if (!trim_commands(target_layer->display_list, command_begin)) return;
             stamp_trace_owner(target_layer->display_list,
                               command_begin,
                               trace_owner_token_for(*current_box, options_));

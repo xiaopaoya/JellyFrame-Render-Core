@@ -152,5 +152,5 @@ std::size_t shared_inline_command_count(const SharedInlineBinding&, const TextSy
 bool emit_shared_inline(const LayoutBox&, DisplayList&,
     SharedInlineImageEmitter = nullptr, void* image_context = nullptr,
     std::uint32_t (*resolve_trace_owner)(const Node&, void*) = nullptr,
-    void* trace_context = nullptr) noexcept;
+    void* trace_context = nullptr, bool propagate_allocation_failure = false);
 }

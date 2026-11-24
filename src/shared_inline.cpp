@@ -1259,7 +1259,8 @@ std::size_t shared_inline_command_count(const SharedInlineBinding& binding,
 
 bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
     SharedInlineImageEmitter image_emitter, void* image_context,
-    std::uint32_t (*resolve_trace_owner)(const Node&, void*), void* trace_context) noexcept {
+    std::uint32_t (*resolve_trace_owner)(const Node&, void*), void* trace_context,
+    bool propagate_allocation_failure) {
     try {
     const auto& binding = *box.text_layout_cache.shared_inline;
     const auto& snapshot = *binding.snapshot;
@@ -1388,8 +1389,13 @@ bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
     display.reserve(display.size()+draft.size());
     for (auto& command : draft) display.push_back(std::move(command));
     return true;
-    } catch (const std::bad_alloc&) { return false; }
-      catch (const std::length_error&) { return false; }
+    } catch (const std::bad_alloc&) {
+        if (propagate_allocation_failure) throw;
+        return false;
+    } catch (const std::length_error&) {
+        if (propagate_allocation_failure) throw;
+        return false;
+    }
       catch (const std::runtime_error&) { return false; }
 }
 }

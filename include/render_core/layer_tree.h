@@ -2,6 +2,7 @@
 
 // Version of the installed ordered layer-tree value contract.
 #define JELLYFRAME_RENDER_CORE_CANONICAL_LAYER_API_VERSION 1
+#define JELLYFRAME_RENDER_CORE_STRICT_LAYER_BUILD_API_VERSION 1
 
 #include "render_core/arena.h"
 #include "render_core/geometry.h"
@@ -150,12 +151,24 @@ struct LayerTreeBuilderOptions {
     bool paint_scroll_indicators = false;
 };
 
+enum class LayerTreeBuildStatus : std::uint8_t {
+    Success,
+    LayerLimit,
+    CommandLimit,
+    AllocationFailure,
+    InvalidLayout
+};
+
 class LayerTreeBuilder {
 public:
     explicit LayerTreeBuilder(LayerTreeBuilderOptions options = {});
 
     LayerNodePtr build(const LayoutBox& root) const;
     LayerNodePtr build(const LayoutBox& root, MonotonicArena& arena) const;
+    // Scalar layout only. Both limits are inclusive, and the root uses one
+    // layer. Output is replaced only on success. Layout and callback contracts
+    // are the same as build(); unsupported paint features keep their fallback.
+    LayerTreeBuildStatus build_strict(const LayoutBox& root, LayerNodePtr& output) const;
 #if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
     bool build_contextual(const contextual_text::LayoutResult& layout,
                           contextual_text::LayerCapture& output) const noexcept;
@@ -170,7 +183,8 @@ public:
 private:
     LayerTreeBuilderOptions options_;
 
-    LayerNodePtr build_with_arena(const LayoutBox& root, MonotonicArena* arena) const;
+    LayerNodePtr build_with_arena(const LayoutBox& root, MonotonicArena* arena,
+                                  LayerTreeBuildStatus* strict_status = nullptr) const;
     void trim_display_list(DisplayList& display_list,
                            std::size_t command_begin,
                            std::size_t& remaining_commands,
@@ -180,7 +194,8 @@ private:
                         MonotonicArena* arena,
                         const Rect& viewport,
                         std::size_t& remaining_commands,
-                        bool& display_budget_reported) const;
+                        bool& display_budget_reported,
+                        LayerTreeBuildStatus* strict_status) const;
     LayerNodePtr make_layer_node(MonotonicArena* arena) const;
 };
 
