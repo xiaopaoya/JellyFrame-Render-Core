@@ -6229,7 +6229,6 @@ Style StyleResolver::resolve_uncached(const Node& node,
                     source[position] == '\r' || source[position] == '\f')) {
                 ++position;
             }
-            const std::size_t begin = position;
             bool negative = false;
             if (integer && position < source.size() &&
                 (source[position] == '+' || source[position] == '-')) {
@@ -6260,7 +6259,9 @@ Style StyleResolver::resolve_uncached(const Node& node,
                 if (value > static_cast<double>(std::numeric_limits<int>::max())) return false;
             }
             const std::size_t number_end = integer ? integer_end : position;
-            output.number = source.substr(begin, number_end - begin);
+            // The sign has already been validated. Keep the ratio token within
+            // the same length limit as the digits and decimal point.
+            output.number = source.substr(digits, number_end - digits);
             output.value = value;
             output.percent = !integer && position < source.size() && source[position] == '%';
             return true;
@@ -6278,6 +6279,7 @@ Style StyleResolver::resolve_uncached(const Node& node,
                 if (!width_number.empty() && width_number.back() == '.') width_number.remove_suffix(1);
                 if (!height_number.empty() && height_number.back() == '.') height_number.remove_suffix(1);
                 char source[127];
+                if (width_number.size() + height_number.size() + 1 > sizeof(source)) return;
                 auto* end = std::copy(width_number.begin(), width_number.end(), source);
                 *end++ = '/';
                 end = std::copy(height_number.begin(), height_number.end(), end);
