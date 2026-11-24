@@ -220,13 +220,15 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     SharedInlineProof result;
     result.box = &box;
     result.node = box.node;
-    result.parent = box.node->parent;
     result.parent_member = parent;
     result.children = box.children.size();
-    result.dom_children = box.node->children.size();
-    result.parent_dom_children = box.node->parent ? box.node->parent->children.size() : 0;
-    result.source = box.node->text;
-    result.tag = box.node->tag_name;
+    if (box.node) {
+        result.parent = box.node->parent;
+        result.dom_children = box.node->children.size();
+        result.parent_dom_children = box.node->parent ? box.node->parent->children.size() : 0;
+        result.source = box.node->text;
+        result.tag = box.node->tag_name;
+    }
     layout_text_font(box.style, result.font);
     result.color = box.style.color;
     result.background_color = box.style.background_color;
@@ -237,7 +239,7 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     result.align = box.style.text_align;
     result.nowrap = box.style.white_space_nowrap;
     result.anywhere = box.style.overflow_wrap_anywhere;
-    result.preserves_whitespace = box.node->type == NodeType::Text &&
+    result.preserves_whitespace = box.node && box.node->type == NodeType::Text &&
         preserves_dom_text_whitespace(*box.node);
     result.text_decoration_underline = box.style.text_decoration_underline;
     result.text_decoration_line_through = box.style.text_decoration_line_through;
@@ -249,7 +251,7 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     result.before_counter_suffix = box.style.before_counter_suffix;
     result.after_counter_name = box.style.after_counter_name;
     result.after_counter_suffix = box.style.after_counter_suffix;
-    if (box.node->type == NodeType::Element) {
+    if (box.node && box.node->type == NodeType::Element) {
         if (box.style.before_content_kind == GeneratedContentKind::Counter &&
             box.style.before_counter_name == "list-num") {
             result.before_counter_text = std::to_string(shared_list_item_ordinal(*box.node)) +
@@ -272,7 +274,7 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     result.before_left_specified = box.style.before_left_specified;
     result.after_left_specified = box.style.after_left_specified;
     result.list_style_type = box.style.list_style_type;
-    if (box.node->tag_name == "li") result.list_ordinal = shared_list_item_ordinal(*box.node);
+    if (box.node && box.node->tag_name == "li") result.list_ordinal = shared_list_item_ordinal(*box.node);
     return result;
 }
 bool generated_source_eligible(const Style& style, bool host) {
@@ -627,6 +629,23 @@ struct Collector {
         if (rendered != box.children.size() || !append_generated(box, member, true)) return false;
         return true;
     }
+    bool collect_anonymous(LayoutBox& host) {
+        snapshot.members.emplace_back();
+        snapshot.members.back().proof = proof(host, 0);
+        ++budget.statistics.members;
+        for (std::size_t i = 0; i < host.children.size(); ++i) {
+            auto& child = *host.children[i];
+            if (!child.node || child.node->type != NodeType::Text || !child.node->parent) return false;
+            const auto& siblings = child.node->parent->children;
+            std::size_t dom_index = 0;
+            for (; dom_index < siblings.size(); ++dom_index) {
+                budget.work(1);
+                if (siblings[dom_index].get() == child.node) break;
+            }
+            if (dom_index == siblings.size() || !collect(child, 0, 1, dom_index, i)) return false;
+        }
+        return true;
+    }
 };
 int floor_pixel(std::int64_t n) {
     return static_cast<int>(n >= 0 ? n/1000 : -((-n+999)/1000));
@@ -700,7 +719,8 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
     const bool list_item = host.node && host.node->type == NodeType::Element && host.node->tag_name == "li";
     const bool native_list_marker = list_item &&
         (host.style.list_style_type == ListStyleType::Decimal || host.style.list_style_type == ListStyleType::Disc);
-    if (!host.node || !options.text_system ||
+    const bool anonymous = is_anonymous_flex_grid_text(host);
+    if ((!host.node && (!anonymous || host.children.size() == 1)) || !options.text_system ||
         !options.text_system->ready() || host.children.empty() ||
         (host.text_layout_cache.contents_sources && !host.text_layout_cache.contents_sources->complete) ||
         !neutral(host.style, true, false, true, false, true) ||
@@ -719,14 +739,20 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
             precise_width_units % 1000 != 0 && host.children.size() == 1 &&
             host.children.front()->node && host.children.front()->node->type == NodeType::Text;
         std::size_t member_count = 0, owner_count = 0;
-        if (!preflight(*host.node, 0, member_count, owner_count, budget) ||
-            (member_count <= 2 && !precise_single_text) || owner_count == 0) return false;
+        if (anonymous) {
+            if (host.children.size() >= max_members) return false;
+            owner_count = host.children.size();
+            member_count = owner_count + 1;
+        } else if (!preflight(*host.node, 0, member_count, owner_count, budget) ||
+            (member_count <= 2 && !precise_single_text) || owner_count == 0) {
+            return false;
+        }
         budget.capacity(sizeof(SharedInlineSnapshot)+member_count*(sizeof(SharedInlineMember)+sizeof(SharedInlineOmittedSource))+
             owner_count*(sizeof(SharedInlineOwner)+sizeof(CoreTextParagraphSpan)+sizeof(SharedInlineSnapshot::OwnerPaint)));
         auto snapshot = std::make_shared<SharedInlineSnapshot>();
         snapshot->system = options.text_system;
         snapshot->generation = options.text_system->generation();
-        snapshot->dom_root = host.node;
+        snapshot->dom_root = anonymous ? host.children.front()->node : host.node;
         snapshot->contents_sources = host.text_layout_cache.contents_sources;
         std::size_t ancestors = 0;
         while (snapshot->dom_root && snapshot->dom_root->parent) {
@@ -796,8 +822,8 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
                 std::max(host.rect.height, host.style.font_size + 4)};
             snapshot->marker.color = host.style.color;
         }
-        if (!collector.collect(host, 0, 0) ||
-            collector.spans.empty() || (snapshot->members.size() <= 2 && !precise_single_text)) return false;
+        if (!(anonymous ? collector.collect_anonymous(host) : collector.collect(host, 0, 0)) ||
+            collector.spans.empty() || (!anonymous && snapshot->members.size() <= 2 && !precise_single_text)) return false;
         paragraph_options.strut = snapshot->members[0].proof.font;
         if (!snapshot->system->resolve_family_hash(paragraph_options.strut.family, paragraph_options.strut.family)) return false;
         snapshot->host_geometry = host_geometry(host.style);
@@ -984,7 +1010,10 @@ void retire_shared_inline(LayoutBox& host) noexcept {
 bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem* system) noexcept {
     const auto& snapshot = *binding.snapshot;
     if (system != snapshot.system || !system || system->generation() != snapshot.generation) return false;
-    const auto* root = snapshot.members[0].proof.node;
+    const auto& host = *snapshot.members[0].proof.box;
+    const bool anonymous = snapshot.members[0].proof.node == nullptr;
+    if (anonymous && !is_anonymous_flex_grid_text(host)) return false;
+    const auto* root = anonymous ? snapshot.dom_root : snapshot.members[0].proof.node;
     if (!root) return false;
     std::size_t ancestors = 0;
     while (root->parent) {
@@ -992,11 +1021,10 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
         root = root->parent;
     }
     if (root != snapshot.dom_root || root->mutation_generation != snapshot.dom_generation) return false;
-    const auto& host = *snapshot.members[0].proof.box;
     if (host.text_layout_cache.contents_sources != snapshot.contents_sources ||
         (snapshot.contents_sources && !snapshot.contents_sources->complete)) return false;
     if ((host.content_geometry.width >= 0 && host.content_geometry.width != snapshot.width_units) ||
-        host_geometry(host.style) != snapshot.host_geometry ||
+        (!anonymous && host_geometry(host.style) != snapshot.host_geometry) ||
         !host.style.computed_sizes.equals(snapshot.host_computed_sizes)) return false;
     const auto origin_x = static_cast<std::int64_t>(host.rect.x)+snapshot.content_offset_x;
     const auto origin_y = static_cast<std::int64_t>(host.rect.y)+snapshot.content_offset_y;
@@ -1013,6 +1041,15 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
                 parent_box.children[p.render_index].get() != p.box) return false;
         }
         const auto& box = *p.box;
+        if (i == 0 && anonymous) {
+            LayoutTextFont font;
+            if (box.children.size() != p.children || !neutral(box.style, true, false, true, false, true) ||
+                layout_text_font(box.style, font) != S::Ok || !same_font(font, p.font) ||
+                box.style.line_height != p.line_height || box.style.text_indent != p.indent ||
+                box.style.text_align != p.align || box.style.white_space_nowrap != p.nowrap ||
+                box.style.overflow_wrap_anywhere != p.anywhere) return false;
+            continue;
+        }
         if (!p.node) return false;
         std::int64_t image_width = 0;
         int image_height = 0;
@@ -1205,7 +1242,8 @@ std::size_t shared_inline_command_count(const SharedInlineBinding& binding,
 }
 
 bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
-    SharedInlineImageEmitter image_emitter, void* image_context) noexcept {
+    SharedInlineImageEmitter image_emitter, void* image_context,
+    std::uint32_t (*resolve_trace_owner)(const Node&, void*), void* trace_context) noexcept {
     try {
     const auto& binding = *box.text_layout_cache.shared_inline;
     const auto& snapshot = *binding.snapshot;
@@ -1271,6 +1309,8 @@ bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
             }
             const auto& fragment = snapshot.paragraph.fragments[fragment_index++];
             if (fragment.owner >= snapshot.owners.size() || fragment.line >= snapshot.paragraph.lines.size()) return false;
+            const auto* source = snapshot.owners[fragment.owner].source_node;
+            const auto trace_owner = resolve_trace_owner && source ? resolve_trace_owner(*source, trace_context) : 0;
             const auto& owner_paint = snapshot.owner_paints[fragment.owner];
             const auto& line = snapshot.paragraph.lines[fragment.line];
             auto rect = union_rect(fragment_bounds(fragment, line), fragment_ink(fragment, line));
@@ -1285,6 +1325,7 @@ bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
                 shadow_command.set_type(DisplayCommandType::PreparedText);
                 shadow_command.rect = shadow_rect;
                 shadow_command.color = shadow.uses_current_color ? owner_paint.color : shadow.color;
+                shadow_command.trace_owner_token = trace_owner;
                 shadow_command.text = fragment.packet;
                 set_prepared_text_origin(shadow_command,
                     safe_add(origin_x, shadow.offset_x),
@@ -1295,6 +1336,7 @@ bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
             command.set_type(DisplayCommandType::PreparedText);
             command.rect = rect;
             command.color = owner_paint.color;
+            command.trace_owner_token = trace_owner;
             command.text = fragment.packet;
             set_prepared_text_origin(command, origin_x, safe_add(origin_y, line.baseline));
             draft.push_back(std::move(command));
@@ -1310,6 +1352,7 @@ bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
                 strike_command.set_type(DisplayCommandType::FillRect);
                 strike_command.rect = strike;
                 strike_command.color = owner_paint.color;
+                strike_command.trace_owner_token = trace_owner;
                 strike_command.color2 = strike_command.color;
                 draft.push_back(std::move(strike_command));
             }
@@ -1318,6 +1361,7 @@ bool emit_shared_inline(const LayoutBox& box, DisplayList& display,
                 underline_command.set_type(DisplayCommandType::FillRect);
                 underline_command.rect = underline;
                 underline_command.color = owner_paint.color;
+                underline_command.trace_owner_token = trace_owner;
                 underline_command.color2 = underline_command.color;
                 draft.push_back(std::move(underline_command));
             }

@@ -1,4 +1,5 @@
 #include "intrinsic_source_query.h"
+#include "shared_inline.h"
 
 #include "core_text_measure.h"
 #include "css_dimension_precision.h"
@@ -185,15 +186,17 @@ public:
             limits_.max_source_bytes == 0 || limits_.max_measurements == 0 ||
             limits_.max_work == 0 || limits_.max_scratch_bytes == 0)
             return result(IntrinsicSourceStatus::InvalidInput);
-        if (root_.node == nullptr || root_.node->type != NodeType::Element ||
-            root_.style.display != Display::Block || replaced_or_native(*root_.node) ||
+        const bool anonymous = is_anonymous_flex_grid_text(root_);
+        if ((!anonymous && (!root_.node || root_.node->type != NodeType::Element ||
+                replaced_or_native(*root_.node) || root_.node->tag_name == "li")) ||
+            root_.style.display != Display::Block ||
             root_.style.text_decoration_underline || root_.style.text_decoration_line_through ||
             root_.style.white_space_nowrap ||
             !has_valid_size_sentinels(root_.style) ||
             root_.style.letter_spacing != 0 || !supported_text_transform(root_.style.text_transform) ||
             root_.style.position_type != PositionType::Static ||
             root_.style.text_indent != 0 ||
-            root_.style.list_style_type != ListStyleType::None || root_.node->tag_name == "li")
+            root_.style.list_style_type != ListStyleType::None)
             return result(IntrinsicSourceStatus::Unsupported);
         if (root_.style.before_content_kind != GeneratedContentKind::None ||
             root_.style.after_content_kind != GeneratedContentKind::None)
@@ -425,6 +428,10 @@ private:
                 }
                 ++boxes_;
                 if (!consume_work(1)) return false;
+                if (frame.root && is_anonymous_flex_grid_text(box)) {
+                    frame.entered = true;
+                    continue;
+                }
                 if (box.node == nullptr) {
                     status_ = IntrinsicSourceStatus::Unsupported;
                     return false;

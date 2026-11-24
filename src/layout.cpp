@@ -2847,7 +2847,8 @@ int LayoutEngine::layout_inline_children(LayoutBox& box,
                                          int content_width,
                                          std::size_t depth, std::int64_t precise_width_units) const {
     int shared_height = 0;
-    if (!has_temporary_size_override(box.style) && !has_temporary_style_replay(box.style) &&
+    if ((detail::is_anonymous_flex_grid_text(box) || !has_temporary_size_override(box.style)) &&
+        !has_temporary_style_replay(box.style) &&
         detail::layout_shared_inline(box, content_x, content_y, content_width, options_, shared_height,
             precise_width_units, natural_images_))
         return shared_height;
@@ -3231,6 +3232,19 @@ int LayoutEngine::layout_flex_box(LayoutBox& box,
     }
 
     const auto layout_child_for_width = [&](LayoutBox& child, int target_width, bool force_width) {
+        if (detail::is_anonymous_flex_grid_text(child)) {
+            int width = target_width;
+            if (!force_width) {
+                const auto measured = options_.text_system
+                    ? intrinsic_queries_->query_width(child, *options_.text_system,
+                        {detail::IntrinsicPercentageBasisKind::CyclicSameAxis, -1})
+                    : detail::IntrinsicSourceWidthResult{};
+                width = measured.status == detail::IntrinsicSourceStatus::Complete
+                    ? clamp_layout_value((measured.max_content_border_box_units + 999) / 1000)
+                    : grid_intrinsic_outer_width(child, options_.text_system, options_.diagnostics);
+            }
+            return layout_box(child, 0, 0, std::max(0, width), 0, depth + 1);
+        }
         SizeOverrideRestore restore(child.style, detail::SizeProperty::Width);
         if (force_width) {
             child.style.computed_sizes.clear(detail::SizeProperty::Width);
@@ -3581,7 +3595,8 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
         }
         // An admitted auto-width image keeps its natural width, even past a fixed
         // track edge. Unknown or refused metadata retains the track-width fallback.
-        if (!placement.preserve_natural_width && child.style.width < 0 && child.style.width_percent < 0) {
+        if (!placement.preserve_natural_width && child.style.width < 0 && child.style.width_percent < 0 &&
+            !detail::is_anonymous_flex_grid_text(child)) {
             child.style.computed_sizes.clear(detail::SizeProperty::Width);
             child.style.table_properties &= ~table_sizing_provenance_bit(detail::SizeProperty::Width);
             child.style.width = item_width;

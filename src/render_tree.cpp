@@ -649,6 +649,19 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
     std::deque<Style> contents_styles;
     std::shared_ptr<ContentsSourceTopology> contents_sources;
     bool has_contents = false;
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    struct TextSeparator {
+        const Node* node;
+        Style style;
+    };
+    RenderObject* text_parent = nullptr;
+    RenderObject* text_group = nullptr;
+    std::vector<TextSeparator> text_separators;
+    const auto finish_text_group = [&] {
+        text_group = nullptr;
+        text_separators.clear();
+    };
+#endif
     const auto record_source = [&](ContentsSourceRecord record) {
         if (!contents_sources) contents_sources = std::make_shared<ContentsSourceTopology>();
         const auto max_records = std::max<std::size_t>(1, options_.max_contents_source_records);
@@ -672,6 +685,16 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         const Node& node = *pending_node.node;
         RenderObject& parent = *pending_node.parent;
 
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+        if (text_parent != &parent) {
+            finish_text_group();
+            text_parent = &parent;
+        }
+        const bool flex_grid_text = node.type == NodeType::Text &&
+            (parent.style.display == Display::Flex || parent.style.display == Display::Grid);
+#else
+        constexpr bool flex_grid_text = false;
+#endif
         if (render_object_count >= max_render_objects) {
             if (!budget_reported) {
                 report_diagnostic(options_.diagnostics,
@@ -689,7 +712,8 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         // Keep overrides on the established path and preserve budget diagnostics.
         if (node.type == NodeType::Text &&
             (options_.style_overrides == nullptr || options_.style_overrides->empty()) &&
-            (node.text.empty() || (!pending_node.under_contents && is_collapsible_whitespace_text(node)))) {
+            (node.text.empty() || (!flex_grid_text && !pending_node.under_contents &&
+                is_collapsible_whitespace_text(node)))) {
             continue;
         }
 
@@ -727,7 +751,49 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
             continue;
         }
 
-        if (pending_node.under_contents && node.type == NodeType::Text &&
+        RenderObject* destination = &parent;
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+        if (flex_grid_text && style.display != Display::None && !node.text.empty()) {
+            if (is_collapsible_whitespace_text(node)) {
+                if (text_group && text_separators.size() < max_render_objects - render_object_count)
+                    text_separators.push_back({&node, std::move(style)});
+                continue;
+            }
+            const auto required = text_group ? text_separators.size() + 1 : 2;
+            if (required > max_render_objects - render_object_count) {
+                if (!budget_reported) {
+                    report_diagnostic(options_.diagnostics, DiagnosticStage::RenderTree,
+                        DiagnosticSeverity::Warning, "render-object-limit",
+                        "Render object budget cannot admit the anonymous text item",
+                        "Increase max_render_objects or simplify the view hierarchy.");
+                    budget_reported = true;
+                }
+                finish_text_group();
+                continue;
+            }
+            if (!text_group) {
+                auto group = make_render_object(arena);
+                group->type = RenderObjectType::Block;
+                group->style.display = Display::Block;
+                inherit_text_style(group->style, parent.style);
+                group->style.text_overflow_ellipsis = false;
+                text_group = group.get();
+                parent.children.push_back(std::move(group));
+                ++render_object_count;
+            }
+            for (auto& separator : text_separators) {
+                auto text = make_render_object(arena);
+                text->type = RenderObjectType::Text;
+                text->node = separator.node;
+                text->style = std::move(separator.style);
+                text_group->children.push_back(std::move(text));
+                ++render_object_count;
+            }
+            text_separators.clear();
+            destination = text_group;
+        }
+#endif
+        if (!flex_grid_text && pending_node.under_contents && node.type == NodeType::Text &&
             !node.text.empty() && is_collapsible_whitespace_text(node)) {
             record_source(ContentsSourceRecord{ContentsSourceKind::OmittedWhitespace, parent.node, &node,
                 node.parent, pending_node.dom_index, contents_source_style(style), node.text});
@@ -738,13 +804,16 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
             continue;
         }
 
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+        if (!flex_grid_text) finish_text_group();
+#endif
         auto object = make_render_object(arena);
         RenderObject* object_raw = object.get();
         ++render_object_count;
         object->type = render_type_for(node, style);
         object->node = &node;
         object->style = style;
-        parent.children.push_back(std::move(object));
+        destination->children.push_back(std::move(object));
 
         if (!is_replaced_control(node)) {
             for (std::size_t i = node.children.size(); i > 0; --i) {

@@ -1648,7 +1648,9 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
                 return draft.size() == command_count + 1 &&
                     draft.back().type() == DisplayCommandType::Image;
             };
-            detail::emit_shared_inline(box, display_list, emit_image, &image_context);
+            const auto& trace = options.trace_owner_resolver;
+            detail::emit_shared_inline(box, display_list, emit_image, &image_context,
+                box.node == nullptr ? trace.resolve : nullptr, trace.context);
         }
         return;
     }
