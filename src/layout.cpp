@@ -3533,12 +3533,14 @@ int LayoutEngine::layout_grid_box(LayoutBox& box,
         const int row_span = placement.row_span;
         const int item_width = grid_item_width(columns, placement.column, column_span);
         const auto& style = child.style;
+        const bool allows_natural_ratio = !has_aspect_ratio(style) ||
+            (style.width >= 0 && style.aspect_ratio_auto);
         const bool natural_image_item = natural_image_column && style.grid_column_span == 1 && row_span == 1 &&
             style.position_type == PositionType::Static &&
             flex_cross_axis_alignment(child, box.style.align_items) == AlignItems::Start &&
             style.display == Display::Block && style.width_percent == -1 &&
             style.height == -1 && style.height_percent == -1 && style.computed_sizes.empty() &&
-            !has_aspect_ratio(style) && child.children.empty() && child.node && box.node &&
+            allows_natural_ratio && child.children.empty() && child.node && box.node &&
             child.node->parent == box.node && child.node->tag_name == "img" && child.node->children.empty() &&
             !child.node->attribute("src").empty();
         const bool unconstrained_auto_width = natural_image_item && style.width == -1 &&
