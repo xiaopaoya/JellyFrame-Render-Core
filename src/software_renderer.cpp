@@ -10,6 +10,7 @@
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <climits>
 #include <cstdint>
 #ifdef JELLYFRAME_ENABLE_IMAGE_FILE_IO
 #include <fstream>
