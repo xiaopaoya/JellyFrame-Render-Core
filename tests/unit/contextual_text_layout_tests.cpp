@@ -22,6 +22,15 @@ void check_markers(const LayoutBox& box, bool contextual) {
   for (const auto& child : box.children) check_markers(*child, contextual);
 }
 
+const LayoutBox* find_box_by_id(const LayoutBox& box, const std::string& id) {
+  const auto found = box.node->attributes.find("id");
+  if (found != box.node->attributes.end() && found->second == id) return &box;
+  for (const auto& child : box.children) {
+    if (const auto* match = find_box_by_id(*child, id)) return match;
+  }
+  return nullptr;
+}
+
 bool same_pixels(const FrameBuffer& a, const FrameBuffer& b) {
   return a.pixels.size() == b.pixels.size() &&
          std::equal(a.pixels.begin(), a.pixels.end(), b.pixels.begin(), [](Color lhs, Color rhs) {
@@ -181,12 +190,128 @@ void check_capture(const char* fixture_root) {
         "expired document preserves capture");
   check(same_pixels(draw_capture(capture), expected), "capture retains paint after source and binding destruction");
 }
+
+void check_nowrap_flex_row(const char* fixture_root) {
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+  Fixture fixture(fixture_root, "regular", true);
+  LayoutOptions options;
+  auto work = budget;
+  check(create_binding(fixture.as_inputs(), {}, work, options.binding) == Status::ok,
+        "Flex binding");
+  auto doc = HtmlParser().parse(
+      "<body><main id='row'><div id='first'>office AV</div><div id='second'>Second fi</div></main></body>");
+  StyleResolver styles(CssParser().parse(
+      "body{margin:0}main{display:flex;flex-flow:row nowrap;width:160px;column-gap:10px;"
+      "align-items:flex-start;color:#aa0000;font-size:16px}"
+      "#first{width:60px;min-width:0;color:#0000cc;font-size:20px;line-height:24px;text-align:center}"
+      "#second{width:90px;min-width:0;color:#008800;font-size:16px;line-height:20px;text-align:end}"));
+  auto render = RenderTreeBuilder(styles).build(*doc);
+  LayoutResult result;
+  work = budget;
+  const auto status = LayoutEngine(styles).layout_contextual(
+      *render, viewport.width, viewport.height, options, work, result);
+  check(status == Status::ok && result.valid() && result.paragraphs().size() == 2,
+        "definite-width nowrap Flex row lays out contextual text");
+
+  const auto* row = find_box_by_id(*result.tree(), "row");
+  const auto* first = find_box_by_id(*result.tree(), "first");
+  const auto* second = find_box_by_id(*result.tree(), "second");
+  check(row && first && second, "Flex boxes retained in layout");
+  check(row->rect.width == 160 && first->rect.x == row->rect.x && first->rect.width == 60 &&
+        second->rect.x == first->rect.x + first->rect.width + 10 && second->rect.width == 90,
+        "Flex allocator positions definite row items and gap");
+
+  const auto& first_paragraph = result.paragraphs()[0];
+  const auto& second_paragraph = result.paragraphs()[1];
+  check(first_paragraph.owner->node->text == "office AV" &&
+        first_paragraph.origin_x_q1000 == std::int64_t(first->content_geometry.x) &&
+        first_paragraph.content_width_q1000 == 60000 && first_paragraph.align == TextAlign::Center &&
+        first_paragraph.color.r == 0 && first_paragraph.color.g == 0 && first_paragraph.color.b == 204,
+        "first item paragraph uses its host styles and exact allocated frame");
+  check(second_paragraph.owner->node->text == "Second fi" &&
+        second_paragraph.origin_x_q1000 == std::int64_t(second->content_geometry.x) &&
+        second_paragraph.content_width_q1000 == 90000 && second_paragraph.align == TextAlign::End &&
+        second_paragraph.color.r == 0 && second_paragraph.color.g == 136 && second_paragraph.color.b == 0,
+        "second item paragraph uses its host styles and exact allocated frame");
+  check(first->rect.height >= 24 && second->rect.height >= 20 &&
+        second->rect.y == first->rect.y,
+        "row cross-size preserves natural text host heights");
+  check_markers(*result.tree(), true);
+
+  const auto* previous = result.tree();
+  auto limited_options = options;
+  limited_options.paragraph.shape_calls = 1;
+  work = budget;
+  check(LayoutEngine(styles).layout_contextual(*render, viewport.width, viewport.height,
+            limited_options, work, result) == Status::limit && result.tree() == previous,
+        "second item shape refusal rolls back the partially prepared row");
+  const auto refuse = [&](const std::string& css, const std::string& html,
+                          const char* message) {
+    auto rejected_doc = HtmlParser().parse(html);
+    StyleResolver rejected_styles(CssParser().parse(css));
+    auto rejected_render = RenderTreeBuilder(rejected_styles).build(*rejected_doc);
+    auto rejected_work = budget;
+    check(LayoutEngine(rejected_styles).layout_contextual(
+              *rejected_render, viewport.width, viewport.height, options, rejected_work, result) ==
+              Status::invalid && result.tree() == previous,
+          message);
+  };
+  const std::string items = "<body><main><div>First</div><div>Second</div></main></body>";
+  refuse("main{display:flex;flex-flow:row wrap;width:160px}div{width:60px}", items,
+         "wrapped row refusal preserves prior result");
+  refuse("main{display:flex;flex-flow:column nowrap;width:160px}div{width:60px}", items,
+         "column refusal preserves prior result");
+  refuse("main{display:flex;flex-flow:row nowrap;width:auto}div{width:60px}", items,
+         "indefinite-width row refusal preserves prior result");
+  refuse("main{display:flex;flex-flow:row nowrap;width:160px}div{width:60px}",
+         "<body><main><div>First<span>Nested</span></div></main></body>",
+         "nested flex item topology refusal preserves prior result");
+  refuse("main{display:flex;flex-flow:row nowrap;width:160px}div{width:60px}",
+         "<body><main><div>First</div><span>Anonymous</span></main></body>",
+         "anonymous flex item refusal preserves prior result");
+#else
+  Fixture fixture(fixture_root, "regular", true);
+  LayoutOptions options;
+  auto work = budget;
+  check(create_binding(fixture.as_inputs(), {}, work, options.binding) == Status::ok,
+        "Flex-disabled binding");
+  auto doc = HtmlParser().parse(
+      "<body><main id='row'><div>First</div><div>Second</div></main></body>");
+  StyleResolver styles(CssParser().parse(
+      "body{margin:0}main{display:flex;flex-flow:row nowrap;width:160px}div{width:60px}"));
+  auto render = RenderTreeBuilder(styles).build(*doc);
+  const auto find_row = [&](const auto& self, RenderObject& object) -> RenderObject* {
+    const auto id = object.node->attributes.find("id");
+    if (id != object.node->attributes.end() && id->second == "row") return &object;
+    for (auto& child : object.children) {
+      if (auto* match = self(self, *child)) return match;
+    }
+    return nullptr;
+  };
+  auto* row = find_row(find_row, *render);
+  check(row != nullptr, "Flex row retained in render tree");
+  row->style.display = Display::Block;
+  LayoutResult result;
+  work = budget;
+  check(LayoutEngine(styles).layout_contextual(
+            *render, viewport.width, viewport.height, options, work, result) == Status::ok &&
+        result.valid(), "block fallback establishes prior contextual output");
+  const auto* previous = result.tree();
+  row->style.display = Display::Flex;
+  work = budget;
+  check(LayoutEngine(styles).layout_contextual(
+            *render, viewport.width, viewport.height, options, work, result) == Status::invalid &&
+        result.tree() == previous,
+        "Flex-disabled contextual layout refuses flex row and preserves prior result");
+#endif
+}
 }
 
 int main(int argc, char** argv) {
   try {
     check(argc == 2, "fixture root");
     check_capture(argv[1]);
+    check_nowrap_flex_row(argv[1]);
     Fixture fixture(argv[1], "regular", true);
     auto work = budget;
     LayoutOptions options;

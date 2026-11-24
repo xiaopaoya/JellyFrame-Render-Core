@@ -66,6 +66,83 @@ void reference(const shaping_catalog::View& catalog, std::string_view bytes,
     }
   }
 }
+
+void display_list_owns_bindings_and_preflights_all_commands(const std::string& root) {
+  const Color clear{11, 23, 31, 255}, ink{203, 41, 137, 219};
+  Fixture fixture(root, "regular", true);
+  Binding binding;
+  auto work = budget;
+  check(create_binding(fixture.as_inputs(), {}, work, binding) == Status::ok,
+        "display-list binding");
+  std::string packet_bytes;
+  Metrics metrics;
+  work = budget;
+  check(prepare(binding, 16000, "AV", {}, work, packet_bytes, metrics) == Status::ok,
+        "display-list shaped packet");
+
+  ContextualTextDisplayCommand first;
+  first.rect = {0, 0, 64, 48};
+  first.color = ink;
+  first.baseline_x_q1000 = 9500;
+  first.baseline_y_q1000 = 26000;
+  first.packet = packet_bytes;
+  first.binding = binding;
+  ContextualTextDisplayList commands{first};
+  SoftwareRasterizer rasterizer;
+  FrameBuffer actual(64, 48, clear), expected = actual;
+  work = budget;
+  check(paint(binding, packet_bytes, expected, 9500, 26000, {0, 0, 64, 48},
+              ink, {}, work) == Status::ok,
+        "display-list reference paint");
+  rasterizer.rasterize(commands, actual, {0, 0, 64, 48});
+  check(equal(actual, expected), "typed display-list paints JFSP2 packet");
+
+  SoftwareRasterizerScratch scratch;
+  FrameBuffer reused(64, 48, clear), reused_expected = reused;
+  rasterizer.rasterize(commands, reused, {0, 0, 64, 48}, 0, 0, &scratch);
+  check(equal(reused, expected) && equal(scratch.transformed_surface, reused_expected),
+        "scratch-backed contextual display paint is atomic");
+  const auto retained_scratch_capacity = scratch.transformed_surface.pixels.capacity();
+  for (int frame = 0; frame < 3; ++frame) {
+    reused.clear(clear);
+    reused_expected = reused;
+    rasterizer.rasterize(commands, reused, {0, 0, 64, 48}, 0, 0, &scratch);
+    check(equal(reused, expected) &&
+              scratch.transformed_surface.pixels.capacity() == retained_scratch_capacity,
+          "repeated contextual paint reuses scratch capacity");
+  }
+  const auto scratch_before_invalid = scratch.transformed_surface;
+  FrameBuffer invalid_frame(64, 48, clear);
+  invalid_frame.pixels.pop_back();
+  const auto invalid_frame_before = invalid_frame;
+  rasterizer.rasterize(commands, invalid_frame, {0, 0, 64, 48}, 0, 0, &scratch);
+  check(equal(invalid_frame, invalid_frame_before) &&
+            equal(scratch.transformed_surface, scratch_before_invalid),
+        "invalid framebuffer preserves target and reusable scratch");
+
+  // The retained command keeps the immutable resource snapshot alive after
+  // the producer's binding and source buffers have gone away.
+  binding = {};
+  fixture.font.clear(); fixture.catalog.clear(); fixture.companion.clear();
+  fixture.tables.clear(); fixture.eligibility.clear();
+  FrameBuffer retained(64, 48, clear);
+  rasterizer.rasterize(commands, retained, {0, 0, 64, 48});
+  check(equal(retained, expected), "display command retains binding resources");
+
+  // A malformed later packet is found before the valid first command can
+  // change the caller framebuffer.
+  commands.push_back(first);
+  commands.back().packet.back() ^= 1;
+  FrameBuffer refused(64, 48, clear), before = refused;
+  rasterizer.rasterize(commands, refused, {0, 0, 64, 48});
+  check(equal(refused, before), "all-command packet preflight is atomic");
+
+  commands.pop_back();
+  commands.front().baseline_x_q1000 = INT32_MAX;
+  refused = before;
+  rasterizer.rasterize(commands, refused, {0, 0, 64, 48}, 1, 0);
+  check(equal(refused, before), "translated baseline refusal is atomic");
+}
 }
 int main(int argc, char** argv) {
   try {
@@ -132,6 +209,7 @@ int main(int argc, char** argv) {
       target=FrameBuffer(32,32,clear); before=target; work=budget;
       check(paint(retained,bytes,target,0,16000,{0,0,32,32},ink,{},work)==Status::ok&&!equal(target,before),"retained raster owner");
     }
+    display_list_owns_bindings_and_preflights_all_commands(argv[1]);
     std::cout<<cases<<" actual-font independent paint/full/tiled cases; refusal/extremes/lifetime passed\n";
   } catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

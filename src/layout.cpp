@@ -1911,8 +1911,12 @@ bool LayoutEngine::layout_precise_flex(LayoutBox& box, std::int64_t width, std::
     }
     const auto gap=static_cast<std::int64_t>(std::max(0,row?box.style.column_gap:box.style.row_gap))*1000;
     if (resolve_flex_lengths_precise(items,main_size,gap,[](std::size_t){return FlexLengthChargeDecision::Continue;}) != FlexLengthPrecisionStatus::Success) return false;
-    const auto make_context = [&](const FlexLengthPrecisionItem& item, std::int64_t cx, std::int64_t cy) {
+    const auto make_context = [&](const FlexLengthPrecisionItem& item, std::int64_t cx,
+                                  std::int64_t cy) {
         PreciseBoxContext context{width,fixed_height,cx,cy};
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+        context.contextual=parent.contextual;
+#endif
         context.border_origin=true;
         const auto content=std::max<std::int64_t>(0,item.target-decoration(item.child->style,row));
         if(row) context.allocated_width=content; else context.allocated_height=content;
@@ -2141,6 +2145,13 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
             if (flow_units) *flow_units = static_cast<std::int64_t>(result)*1000;
             return result;
         } else {
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+            if (context.contextual) {
+                context.contextual->status = contextual_text::Status::invalid;
+                if (flow_units) *flow_units = 0;
+                return 0;
+            }
+#endif
             const auto result = layout_box(box,project_size_edge(context.x),project_size_edge(context.y),
                 project_size_edge(context.width),height,depth);
             if (flow_units) *flow_units = static_cast<std::int64_t>(result)*1000;
