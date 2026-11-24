@@ -4,6 +4,7 @@
 #include "render_core/dom.h"
 #include "render_core/raster_primitives.h"
 #include "layout_clip_geometry.h"
+#include "generated_flex_grid_text.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -109,6 +110,13 @@ HitTestResult HitTester::hit_test_box(const LayoutBox& box, int x, int y,
     }
     if (box.style.visibility_hidden) {
         return {};
+    }
+    if (detail::owns_generated_text(box.text_layout_cache.contents_sources)) {
+        const auto* origin = detail::current_generated_text_origin(*box.node);
+        if (!origin) return {};
+        auto result = make_result(box, x, y);
+        result.node = origin;
+        return result;
     }
     auto result = make_result(box, x, y);
     if (const auto* generated_node = detail::shared_inline_generated_hit_node(box, x, y))

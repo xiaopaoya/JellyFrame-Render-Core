@@ -11,6 +11,7 @@
 #include "background_image_geometry.h"
 #include "background_gradient_geometry.h"
 #include "background_repeat_geometry.h"
+#include "generated_flex_grid_text.h"
 #if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
 #include "contextual_text_layout_internal.h"
 #endif
@@ -62,7 +63,9 @@ std::uint32_t trace_owner_token_for(const LayoutBox& box, const LayerTreeBuilder
     if (box.node == nullptr || options.trace_owner_resolver.resolve == nullptr) {
         return 0;
     }
-    return options.trace_owner_resolver.resolve(*box.node, options.trace_owner_resolver.context);
+    const Node* node = detail::owns_generated_text(box.text_layout_cache.contents_sources)
+        ? detail::current_generated_text_origin(*box.node) : box.node;
+    return node ? options.trace_owner_resolver.resolve(*node, options.trace_owner_resolver.context) : 0;
 }
 
 void stamp_trace_owner(DisplayList& display_list, std::size_t begin, std::uint32_t token) {
@@ -1655,6 +1658,10 @@ void paint_box_self(const LayoutBox& box, DisplayList& display_list,
         return;
     }
     if (box.node != nullptr && box.node->type == NodeType::Text) {
+        if (detail::owns_generated_text(box.text_layout_cache.contents_sources) &&
+            !detail::current_generated_text_origin(*box.node)) {
+            return;
+        }
         const TextLayoutCache* cached_layout = valid_text_layout_cache(box, options);
         if (cached_layout != nullptr) {
             if (has_text_shadow(box.style)) {
