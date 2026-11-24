@@ -253,12 +253,12 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     result.after_counter_name = box.style.after_counter_name;
     result.after_counter_suffix = box.style.after_counter_suffix;
     if (box.node && box.node->type == NodeType::Element) {
-        if (box.style.before_content_kind == GeneratedContentKind::Counter &&
+        if (is_generated_counter(box.style.before_content_kind) &&
             box.style.before_counter_name == "list-num") {
             result.before_counter_text = std::to_string(shared_list_item_ordinal(*box.node)) +
                 box.style.before_counter_suffix;
         }
-        if (box.style.after_content_kind == GeneratedContentKind::Counter &&
+        if (is_generated_counter(box.style.after_content_kind) &&
             box.style.after_counter_name == "list-num") {
             result.after_counter_text = std::to_string(shared_list_item_ordinal(*box.node)) +
                 box.style.after_counter_suffix;
@@ -282,7 +282,7 @@ bool generated_source_eligible(const Style& style, bool host) {
     const auto supported = [](GeneratedContentKind kind, const std::string& counter_name) {
         return kind == GeneratedContentKind::None ||
             is_generated_text(kind) ||
-            (kind == GeneratedContentKind::Counter && counter_name == "list-num");
+            (is_generated_counter(kind) && counter_name == "list-num");
     };
     return supported(style.before_content_kind, style.before_counter_name) &&
         supported(style.after_content_kind, style.after_counter_name) &&
@@ -1118,9 +1118,9 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
             box.style.before_counter_suffix != p.before_counter_suffix ||
             box.style.after_counter_name != p.after_counter_name ||
             box.style.after_counter_suffix != p.after_counter_suffix ||
-            ((p.before_kind == GeneratedContentKind::Counter && p.before_counter_name == "list-num") &&
+            ((is_generated_counter(p.before_kind) && p.before_counter_name == "list-num") &&
                 p.before_counter_text != std::to_string(shared_list_item_ordinal(*p.node)) + p.before_counter_suffix) ||
-            ((p.after_kind == GeneratedContentKind::Counter && p.after_counter_name == "list-num") &&
+            ((is_generated_counter(p.after_kind) && p.after_counter_name == "list-num") &&
                 p.after_counter_text != std::to_string(shared_list_item_ordinal(*p.node)) + p.after_counter_suffix) ||
             !same_color(box.style.before_color, p.before_color) ||
             !same_color(box.style.after_color, p.after_color) ||

@@ -5,6 +5,7 @@
 #include "background_style_access.h"
 #include "generated_flex_grid_text.h"
 #include "scalar_cascade_cache.h"
+#include "shared_inline.h"
 
 #include <algorithm>
 #include <cstring>
@@ -711,13 +712,20 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         text_separators.clear();
         append_text(*text_group, node, std::move(style), std::move(owner));
     };
+    const auto supports_generated_item = [](const Style& style, bool after) {
+        const auto kind = after ? style.after_content_kind : style.before_content_kind;
+        return is_generated_text(kind) || (is_generated_counter(kind) &&
+            (after ? style.after_counter_name : style.before_counter_name) == "list-num");
+    };
     const auto append_generated_item = [&](RenderObject& parent, const Node& origin,
                                             const Style& style, bool after) {
+        if (!supports_generated_item(style, after)) return;
         const auto kind = after ? style.after_content_kind : style.before_content_kind;
-        if (!is_generated_text(kind)) return;
+        const bool counter = is_generated_counter(kind);
         const auto& source = after ? style.after_content_text : style.before_content_text;
-        const bool flatten = kind == GeneratedContentKind::ContentsText;
-        if (flatten && source.empty()) return;
+        const bool flatten = kind == GeneratedContentKind::ContentsText ||
+            kind == GeneratedContentKind::ContentsCounter;
+        if (flatten && !counter && source.empty()) return;
         if (!flatten) {
             finish_text_group();
             if (max_render_objects - render_object_count < 2) {
@@ -732,7 +740,8 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
             }
         }
         auto text = std::make_shared<detail::GeneratedFlexGridText>(origin);
-        text->text = source;
+        text->text = counter ? std::to_string(detail::shared_list_item_ordinal(origin)) +
+            (after ? style.after_counter_suffix : style.before_counter_suffix) : source;
         std::shared_ptr<const ContentsSourceTopology> owner(text, &detail::generated_text_owner);
         Style pseudo_style;
         pseudo_style.display = Display::Inline;
@@ -844,7 +853,7 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
             if (parent.style.display == Display::Flex || parent.style.display == Display::Grid) {
                 append_generated_item(parent, node, style, false);
-                if (is_generated_text(style.after_content_kind))
+                if (supports_generated_item(style, true))
                     pending.push_back(PendingNode{&node, &parent, inherited_style, true,
                         pending_node.dom_index, true});
             }
