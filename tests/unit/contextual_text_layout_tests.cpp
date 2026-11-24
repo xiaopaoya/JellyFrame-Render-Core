@@ -121,6 +121,7 @@ void check_capture(const char* fixture_root) {
     --exact.max_display_commands;
     check(!LayerTreeBuilder(exact).build_contextual(layout, capture) && capture.layer_tree() == previous,
           "one below command limit preserves capture");
+    ++exact.max_display_commands;
     exact.max_layers = 0;
     check(!LayerTreeBuilder(exact).build_contextual(layout, capture) && capture.layer_tree() == previous,
           "zero-layer limit preserves capture");
