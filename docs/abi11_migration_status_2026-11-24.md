@@ -19,6 +19,18 @@ are evidence for their stated scope only.
   regression for row geometry, shaped text, paint-list pixels, feature-off
   refusal, unsupported wrap/column topologies, and retained replay. All PR CI
   checks passed.
+- Core PR #101 merged as
+  `3f51df64f19603c09001c138c4025724a07c0989`. It adds bounded definite-size
+  nowrap Flex columns and cross-owner UTF-8 cluster mapping coverage. Core
+  full contextual and cropped contextual CTest passed 46/46 and 45/45.
+- Runtime PR #157 merged as
+  `d716a89e12759d178d3249754e8fb3b7fc3db826`. Its installed-worker test covers
+  column box geometry, text baselines, pixel samples, auto-height refusal, and
+  replay after teardown. Focused full/cropped/contextual-off consumers pass
+  1/1 in each profile; all PR CI checks passed.
+- Core PR #102 merged as
+  `87509da0195275983a3e5281a2b07e2e09b4b77a` and corrected this document's
+  references to merged work.
 - WS147 production-trust V0 and V1 screen checks were observed successfully.
   They validate trust QA presentation and do not qualify contextual layout or
   JFSP2 paint-list output.
@@ -28,17 +40,16 @@ are evidence for their stated scope only.
 | Workstream | Current evidence | Required next evidence |
 | --- | --- | --- |
 | Shared inline ownership for shaped text | Core already maps shaping clusters to multiple UTF-8 source owners. Core PR #101 adds a regression for one cluster spanning two multibyte owners. Existing shared-inline spacing tests pass. | The shaped paragraph/source-range model is still not connected to shared-inline layout and paint. Implement this as a separate integration after an owner/cluster paint contract is designed. Preserve per-owner source ranges and refuse unsupported mixed-owner cases until geometry and pixel parity are proven. |
-| Contextual Flex topology | Core #100 and Runtime #156 cover a definite-width nowrap row. Core PR #101 adds bounded column admission for definite pixel container/item sizes, direct text items, nowrap, zero grow, and no decorations or percentage sizing. Full Release CTest passed 46/46; cropped profile passed 45/45. | Wrap, shrink/grow, decorated items, auto/intrinsic/percentage sizing remain refused. Extend only with explicit geometry and pixel oracles. |
-| Paired host qualification | Full/cropped/contextual-off installed consumer suites passed 41/41 per profile against a candidate source package. That run used Runtime `c288dfa23e3997e284d9fa19e750a7a1a4d9c204`, before Runtime #156. | Rerun the full/cropped/OFF paired qualification using merged Runtime #156 and a source manifest generated from the reviewed Core revision. Reconcile candidate and production-lock identities without changing the production lock during qualification. |
-| WS147 contextual device path | Runtime #156 adds host Worker regression coverage. It does not compile Xtensa, exercise device package installation/reboot, measure device resource use, or show the contextual result on screen. | Build an isolated ESP-IDF 5.3.1 qualification image using `sdkconfig.ws147_installed_worker_acceptance.defaults`. Verify the generated ABI11 profile advertises `css.flex-grid`, `text.contextual-jfsp2`, and `text.contextual-layout`. Preserve source/package identity, ELF, BIN, map, and manifest, then test install, restart, rendering, and touch behavior on the board. |
-| Release adoption | The production lock remains on the previously reviewed Core package. Contextual layout remains opt-in. | Review the final Core API, source manifest, resource costs, and paired Runtime/device evidence before proposing a production lock update or release. |
+| Contextual Flex topology | Core #100 and Runtime #156 cover a definite-width nowrap row. Core #101 adds bounded column admission for definite pixel container/item sizes, direct text items, nowrap, zero grow, and no decorations or percentage sizing. Core full/cropped contextual CTest passed 46/46 and 45/45. Runtime #157 verifies the new column route in the installed Worker. | Wrap, shrink/grow, decorated items, auto/intrinsic/percentage sizing remain refused. Extend only with explicit geometry and pixel oracles. |
+| Paired host qualification | With Core 0.12.1 / ABI11 source hash `38d9678a581959a8f48deabce28524aa2f867d144648c086f5917760d0088a66` and the Runtime #157 tree, the full, cropped, and contextual-off installed consumer suites each passed 41/41 with zero skips. The qualification lock was separate from production, and package fallback was disabled. | Add any future contextual capability under the same candidate-package matrix before considering production adoption. |
+| WS147 contextual device path | A WS147 installed-worker acceptance image now builds and links with ESP-IDF 5.3.1. Core 0.12.1 / ABI11 advertises `css.flex-grid`, `text.contextual-jfsp2`, and `text.contextual-layout`. BIN SHA-256 starts `1e815026`; ELF SHA-256 starts `2112efdb`. The 8 MiB app partition retains 3,821,600 bytes. The local Runtime source tree exactly matches official Runtime #157 merge tree `b1864c24ace54306edc2f8f86d9c3e9a3d3d4bef`. | Firmware `0.6.2-abi11-contextual-column1` is built but not yet flashed. Verify board identity and screen, then confirm install/restart, rendered text and touch behavior on this exact image. |
+| Release adoption | The production lock remains on the previously reviewed Core package. Contextual layout remains opt-in. | Review final Core API, source manifest, device observation, and resource evidence before proposing a production lock update or release. |
 
 ## Parallel execution
 
-The shaped-inline source-map regression and bounded Flex column change are
-integrated on the current Core-based migration branch. Runtime/WS147
-qualification established the remaining device gate. The Core branch still
-needs review, paired host qualification, and device qualification before release
-adoption. This checklist supersedes older ABI9 notes
+The bounded Flex column change and Runtime Worker regression are merged. The
+paired full/cropped/OFF host qualification passes. The next open gates are the
+board observation for the exact built firmware and the larger shaped-inline
+owner/cluster integration. The production lock remains unchanged. This checklist supersedes older ABI9 notes
 that still describe the pre-ABI11 migration state; those files remain historical
 records unless explicitly updated with newer evidence.
