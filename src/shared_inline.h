@@ -5,6 +5,15 @@
 namespace jellyframe::detail {
 
 struct NaturalImageSizingFrame;
+inline bool is_anonymous_flex_grid_text(const LayoutBox& box) noexcept {
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    return !box.node && box.style.display == Display::Block && !box.children.empty() &&
+        box.children.front()->node && box.children.front()->node->type == NodeType::Text;
+#else
+    (void)box;
+    return false;
+#endif
+}
 struct SharedInlineProof {
     SharedInlineProof() : source(0, '\0'), tag(0, '\0') {}
     const LayoutBox* box = nullptr;
@@ -141,5 +150,7 @@ const Node* shared_inline_generated_hit_node(const LayoutBox&, int x, int y) noe
 Rect shared_inline_damage_bounds(const LayoutBox&) noexcept;
 std::size_t shared_inline_command_count(const SharedInlineBinding&, const TextSystem*) noexcept;
 bool emit_shared_inline(const LayoutBox&, DisplayList&,
-    SharedInlineImageEmitter = nullptr, void* image_context = nullptr) noexcept;
+    SharedInlineImageEmitter = nullptr, void* image_context = nullptr,
+    std::uint32_t (*resolve_trace_owner)(const Node&, void*) = nullptr,
+    void* trace_context = nullptr) noexcept;
 }

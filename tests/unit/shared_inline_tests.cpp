@@ -2067,6 +2067,87 @@ void flex_override_and_budget_fallback() {
 #endif
 }
 
+void anonymous_flex_grid_text() {
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    Fixture f;
+    for (const std::string display : {"flex", "grid"}) {
+        StyleResolver styles(CssParser{}.parse(
+            "*{margin:0;padding:0}#parent{display:" + display +
+            ";width:120px;grid-template-columns:40px 40px 40px;gap:4px;font-size:16px}"
+            "#real{display:block;width:10px;height:12px}"
+            "span{display:contents}#colored{color:#f00;font-size:20px}"));
+        const auto baseline_dom = HtmlParser{}.parse("<div id=parent>A B<i id=real></i></div>");
+        const auto baseline = LayoutEngine(styles, f.options).layout(*baseline_dom, 160, 80);
+        const auto baseline_glyphs = glyphs(*LayerTreeBuilder(f.layers).build(*baseline));
+        const int following_x = find(*baseline, "real").rect.x;
+        check(baseline_glyphs.size() == 3 && (display != "grid" || following_x == 44),
+            "continuous text and element occupy consecutive items");
+        for (const bool contents : {false, true}) {
+            auto dom = HtmlParser{}.parse(contents
+                ? "<div id=parent>A<span> </span>B<i id=real></i></div>"
+                : "<div id=parent>A<i id=real></i></div>");
+            auto& parent = find_node(*dom, "parent");
+            if (!contents) {
+                parent.insert_child(make_text(" "), 1);
+                parent.insert_child(make_text("B"), 2);
+            }
+            const auto tree = LayoutEngine(styles, f.options).layout(*dom, 160, 80);
+            check(find(*tree, "parent").children.size() == 2 && find(*tree, "real").rect.x == following_x,
+                "split text occupies the original anonymous item");
+            check(glyphs(*LayerTreeBuilder(f.layers).build(*tree)) == baseline_glyphs,
+                "partitioned anonymous text preserves exact glyph geometry");
+        }
+
+        auto styled = HtmlParser{}.parse("<div id=parent>A <span id=colored>B</span><i id=real></i></div>");
+        auto tree = LayoutEngine(styles, f.options).layout(*styled, 160, 80);
+        const auto& item = *find(*tree, "parent").children.front();
+        const auto& colored = find_node(*styled, "colored");
+        LayerTreeBuilderOptions trace_options = f.layers;
+        trace_options.trace_owner_resolver.resolve = [](const Node& node, void*) -> std::uint32_t {
+            return node.type == NodeType::Text && !node.text.empty()
+                ? static_cast<std::uint32_t>(node.text.front()) : 0;
+        };
+        const auto layers = LayerTreeBuilder(trace_options).build(*tree);
+        check(item.children.size() == 2 && item.children.back()->node == colored.children.front().get(),
+            "anonymous item retains real source identity and order");
+        const auto& glyph_box = *item.children.back();
+        for (const auto& hit : {
+            HitTester{}.hit_test(*tree, glyph_box.rect.x + 1, glyph_box.rect.y + 1),
+            HitTester{}.hit_test(*layers, glyph_box.rect.x + 1, glyph_box.rect.y + 1)}) {
+            check(hit.node == &colored, "source remains the hit target through contents");
+        }
+        bool red_b = false;
+        for (const auto& command : LayerTreeBuilder(trace_options).flatten(*layers)) {
+            if (command.type() == DisplayCommandType::PreparedText) {
+                check(command.trace_owner_token == (command.color.r == 255 ? 'B' : 'A'),
+                    "each anonymous fragment traces to its original text node");
+            }
+            if (command.type() == DisplayCommandType::PreparedText &&
+                command.color.r == 255 && command.color.g == 0 && command.color.b == 0)
+                red_b = true;
+        }
+        check(red_b && glyphs(*layers).size() == 3, "both inherited colors paint with the separator");
+        const auto render = RenderTreeBuilder(styles).build(*styled);
+        LayoutEngineOptions limited = f.options;
+        limited.shared_inline.max_attempts = 0;
+        const auto fallback = LayoutEngine(styles, limited).layout(*render, 160, 80);
+        check(glyphs(*LayerTreeBuilder(f.layers).build(*fallback)).size() == 3,
+            "shared budget refusal preserves the sources in ordinary layout");
+
+        for (const bool boundary : {false, true}) {
+            const auto dom = HtmlParser{}.parse(boundary
+                ? "<div id=parent>A<span> </span><i id=real></i>B</div>"
+                : "<div id=parent><span> </span><i id=real></i></div>");
+            const auto layout = LayoutEngine(styles, f.options).layout(*dom, 160, 80);
+            check(find(*layout, "parent").children.size() == (boundary ? 3 : 1),
+                "real boxes split anonymous items and whitespace-only runs leave no item");
+            check(glyphs(*LayerTreeBuilder(f.layers).build(*layout)).size() == (boundary ? 2 : 0),
+                "the discarded separator does not paint");
+        }
+    }
+#endif
+}
+
 void fractional_alignment() {
     Fixture f;
     for (const char* alignment : {"center", "end"}) {
@@ -2217,6 +2298,7 @@ int main() {
         cumulative_scratch_acquisitions();
         layout_topology_replacement();
         flex_override_and_budget_fallback();
+        anonymous_flex_grid_text();
         fractional_alignment();
         fractional_flex_allocations_preserve_text_wrap();
         partition_matrix_and_events();
