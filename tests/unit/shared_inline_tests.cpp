@@ -2320,6 +2320,72 @@ void flattened_generated_flex_grid_text() {
 #endif
 }
 
+void generated_flex_grid_list_num_counters() {
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    auto font = asset(400, 16, 4, 1,
+        {{32, 250}, {'.', 250}, {'1', 450}, {'2', 550}, {':', 250}, {'A', 500}, {'B', 600}});
+    TextFontFace face{1, 0, font.font};
+    TextSystem system;
+    check(system.bind(&face, 1) == TextSystemStatus::Ok, "bind Flex/Grid counter font");
+    LayoutEngineOptions options;
+    options.text_system = &system;
+    LayerTreeBuilderOptions layer_options;
+    layer_options.text_system = &system;
+    layer_options.trace_owner_resolver.resolve = [](const Node& node, void*) -> std::uint32_t {
+        return node.attribute("id") == "origin" ? 42 : 0;
+    };
+    LayerTreeBuilder painter(layer_options);
+    for (const std::string display : {"flex", "grid"}) {
+        for (const bool flatten : {false, true}) {
+            const std::string declarations = flatten ? "display:contents;" : "";
+            StyleResolver styles(CssParser{}.parse(
+                "*{margin:0;padding:0}#parent{display:" + display +
+                ";width:200px;grid-template-columns:repeat(5,40px);font-size:16px}"
+                "li{display:block}#origin,#unsupported,#hidden{display:contents}"
+                "#origin::before{" + declarations + "content:counter(list-num)'.';color:#f00}"
+                "#origin::after{" + declarations + "content:counter(list-num)':';color:#00f}"
+                "#unsupported::before{display:contents;content:counter(chapter)}"
+                "#hidden::before{display:none;content:counter(list-num)}"));
+            auto dom = HtmlParser{}.parse(
+                "<ul id=parent><li id=preceding></li>A<li id=origin>B</li>A"
+                "<span id=unsupported></span><span id=hidden></span></ul>");
+            LayoutEngine engine(styles, options);
+            auto layout = engine.layout(*dom, 200, 100);
+            const auto& parent = find(*layout, "parent");
+            check(parent.children.size() == (flatten ? 2 : 6),
+                  "only visible supported counters partition anonymous items");
+            const auto& before_item = *parent.children[flatten ? 1 : 2];
+            const auto& before_text = *before_item.children[flatten ? 1 : 0];
+            const auto& origin = find_node(*dom, "origin");
+            auto layers = painter.build(*layout);
+            const auto text_order = [](const std::vector<Glyph>& values) {
+                std::string text;
+                for (const auto& glyph : values) text.push_back(static_cast<char>(std::get<0>(glyph)));
+                return text;
+            };
+            check(text_order(glyphs(*layers)) == "A2.B2:A",
+                  "counter values and suffixes preserve generated and DOM source order");
+            const auto commands = painter.flatten(*layers);
+            check(std::count_if(commands.begin(), commands.end(), [](const auto& command) {
+                return command.type() == DisplayCommandType::PreparedText &&
+                    command.trace_owner_token == 42 && (command.color.r == 255 || command.color.b == 255);
+            }) == 2, "counter paint retains both pseudo styles and traces to the origin");
+            check(HitTester{}.hit_test(*layers, before_text.rect.x + 1, before_text.rect.y + 1).node == &origin,
+                  "counter glyph hit returns the originating list item");
+
+            auto& dom_parent = find_node(*dom, "parent");
+            const auto preceding = dom_parent.detach_child(find_node(*dom, "preceding"));
+            check(preceding != nullptr, "detach the preceding list item");
+            check(text_order(glyphs(*painter.build(*layout))).find('2') == std::string::npos,
+                  "a retained layout does not repaint a stale counter value");
+            const auto updated = engine.layout(*dom, 200, 100);
+            check(text_order(glyphs(*painter.build(*updated))) == "A1.B1:A",
+                  "a fresh layout reflects the new ordinal");
+        }
+    }
+#endif
+}
+
 void fractional_alignment() {
     Fixture f;
     for (const char* alignment : {"center", "end"}) {
@@ -2473,6 +2539,7 @@ int main() {
         anonymous_flex_grid_text();
         generated_flex_grid_items_from_contents();
         flattened_generated_flex_grid_text();
+        generated_flex_grid_list_num_counters();
         fractional_alignment();
         fractional_flex_allocations_preserve_text_wrap();
         partition_matrix_and_events();

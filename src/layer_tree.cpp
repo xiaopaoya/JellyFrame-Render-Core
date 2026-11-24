@@ -663,7 +663,7 @@ std::string generated_before_text(const LayoutBox& box) {
     if (is_generated_text(box.style.before_content_kind)) {
         return box.style.before_content_text;
     }
-    if (box.style.before_content_kind == GeneratedContentKind::Counter && box.node != nullptr) {
+    if (is_generated_counter(box.style.before_content_kind) && box.node != nullptr) {
         return std::to_string(detail::shared_list_item_ordinal(*box.node)) + box.style.before_counter_suffix;
     }
     return {};
@@ -673,7 +673,7 @@ std::string generated_after_text(const LayoutBox& box) {
     if (is_generated_text(box.style.after_content_kind)) {
         return box.style.after_content_text;
     }
-    if (box.style.after_content_kind == GeneratedContentKind::Counter && box.node != nullptr) {
+    if (is_generated_counter(box.style.after_content_kind) && box.node != nullptr) {
         return std::to_string(detail::shared_list_item_ordinal(*box.node)) + box.style.after_counter_suffix;
     }
     return {};
@@ -724,7 +724,7 @@ void paint_list_marker(const LayoutBox& box, DisplayList& display_list, const Te
     }
     std::string marker = generated_before_text(box);
     bool generated = !marker.empty();
-    if (text_system != nullptr && box.style.before_content_kind == GeneratedContentKind::Counter &&
+    if (text_system != nullptr && is_generated_counter(box.style.before_content_kind) &&
         box.style.before_counter_name != "list-num") {
         report_diagnostic(diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
                           "layer-core-list-marker-text-refused",
@@ -779,7 +779,7 @@ void paint_generated_inline_content(const LayoutBox& box,
     const bool before = pseudo_element == CssPseudoElement::Before;
     const auto content_kind = before ? box.style.before_content_kind : box.style.after_content_kind;
     const auto& counter_name = before ? box.style.before_counter_name : box.style.after_counter_name;
-    if (text_system != nullptr && content_kind == GeneratedContentKind::Counter &&
+    if (text_system != nullptr && is_generated_counter(content_kind) &&
         counter_name != "list-num") {
         report_diagnostic(diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
                           "layer-core-generated-inline-text-refused",

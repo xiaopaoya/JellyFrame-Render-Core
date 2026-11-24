@@ -87,10 +87,15 @@ enum class GeneratedContentKind : std::uint8_t {
     Text,
     Counter,
     ContentsText,
+    ContentsCounter,
 };
 
 inline bool is_generated_text(GeneratedContentKind kind) noexcept {
     return kind == GeneratedContentKind::Text || kind == GeneratedContentKind::ContentsText;
+}
+
+inline bool is_generated_counter(GeneratedContentKind kind) noexcept {
+    return kind == GeneratedContentKind::Counter || kind == GeneratedContentKind::ContentsCounter;
 }
 
 enum class CssPseudoElement : std::uint8_t {

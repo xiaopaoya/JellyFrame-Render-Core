@@ -6364,9 +6364,11 @@ Style StyleResolver::resolve_uncached(const Node& node,
         style.before_counter_suffix.clear();
         style.before_left = 0;
         style.before_left_specified = false;
-    } else if (slots.before_display == Display::Contents &&
-               style.before_content_kind == GeneratedContentKind::Text) {
-        style.before_content_kind = GeneratedContentKind::ContentsText;
+    } else if (slots.before_display == Display::Contents) {
+        if (style.before_content_kind == GeneratedContentKind::Text)
+            style.before_content_kind = GeneratedContentKind::ContentsText;
+        if (style.before_content_kind == GeneratedContentKind::Counter)
+            style.before_content_kind = GeneratedContentKind::ContentsCounter;
     }
     if (slots.after_display == Display::None) {
         style.after_content_kind = GeneratedContentKind::None;
@@ -6375,9 +6377,11 @@ Style StyleResolver::resolve_uncached(const Node& node,
         style.after_counter_suffix.clear();
         style.after_left = 0;
         style.after_left_specified = false;
-    } else if (slots.after_display == Display::Contents &&
-               style.after_content_kind == GeneratedContentKind::Text) {
-        style.after_content_kind = GeneratedContentKind::ContentsText;
+    } else if (slots.after_display == Display::Contents) {
+        if (style.after_content_kind == GeneratedContentKind::Text)
+            style.after_content_kind = GeneratedContentKind::ContentsText;
+        if (style.after_content_kind == GeneratedContentKind::Counter)
+            style.after_content_kind = GeneratedContentKind::ContentsCounter;
     }
     return style;
 }
