@@ -216,9 +216,10 @@ bool paint(FrameBuffer& target, const ImagePaintRequest& request, void* context)
 }
 void grid_item_natural_height() {
     auto dom = HtmlParser{}.parse("<div id='parent'><img id='i' src='image'></div>");
-    const std::string css = "html,body{margin:0;padding:0}"
+    const std::string base_css = "html,body{margin:0;padding:0}"
         "#parent{width:400px;height:300px;display:grid;grid-template-columns:200px;align-items:start}"
-        "#i{display:block;margin:0;padding:0;border:0;box-sizing:content-box;width:120px;height:auto}";
+        "#i{display:block;margin:0;padding:0;border:0;box-sizing:content-box;height:auto}";
+    const std::string css = base_css + "#i{width:120px}";
     StyleResolver styles(CssParser{}.parse(css));
     Snapshot snapshot;
     snapshot.size = {ImageIntrinsicSizeState::Known, 320, 160};
@@ -243,6 +244,41 @@ void grid_item_natural_height() {
     const auto& next = find(*two_rows, "next");
     check(next.rect.x == image.rect.x && next.rect.y == image.rect.y + image.rect.height,
           "the second item starts below the natural-height image in the fixed column");
+
+    auto hinted = HtmlParser{}.parse("<div id='parent'><img id='i' src='image' width='120' height='120'>"
+                                     "<div id='next'></div></div>");
+    const std::string hinted_css = base_css + "#parent{height:auto}#next{display:block;height:10px}";
+    StyleResolver hinted_styles(CssParser{}.parse(hinted_css));
+    for (const auto state : {ImageIntrinsicSizeState::Known, ImageIntrinsicSizeState::Unknown}) {
+        Snapshot metadata;
+        const bool known = state == ImageIntrinsicSizeState::Known;
+        metadata.size = known ? snapshot.size : ImageIntrinsicSize{};
+        const int expected_height = known ? 60 : 120;
+        auto hinted_tree = LayoutEngine(hinted_styles, options(metadata, stats)).layout(*hinted, 500, 400);
+        check(hinted_tree && stats.queries == 1 && metadata.metadata_calls == 1,
+              "Grid queries natural dimensions once with HTML width and automatic CSS height");
+        const auto& hinted_image = find(*hinted_tree, "i");
+        check(hinted_image.rect.width == 120 && hinted_image.rect.height == expected_height &&
+              hinted_image.content_geometry.height() == expected_height * 1000 &&
+              find(*hinted_tree, "next").rect.y == hinted_image.rect.y + expected_height,
+              "Grid uses the natural ratio when known and the HTML ratio while unknown");
+    }
+    Snapshot budget_metadata;
+    budget_metadata.size = snapshot.size;
+    auto zero_budget = options(budget_metadata, stats);
+    zero_budget.natural_image_sizing.max_queries = 0;
+    auto budget_fallback = LayoutEngine(hinted_styles, zero_budget).layout(*hinted, 500, 400);
+    check(budget_fallback && stats.limit_refusals == 1 && budget_metadata.metadata_calls == 0 &&
+          find(*budget_fallback, "i").rect.height == 120 && find(*budget_fallback, "next").rect.y == 120,
+          "Grid retains the HTML ratio and row placement after metadata budget refusal");
+    StyleResolver authored_ratio_styles(CssParser{}.parse(hinted_css + "#i{aspect-ratio:3/1}"));
+    Snapshot authored_ratio_metadata;
+    authored_ratio_metadata.size = snapshot.size;
+    auto authored_ratio = LayoutEngine(authored_ratio_styles, options(authored_ratio_metadata, stats))
+        .layout(*hinted, 500, 400);
+    check(authored_ratio && find(*authored_ratio, "i").rect.height == 40 &&
+          authored_ratio_metadata.metadata_calls == 0,
+          "Grid honors a non-automatic CSS ratio without consulting image metadata");
 
     for (const char* override_css : {"#parent{grid-template-columns:1fr}", "#i{width:50%}",
              "#i{width:120.5px}", "#i{height:20px}", "#i{height:25%}", "#i{position:relative}",
