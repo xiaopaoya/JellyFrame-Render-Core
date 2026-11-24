@@ -40,6 +40,29 @@ bool has_diagnostic_code(const VectorDiagnosticSink& sink, const std::string& co
     return false;
 }
 
+void check_strict_budgets(const LayoutBox& layout, const LayerNode& expected,
+                          LayerTreeBuilderOptions options) {
+    options.max_layers = count_layers(expected);
+    options.max_display_commands = count_layer_display_commands(expected);
+    LayerNodePtr output;
+    check(LayerTreeBuilder(options).build_strict(layout, output) == LayerTreeBuildStatus::Success,
+          "strict layer build accepts exact limits");
+    check(count_layers(*output) == options.max_layers &&
+          count_layer_display_commands(*output) == options.max_display_commands,
+          "strict layer build preserves the complete tree");
+    const auto* accepted = output.get();
+    --options.max_layers;
+    check(LayerTreeBuilder(options).build_strict(layout, output) == LayerTreeBuildStatus::LayerLimit &&
+              output.get() == accepted,
+          "strict layer build preserves output on layer limit");
+    ++options.max_layers;
+    if (options.max_display_commands == 0) return;
+    --options.max_display_commands;
+    check(LayerTreeBuilder(options).build_strict(layout, output) == LayerTreeBuildStatus::CommandLimit &&
+              output.get() == accepted,
+          "strict layer build preserves output on command limit");
+}
+
 struct BuiltPipeline {
     std::unique_ptr<Node> document;
     Stylesheet stylesheet;
@@ -1034,6 +1057,7 @@ void scroll_indicator_is_opt_in_overlay() {
         }
     }
     check(found_thumb, "opt-in scroll indicator emits a thumb overlay");
+    check_strict_budgets(*layout_tree, *layer_tree, options);
 }
 
 void opacity_layer_flattens_alpha() {
@@ -1466,6 +1490,7 @@ void select_popup_paints_above_document_and_hit_tests_to_owner() {
                                                     geometry.rect.x + 2,
                                                     geometry.rect.y + geometry.row_height + 1);
     check(hit.node == select && hit.box == select_box, "popup option hit resolves to select owner");
+    check_strict_budgets(*pipeline.layout_tree, *popup_tree, options);
 #endif
 }
 
@@ -1514,6 +1539,25 @@ void layer_builder_respects_layer_and_display_command_budgets() {
     check(flattened.size() <= 4, "display command budget caps flattened output");
     check(has_diagnostic_code(diagnostics, "layer-limit"), "layer budget diagnostic is reported");
     check(has_diagnostic_code(diagnostics, "display-command-limit"), "display command budget diagnostic is reported");
+    check_strict_budgets(*pipeline.layout_tree, *pipeline.layer_tree, {});
+}
+
+void strict_layer_builder_accepts_zero_commands_and_counts_control_labels() {
+    LayoutBox empty;
+    auto tree = LayerTreeBuilder{}.build(empty);
+    check_strict_budgets(empty, *tree, {});
+
+    test::CoreTextTestFixture fonts;
+    check(fonts.ready(), "Core TextSystem fixture is ready");
+    auto input = build_pipeline_with_core_text("<input value='Alpha' />", "input { width: 100px; }",
+                                               fonts.system());
+    LayerTreeBuilderOptions options;
+    options.text_system = &fonts.system();
+    const auto commands = LayerTreeBuilder(options).flatten(*input.layer_tree);
+    check(std::any_of(commands.begin(), commands.end(), [](const DisplayCommand& command) {
+        return prepared_text_content(command) == "Alpha";
+    }), "strict budget fixture includes a prepared control label");
+    check_strict_budgets(*input.layout_tree, *input.layer_tree, options);
 }
 
 void layer_tree_can_use_monotonic_arena() {
@@ -2412,6 +2456,7 @@ int main() {
         image_element_emits_image_display_command_when_surface_resolves();
         canvas_element_emits_image_display_command_when_surface_resolves();
         layer_builder_respects_layer_and_display_command_budgets();
+        strict_layer_builder_accepts_zero_commands_and_counts_control_labels();
         layer_tree_can_use_monotonic_arena();
     } catch (const std::exception& error) {
         std::cerr << "layer tree test failed: " << error.what() << '\n';

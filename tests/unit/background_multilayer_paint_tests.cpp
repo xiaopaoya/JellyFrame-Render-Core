@@ -160,6 +160,30 @@ void empty_inner_color_clip_is_omitted() {
           "empty color clip reports one bounded diagnostic");
 }
 
+void strict_build_counts_repeated_image_commands() {
+    Fixture fixture;
+    fixture.box.style.background_layer_count = 1;
+    auto& layer = fixture.box.style.background_layers[0];
+    layer = url_layer(1);
+    layer.image.repeat_x = BackgroundImageRepeat::Repeat;
+    layer.image.repeat_y = BackgroundImageRepeat::Repeat;
+    const auto full = fixture.build();
+    check(full.size() > 2, "repeated background emits multiple tiles");
+
+    LayerTreeBuilderOptions options;
+    options.image_resolver = {resolve_background, &fixture.resolver};
+    options.max_display_commands = full.size();
+    LayerNodePtr output;
+    check(LayerTreeBuilder(options).build_strict(fixture.box, output) == LayerTreeBuildStatus::Success &&
+              count_layer_display_commands(*output) == full.size(),
+          "strict repeated background accepts the exact command budget");
+    const auto* accepted = output.get();
+    --options.max_display_commands;
+    check(LayerTreeBuilder(options).build_strict(fixture.box, output) == LayerTreeBuildStatus::CommandLimit &&
+              output.get() == accepted,
+          "strict repeated background rejects a one-command shortage atomically");
+}
+
 }
 
 int main() {
@@ -170,6 +194,7 @@ int main() {
         auto_sized_url_requires_known_intrinsic_size();
         color_clip_uses_per_edge_insets_without_origin();
         empty_inner_color_clip_is_omitted();
+        strict_build_counts_repeated_image_commands();
         std::cout << "canonical background layer paint contract passed\n";
         return 0;
     } catch (const std::exception& error) {
