@@ -2148,6 +2148,108 @@ void anonymous_flex_grid_text() {
 #endif
 }
 
+void generated_flex_grid_items_from_contents() {
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+    Fixture fixture;
+    for (const std::string display : {"flex", "grid"}) {
+        StyleResolver styles(CssParser{}.parse(
+            "*{margin:0;padding:0}#parent{display:" + display +
+            ";width:180px;grid-template-columns:40px 40px 40px 40px;gap:4px;font-size:16px}"
+            "#tail{display:block;width:10px;height:12px}"
+            "#contents{display:contents;color:#00f;font-size:20px;text-decoration:underline}"
+            "#contents::before{content:'B';color:#f00;font-weight:700}"
+            "#contents::after{content:'B'}"));
+        auto dom = HtmlParser{}.parse(
+            "<div id=parent>A<span id=contents>A</span>A<i id=tail></i></div>");
+        const auto& source = find_node(*dom, "contents");
+        LayoutBoxPtr layout;
+        {
+            MonotonicArena render_arena;
+            auto render = RenderTreeBuilder(styles).build(*dom, render_arena);
+            layout = LayoutEngine(styles, fixture.options).layout(*render, 200, 100);
+        }
+        const auto& parent = find(*layout, "parent");
+        check(parent.children.size() == 6, "generated items split both neighboring anonymous text runs");
+        RenderTreeOptions limited_sources;
+        limited_sources.max_contents_source_bytes = 0;
+        const auto limited_render = RenderTreeBuilder(styles, limited_sources).build(*dom);
+        check(limited_render->contents_sources && !limited_render->contents_sources->complete,
+              "the fixture exhausts the shared-inline source record budget");
+        const auto limited_layout = LayoutEngine(styles, fixture.options).layout(*limited_render, 200, 100);
+        check(find(*limited_layout, "parent").children.size() == parent.children.size(),
+              "the shared-inline source budget does not remove generated Flex/Grid items");
+        if (display == "grid") {
+            check(parent.children[1]->rect.x == 44 && parent.children[3]->rect.x == 132 &&
+                  find(*layout, "tail").rect.x == 44 && find(*layout, "tail").rect.y > parent.rect.y,
+                  "generated and real items occupy the expected Grid tracks");
+        }
+        const auto& before = *parent.children[1]->children.front();
+        const auto& after = *parent.children[3]->children.front();
+        check(before.style.font_size == 20 && before.style.font_weight == 700 && before.style.color.r == 255 &&
+              after.style.font_size == 20 && after.style.font_weight == 400 && after.style.color.b == 255,
+              "generated text retains originating style and pseudo overrides");
+
+        auto paint = fixture.layers;
+        paint.trace_owner_resolver.resolve = [](const Node& node, void*) -> std::uint32_t {
+            return node.attribute("id") == "contents" ? 42 : 0;
+        };
+        const auto layers = LayerTreeBuilder(paint).build(*layout);
+        unsigned expected[] = {'A', 'B', 'A', 'B', 'A'};
+        const auto values = glyphs(*layers);
+        check(values.size() == 5, "each generated text item emits exactly one glyph");
+        for (std::size_t i = 0; i < values.size(); ++i)
+            check(std::get<0>(values[i]) == expected[i], "glyphs preserve generated and DOM source order");
+        std::size_t traced = 0;
+        for (const auto& command : LayerTreeBuilder(paint).flatten(*layers)) {
+            if (command.type() == DisplayCommandType::PreparedText && command.trace_owner_token == 42) ++traced;
+        }
+        check(traced == 2, "generated text traces to its originating DOM element");
+        for (const auto* box : {&before, &after}) {
+            const int x = box->rect.x + 1;
+            const int y = box->rect.y + 1;
+            check(HitTester{}.hit_test(*layout, x, y).node == &source &&
+                  HitTester{}.hit_test(*layers, x, y).node == &source,
+                  "generated text hits its origin after render arena destruction");
+        }
+        const auto detached_source = source.parent->detach_child(source);
+        check(detached_source.get() == &source, "detach the boxless pseudo origin");
+        check(HitTester{}.hit_test(*layout, before.rect.x + 1, before.rect.y + 1).node != &source,
+              "removing the origin invalidates the generated source hit");
+        const auto stale = LayerTreeBuilder(paint).build(*layout);
+        check(glyphs(*stale).size() == 3, "a new paint cannot reuse stale generated source text");
+
+        auto removed_dom = HtmlParser{}.parse("<div id=parent><span id=contents></span></div>");
+        auto removed_layout = LayoutEngine(styles, fixture.options).layout(*removed_dom, 200, 100);
+        const auto& generated = *find(*removed_layout, "parent").children.front()->children.front();
+        auto& removed_parent = find_node(*removed_dom, "parent");
+        check(removed_parent.remove_child(find_node(*removed_dom, "contents")), "destroy the empty pseudo origin");
+        LayerTreeBuilder removed_painter(paint);
+        const auto removed_layers = removed_painter.build(*removed_layout);
+        const auto removed_commands = removed_painter.flatten(*removed_layers);
+        check(std::none_of(removed_commands.begin(), removed_commands.end(),
+                           [](const auto& command) { return command.type() == DisplayCommandType::FillRect; }) &&
+              glyphs(*removed_layers).empty() &&
+              HitTester{}.hit_test(*removed_layout, generated.rect.x + 1, generated.rect.y + 1).node ==
+                  &removed_parent,
+              "destroying the origin invalidates the generated text without dereferencing the source");
+
+        auto empty_dom = HtmlParser{}.parse("<div id=parent>A<span></span>A<i id=tail></i></div>");
+        for (const std::string value : {"''", "' '", "none"}) {
+            StyleResolver empty_styles(CssParser{}.parse(
+                "*{margin:0;padding:0}#parent{display:" + display +
+                ";width:180px;grid-template-columns:40px 40px 40px 40px;gap:4px;font-size:16px}"
+                "#tail{display:block;width:10px;height:12px}"
+                "span{display:contents}span::before{content:" + value + "}"));
+            const auto empty_layout = LayoutEngine(empty_styles, fixture.options).layout(*empty_dom, 200, 100);
+            check(find(*empty_layout, "parent").children.size() == (value == "none" ? 2 : 4),
+                  "empty or collapsed generated text still creates a separate item");
+            check(glyphs(*LayerTreeBuilder(fixture.layers).build(*empty_layout)).size() == 2,
+                  "empty generated items emit no glyphs");
+        }
+    }
+#endif
+}
+
 void fractional_alignment() {
     Fixture f;
     for (const char* alignment : {"center", "end"}) {
@@ -2299,6 +2401,7 @@ int main() {
         layout_topology_replacement();
         flex_override_and_budget_fallback();
         anonymous_flex_grid_text();
+        generated_flex_grid_items_from_contents();
         fractional_alignment();
         fractional_flex_allocations_preserve_text_wrap();
         partition_matrix_and_events();

@@ -278,14 +278,13 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     return result;
 }
 bool generated_source_eligible(const Style& style, bool host) {
-    const auto supported = [](GeneratedContentKind kind, const std::string& text,
-        const std::string& counter_name) {
+    const auto supported = [](GeneratedContentKind kind, const std::string& counter_name) {
         return kind == GeneratedContentKind::None ||
-            (kind == GeneratedContentKind::Text && !text.empty()) ||
+            kind == GeneratedContentKind::Text ||
             (kind == GeneratedContentKind::Counter && counter_name == "list-num");
     };
-    return supported(style.before_content_kind, style.before_content_text, style.before_counter_name) &&
-        supported(style.after_content_kind, style.after_content_text, style.after_counter_name) &&
+    return supported(style.before_content_kind, style.before_counter_name) &&
+        supported(style.after_content_kind, style.after_counter_name) &&
         !style.before_left_specified && !style.after_left_specified &&
         (!host || style.display == Display::Block);
 }
@@ -374,6 +373,7 @@ struct Collector {
         const auto& source = kind == GeneratedContentKind::Text
             ? (after ? style.after_content_text : style.before_content_text)
             : (after ? source_proof.after_counter_text : source_proof.before_counter_text);
+        if (kind == GeneratedContentKind::Text && source.empty()) return true;
         if (source.empty() || source.size() > max_source - bytes) return false;
         Style pseudo_style = style;
         if (after ? style.after_font_weight_specified : style.before_font_weight_specified)
@@ -474,13 +474,14 @@ struct Collector {
         const auto& style = wrapper.style;
         const auto kind = after ? style.after_content_kind : style.before_content_kind;
         if (kind == GeneratedContentKind::None) return true;
+        const auto& source = after ? style.after_content_text : style.before_content_text;
+        if (kind == GeneratedContentKind::Text && source.empty()) return true;
         if (kind != GeneratedContentKind::Text || wrapper.node == nullptr ||
             wrapper.node->type != NodeType::Element ||
             style.text_transform != TextTransform::None || style.visibility_hidden ||
             style.white_space_nowrap != snapshot.members[0].proof.nowrap ||
             style.overflow_wrap_anywhere != snapshot.members[0].proof.anywhere ||
             (after ? style.after_left_specified : style.before_left_specified)) return false;
-        const auto& source = after ? style.after_content_text : style.before_content_text;
         const bool weight_specified = after ? style.after_font_weight_specified : style.before_font_weight_specified;
         const int weight = after ? style.after_font_weight : style.before_font_weight;
         if (source.empty() || source.size() > max_source - bytes || style.font_size < 0 ||

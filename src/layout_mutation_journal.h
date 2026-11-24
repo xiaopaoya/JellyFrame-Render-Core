@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render_core/layout.h"
+#include "generated_flex_grid_text.h"
 
 #include <cstddef>
 #include <limits>
@@ -91,6 +92,8 @@ public:
             Slot& slot = slots_[index];
             using std::swap;
             swap(slot.cache, slot.box->text_layout_cache);
+            if (owns_generated_text(slot.cache.contents_sources))
+                slot.box->text_layout_cache.contents_sources = slot.cache.contents_sources;
         }
         active_ = true;
         return LayoutMutationJournalStatus::Ready;

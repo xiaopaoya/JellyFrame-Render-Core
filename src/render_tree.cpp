@@ -3,6 +3,7 @@
 #include "render_core/text_normalization.h"
 #include "css_aspect_ratio.h"
 #include "background_style_access.h"
+#include "generated_flex_grid_text.h"
 #include "scalar_cascade_cache.h"
 
 #include <algorithm>
@@ -618,6 +619,9 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         const Style* parent_style = nullptr;
         bool under_contents = false;
         std::size_t dom_index = 0;
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+        bool generated_after = false;
+#endif
     };
 
     StyleResolveContext style_context;
@@ -661,6 +665,36 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         text_group = nullptr;
         text_separators.clear();
     };
+    const auto append_generated_item = [&](RenderObject& parent, const Node& origin,
+                                            const Style& style, bool after) {
+        if ((after ? style.after_content_kind : style.before_content_kind) != GeneratedContentKind::Text)
+            return;
+        finish_text_group();
+        const auto& source = after ? style.after_content_text : style.before_content_text;
+        auto text = std::make_shared<detail::GeneratedFlexGridText>(origin);
+        text->text = source;
+        if (is_collapsible_whitespace_text(*text)) text->text.clear();
+        auto item = make_render_object(arena);
+        item->type = RenderObjectType::Block;
+        item->style.display = Display::Block;
+        inherit_text_style(item->style, style);
+        item->style.text_overflow_ellipsis = false;
+        if (after ? style.after_color_specified : style.before_color_specified)
+            item->style.color = after ? style.after_color : style.before_color;
+        if (after ? style.after_font_weight_specified : style.before_font_weight_specified)
+            item->style.font_weight = after ? style.after_font_weight : style.before_font_weight;
+        auto child = make_render_object(arena);
+        child->type = RenderObjectType::Text;
+        child->node = text.get();
+        child->contents_sources = std::shared_ptr<const ContentsSourceTopology>(text,
+            &detail::generated_text_owner);
+        child->style.display = Display::Inline;
+        inherit_text_style(child->style, item->style);
+        child->style.text_indent = 0;
+        item->children.push_back(std::move(child));
+        parent.children.push_back(std::move(item));
+        render_object_count += 2;
+    };
 #endif
     const auto record_source = [&](ContentsSourceRecord record) {
         if (!contents_sources) contents_sources = std::make_shared<ContentsSourceTopology>();
@@ -695,7 +729,11 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
 #else
         constexpr bool flex_grid_text = false;
 #endif
-        if (render_object_count >= max_render_objects) {
+        std::size_t required_objects = 1;
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+        if (pending_node.generated_after) required_objects = 2;
+#endif
+        if (required_objects > max_render_objects - render_object_count) {
             if (!budget_reported) {
                 report_diagnostic(options_.diagnostics,
                                   DiagnosticStage::RenderTree,
@@ -707,6 +745,13 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
             }
             continue;
         }
+
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+        if (pending_node.generated_after) {
+            append_generated_item(parent, node, *pending_node.parent_style, true);
+            continue;
+        }
+#endif
 
         // These sources are discarded independently of their computed style.
         // Keep overrides on the established path and preserve budget diagnostics.
@@ -742,6 +787,24 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
                 node.parent, pending_node.dom_index, contents_source_style(style), {}});
             contents_styles.push_back(style);
             const Style* inherited_style = &contents_styles.back();
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+            if (parent.style.display == Display::Flex || parent.style.display == Display::Grid) {
+                if (style.before_content_kind == GeneratedContentKind::Text) {
+                    if (max_render_objects - render_object_count >= 2) {
+                        append_generated_item(parent, node, style, false);
+                    } else if (!budget_reported) {
+                        report_diagnostic(options_.diagnostics, DiagnosticStage::RenderTree,
+                            DiagnosticSeverity::Warning, "render-object-limit",
+                            "Render object budget cannot admit the generated text item",
+                            "Increase max_render_objects or simplify the view hierarchy.");
+                        budget_reported = true;
+                    }
+                }
+                if (style.after_content_kind == GeneratedContentKind::Text)
+                    pending.push_back(PendingNode{&node, &parent, inherited_style, true,
+                        pending_node.dom_index, true});
+            }
+#endif
             for (std::size_t i = node.children.size(); i > 0; --i) {
                 if (should_descend_into_child(node, *node.children[i - 1])) {
                     pending.push_back(PendingNode{node.children[i - 1].get(), &parent,

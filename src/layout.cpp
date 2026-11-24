@@ -3,6 +3,7 @@
 
 #include "render_core/form_control.h"
 #include "computed_size_geometry.h"
+#include "generated_flex_grid_text.h"
 #include "grid_track_provenance.h"
 #include "intrinsic_source_query.h"
 #include "intrinsic_source_query_height.h"
@@ -1464,7 +1465,9 @@ void LayoutEngine::build_layout_tree(const RenderObject& object, LayoutBox& box,
         pending.pop_back();
         const RenderObject& render_object = *current.object;
         LayoutBox& layout_box = *current.box;
-        if (topology_has_owner(render_object.node) ||
+        if (detail::owns_generated_text(render_object.contents_sources)) {
+            layout_box.text_layout_cache.contents_sources = render_object.contents_sources;
+        } else if (topology_has_owner(render_object.node) ||
             (source_topology && !source_topology->complete))
             layout_box.text_layout_cache.contents_sources = source_topology;
         const bool block_path = current.parent_block_path && render_object.style.display == Display::Block &&
@@ -2596,7 +2599,10 @@ int LayoutEngine::layout_text_box(LayoutBox& box,
                                   int content_width,
                                   int min_width,
                                   int height) const {
+    auto generated_owner = detail::owns_generated_text(box.text_layout_cache.contents_sources)
+        ? box.text_layout_cache.contents_sources : nullptr;
     box.text_layout_cache = TextLayoutCache{};
+    box.text_layout_cache.contents_sources = std::move(generated_owner);
     const Node* document_root = box.node;
     while (document_root != nullptr && document_root->parent != nullptr) {
         document_root = document_root->parent;

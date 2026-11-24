@@ -4884,8 +4884,9 @@ bool apply_generated_declaration(Style& style,
             content_text.clear();
             return true;
         }
-        const std::string text = unquote(value);
-        if (text.empty() || text == "none" || text == "normal") {
+        const std::string token = trim(value);
+        const std::string keyword = lowercase(token);
+        if (token.empty() || keyword == "none" || keyword == "normal") {
             content_kind = GeneratedContentKind::None;
             content_text.clear();
             counter_name_output.clear();
@@ -4893,7 +4894,7 @@ bool apply_generated_declaration(Style& style,
             return true;
         }
         content_kind = GeneratedContentKind::Text;
-        content_text = text;
+        content_text = unquote(token);
         counter_name_output.clear();
         counter_suffix_output.clear();
         return true;
