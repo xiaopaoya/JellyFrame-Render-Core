@@ -42,8 +42,9 @@ are evidence for their stated scope only.
   Flex cross-axis centering, JFSP2 baselines, and final glyph pixels.
 - Core PR #109 merged as
   `2ae16b2f190c54ccc0aa0803b0f53a2fd254c7f2`. Its merge did not include the
-  contextual row-wrap implementation. The implementation is now proposed in
-  Core PR #111 and awaits CI and review.
+  contextual row-wrap implementation. Core PR #111 later merged bounded row
+  wrapping as `79c1ed8c356acc34f8dc23b27feb2a0b7b0df3fc`; Core PR #112 then
+  corrected this migration status as `ce93e5950318ca085c53dc165c4bf6c5ad7bb659`.
 - WS147 production-trust V0 and V1 screen checks were observed successfully.
   They validate trust QA presentation and do not qualify contextual layout or
   JFSP2 paint-list output.
@@ -53,23 +54,23 @@ are evidence for their stated scope only.
 | Workstream | Current evidence | Required next evidence |
 | --- | --- | --- |
 | Shared inline ownership for shaped text | Core already maps shaping clusters to multiple UTF-8 source owners. Core PR #101 adds a regression for one cluster spanning two multibyte owners. Existing shared-inline spacing tests pass. | The shaped paragraph/source-range model is still not connected to shared-inline layout and paint. Implement this as a separate integration after an owner/cluster paint contract is designed. Preserve per-owner source ranges and refuse unsupported mixed-owner cases until geometry and pixel parity are proven. |
-| Contextual Flex topology | Core #100 and Runtime #156 cover a definite-width nowrap row. Core #101 adds bounded column admission for definite pixel container/item sizes, direct text items, nowrap, zero grow, and no decorations or percentage sizing. Core full/cropped contextual CTest passed 46/46 and 45/45. Runtime #157 verifies the new column route in the installed Worker. | Wrap, shrink/grow, decorated items, auto/intrinsic/percentage sizing remain refused. Extend only with explicit geometry and pixel oracles. |
-| Paired host qualification | Requalified after Core PR #106 using Core 0.12.1 / ABI11 source hash `4b1a9ce21fc1d1c790b1c654f4e83677d9e5e0a137afdf15856c1cdd7e01dfaa` from merge commit `508992200070f38b394b1b9d258031eec7d2f844` and Runtime HEAD `18ebb332e8687026f24d52ec9997317596444f22`. Exact full, cropped, and contextual-OFF installed-consumer profiles each passed 41/41 with zero skips or failures. The qualification used an isolated lock with hash `b29460a2c2207d4b4648d6f84018f4d1023cabd9906127a324164c5be9e13c2a`; Core source fallback was disabled, and the production lock and Runtime inputs were unchanged. | Retain the isolated evidence and repeat this matrix if either source identity or installed-package profile changes. The earlier 41/41 result at `38d9678a…` remains evidence for that older Core source only. |
+| Contextual Flex topology | Core #100 and Runtime #156 cover a definite-width nowrap row. Core #101 adds bounded definite-pixel columns. Core #111 adds bounded row wrapping with geometry, baseline, pixel, refusal, and replay coverage. The wrap route is limited to admitted direct text items and fixed geometry; unsupported Flex combinations still refuse. | Runtime #158 must pass its candidate package matrix and merge. Any retained device gate then needs an app built from the matching Core package. |
+| Paired host qualification | Runtime #158 pins merged Core commit `dd7d57b04e0d7d8a8df850e64bb4e5610416ed4c` and candidate source hash `ff9e0ac52a701191dce6a90b508b682b9a9abb8750d432865d779c0ef954abce`. The latest run passed full/cropped/off installed consumers at 39/39 with zero skips. Signed scalar passed 9/9 in each profile, and signed contextual passed 22/22 where enabled. Candidate jobs currently fail at desktop qualification because they request Win32-only targets on Linux. A platform-specific target selection fix is prepared and awaits CI. The production lock remains at Core 0.12.1 / ABI11 source hash `d74b28ca…`; candidate qualification uses an isolated lock and Core source fallback is disabled. | Pass the corrected candidate matrix and merge Runtime #158. Publish and qualify a versioned Core package before updating the production lock. |
 | WS147 contextual device path | The 3 MiB/811,676-byte candidate was invalid because `catalog.jfcat` contained only six bytes (`broken`). The corrected full-resource candidate uses the real 733,641-byte `catalog.jfcat1`, companion, complete font, and Unicode/eligibility tables. A 5 MiB storage layout gives a 1,744,896-byte package slot. Image `0.6.2-abi11-contextual-column5m` is on COM19 and verified by factory-image readback. It advertises ABI11 contextual JFSP2/layout, a 1,744,896-byte slot, and 5,234,688 bytes available. Candidate 1 failed contextual layout admission due to unsupported `flex-flow` shorthand and out-of-profile dimensions. Candidate 2 version 0.1.1 then launched and rendered with `presents_failed=0`. The user later reported that the lower blank viewport stayed white and A/V sat low, while the browser showed centered text. Core PR #106 (`Propagate contextual canvas background to viewport`) merged as `508992200070f38b394b1b9d258031eec7d2f844` after all CI checks passed. It propagates the HTML root background, or body background when the root is transparent, across the contextual viewport, and tests canvas precedence and paint order. Local full contextual CTest passes 46/46 and Flex/Grid-off cropped passes 45/45. Runtime native contextual desktop and installed-bundle consumer tests pass 1/1 each with the patched Core source. Test firmware `0.6.2-abi11-contextual-column5m-bg2` was rebuilt from the merged Core source identity `4b1a9ce2…7e01dfaa`, BIN SHA-256 `6a3b292f…5d9990c`, and is packaged with a verified 16 MiB factory image. App candidate 0.1.2 uses `line-height` matching each card height to center Chinese and A/V text. A real Edge headless render at 172×320 shows the Chinese glyphs and A/V text centered in their cards. The latest board report still finds a white empty viewport and bottom-aligned A/V text, but bg2/0.1.2 has not been installed, so device parity remains unverified. Runtime package check reports zero layout diagnostics; rendered bottom and empty-viewport pixels are dark. JFAPP is 1,595,968 bytes, below the 1,744,896-byte slot. Its signed JFSG still requires a local PEM unlock. The device remains on 0.1.1 pending signing and visual retest. Production Runtime lock is unchanged.|
 | Release adoption | The production lock remains on the previously reviewed Core package. Contextual layout remains opt-in. | Review final Core API, source manifest, device observation, and resource evidence before proposing a production lock update or release. |
 
 ## Parallel execution
 
-Core #109 did not contain the row-wrap implementation. Core PR #111 now carries
-the actual Core changes and awaits CI. Runtime PR #158 carries a candidate-only
-qualification matrix pinned to Core #111's exact commit. The local package
-matrix passed, but the first GitHub run failed before testing because the
-qualification script required evidence outside the Runtime checkout. That path
-was corrected and a new run is in progress.
+Core #111's bounded row-wrap implementation and Core #112's status correction
+are merged. Runtime PR #158 carries the candidate-only worker and installed
+package qualification. Candidate Core consumption and signed scalar/contextual
+tests passed in the latest run. The Linux desktop-consumer step requested a
+Win32-only shell and route test; the Runtime qualification script now selects
+desktop targets by host platform, and the updated candidate CI is pending.
 
 The owner-map adapter remains experimental because it stores mapping data but
-has no shaped-glyph consumer. Remaining gates are Core #111 review/CI, Runtime
-#158 candidate CI, official Core package/release planning, production lock
-review, and WS147 firmware/app visual verification. The production Runtime lock
-remains unchanged. Older ABI9 notes remain historical records unless explicitly
+has no shaped-glyph consumer. Remaining gates are corrected Runtime #158
+candidate CI, a versioned Core package with the new source identity, production
+lock and archive-digest review, and WS147 firmware/app visual verification if
+retained for this feature. The production Runtime lock remains unchanged. Older ABI9 notes remain historical records unless explicitly
 updated with newer evidence.
