@@ -1827,6 +1827,100 @@ bool LayoutEngine::layout_precise_flex(LayoutBox& box, std::int64_t width, std::
     std::size_t depth, std::int64_t& natural_height) const {
     using namespace detail;
     const bool row = box.style.flex_direction == FlexDirection::Row;
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    if (parent.contextual && row && box.style.flex_wrap == 1) {
+        struct PlannedLine { std::size_t first = 0; std::size_t count = 0; std::int64_t height = 0; };
+        std::vector<std::int64_t> item_widths;
+        std::vector<PlannedLine> lines;
+        item_widths.reserve(box.children.size());
+        lines.reserve(box.children.size());
+        const auto gap = static_cast<std::int64_t>(box.style.column_gap) * 1000;
+        const auto available = width;
+        std::int64_t line_width = 0;
+        for (std::size_t index = 0; index < box.children.size(); ++index) {
+            auto& child = *box.children[index];
+            const auto item_width = static_cast<std::int64_t>(child.style.width) * 1000;
+            if (item_width <= 0 || item_width > available) {
+                parent.contextual->status = contextual_text::Status::invalid;
+                return false;
+            }
+            const auto candidate = line_width + (lines.empty() || index == lines.back().first
+                ? 0 : gap) + item_width;
+            if (lines.empty() || (lines.back().count != 0 && candidate > available)) {
+                lines.push_back({index, 0, 0});
+                line_width = item_width;
+            } else {
+                line_width = candidate;
+            }
+            ++lines.back().count;
+            item_widths.push_back(item_width);
+        }
+        std::int64_t line_y = y;
+        for (std::size_t line_index = 0; line_index < lines.size(); ++line_index) {
+            const auto& line = lines[line_index];
+            std::int64_t item_x = x;
+            for (std::size_t offset = 0; offset < line.count; ++offset) {
+                const auto index = line.first + offset;
+                auto& child = *box.children[index];
+                PreciseBoxContext item_context{available, -1, item_x, line_y};
+                item_context.contextual = parent.contextual;
+                item_context.border_origin = true;
+                item_context.allocated_width = item_widths[index];
+                std::int64_t item_flow = 0;
+                layout_box(child, project_size_edge(item_x), project_size_edge(line_y),
+                    project_size_edge(available), legacy_height, depth + 1, &item_context, &item_flow);
+                if (parent.contextual->status != contextual_text::Status::ok) return false;
+                if (child.children.size() != 1 ||
+                    child.rect.width != project_size_extent(item_x, item_widths[index])) {
+                    parent.contextual->status = contextual_text::Status::invalid;
+                    return false;
+                }
+                lines[line_index].height = std::max(lines[line_index].height,
+                    child.content_geometry.height());
+                if (offset + 1 < line.count) item_x += item_widths[index] + gap;
+            }
+            auto& mutable_line = lines[line_index];
+            item_x = x;
+            for (std::size_t offset = 0; offset < line.count; ++offset) {
+                const auto index = line.first + offset;
+                auto& child = *box.children[index];
+                const auto item_height = child.content_geometry.height();
+                const auto free = std::max<std::int64_t>(0, mutable_line.height - item_height);
+                const auto alignment = flex_cross_axis_alignment(child, box.style.align_items);
+                const auto shift = alignment == AlignItems::Center ? free / 2 :
+                    alignment == AlignItems::End ? free : 0;
+                const auto final_y = line_y + shift;
+                child.rect.y = project_size_edge(final_y);
+                child.content_geometry.y = final_y;
+                if (alignment == AlignItems::Stretch) {
+                    child.rect.height = project_size_extent(final_y, mutable_line.height);
+                    child.content_geometry = {child.content_geometry.x, final_y,
+                        child.content_geometry.width, mutable_line.height,
+                        child.content_geometry.height_definite()};
+                }
+                auto& text = *child.children.front();
+                text.rect.y = project_size_edge(final_y);
+                text.content_geometry.y = final_y;
+                item_x += item_widths[index] + gap;
+            }
+            if (mutable_line.height > kDimensionPrecisionMaximum - line_y) {
+                parent.contextual->status = contextual_text::Status::limit;
+                return false;
+            }
+            line_y += mutable_line.height;
+            if (line_index + 1 < lines.size()) {
+                const auto row_gap = static_cast<std::int64_t>(box.style.row_gap) * 1000;
+                if (row_gap > kDimensionPrecisionMaximum - line_y) {
+                    parent.contextual->status = contextual_text::Status::limit;
+                    return false;
+                }
+                line_y += row_gap;
+            }
+        }
+        natural_height = line_y - y;
+        return true;
+    }
+#endif
     if (box.style.flex_wrap && row && fixed_height < 0)
         return layout_wrapped_row_flex(box, x, y, width, legacy_height, depth, natural_height);
     if (box.style.flex_wrap || (!row && fixed_height < 0)) return false;

@@ -74,8 +74,16 @@ contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,st
          o.node->type!=NodeType::Element||!ordinary(o.node->tag_name))return status=Status::invalid;
       if(o.style.display==Display::Flex) {
         const bool row = o.style.flex_direction == FlexDirection::Row;
-        if(o.style.flex_wrap!=0||o.style.width<0||o.children.empty()||
+        const bool wrapped_row = row && o.style.flex_wrap == 1;
+        if((o.style.flex_wrap!=0&&!wrapped_row)||o.style.width<0||o.children.empty()||
            (!row&&(o.style.height<0||o.style.height_percent>=0)))return status=Status::invalid;
+        if (wrapped_row && (o.style.width_percent >= 0 || o.style.min_width >= 0 ||
+            o.style.max_width >= 0 || o.style.min_width_percent >= 0 || o.style.max_width_percent >= 0 ||
+            o.style.flex_grow != 0 || o.style.align_content != JustifyContent::Start ||
+            o.style.row_gap < 0 || o.style.column_gap < 0 ||
+            o.style.justify_content != JustifyContent::Start || o.style.box_sizing_border_box ||
+            !zero(o.style.margin) || !zero(o.style.padding) || !zero(o.style.border_width)))
+          return status=Status::invalid;
         if (!row && (o.style.width_percent >= 0 || o.style.min_width >= 0 || o.style.max_width >= 0))
           return status=Status::invalid;
         if (!row && (!zero(o.style.padding) || !zero(o.style.border_width) || o.style.box_sizing_border_box))
@@ -88,6 +96,15 @@ contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,st
           if(!item||item->type!=RenderObjectType::Block||item->style.display!=Display::Block||
              item->node==nullptr||item->node->type!=NodeType::Element||item->children.size()!=1||
              item->children[0]==nullptr||item->children[0]->type!=RenderObjectType::Text)
+            return status=Status::invalid;
+          if (wrapped_row && (!plain(item->style) || item->style.width < 0 ||
+              item->style.width_percent >= 0 || item->style.min_width > 0 || item->style.max_width >= 0 ||
+              item->style.min_width_percent >= 0 || item->style.max_width_percent >= 0 ||
+              item->style.flex_grow != 0 || item->style.flex_shrink != 0 ||
+              (item->style.flex_basis >= 0 && (item->style.flex_basis_kind != FlexBasisKind::Length ||
+                  item->style.flex_basis != item->style.width)) ||
+              item->style.flex_order != 0 || item->style.box_sizing_border_box || !zero(item->style.margin) ||
+              !zero(item->style.padding) || !zero(item->style.border_width)))
             return status=Status::invalid;
           if (!row) {
             if (!plain(item->style, true) || item->style.height < 0 || item->style.flex_grow != 0 ||

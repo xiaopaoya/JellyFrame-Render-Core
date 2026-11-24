@@ -271,6 +271,73 @@ void check_nowrap_flex_row(const char* fixture_root) {
   const std::string items = "<body><main><div>First</div><div>Second</div></main></body>";
   refuse("main{display:flex;flex-direction:row;flex-wrap:wrap;width:160px}div{width:60px}", items,
          "wrapped row refusal preserves prior result");
+  auto wrapped_doc = HtmlParser().parse(
+      "<body><main id='wrapped'><div id='wide'>A</div><div id='short'>A</div>"
+      "<div id='tall'>A</div></main></body>");
+  StyleResolver wrapped_styles(CssParser().parse(
+      "body{margin:0}main{display:flex;flex-direction:row;flex-wrap:wrap;width:54px;column-gap:4px;row-gap:5px;"
+      "align-items:center;color:#000000}"
+      "#wide{width:30px;min-width:0;flex:0 0 30px;font-size:16px;line-height:12px}"
+      "#short{width:25px;min-width:0;flex:0 0 25px;font-size:16px;line-height:12px}"
+      "#tall{width:20px;min-width:0;flex:0 0 20px;font-size:16px;line-height:20px}"));
+  auto wrapped_render = RenderTreeBuilder(wrapped_styles).build(*wrapped_doc);
+  work = budget;
+  const auto wrapped_status = LayoutEngine(wrapped_styles).layout_contextual(
+            *wrapped_render, viewport.width, viewport.height, options, work, result);
+  check(wrapped_status == Status::ok &&
+        result.paragraphs().size() == 3,
+        "fixed-width contextual Flex items wrap with staged row geometry");
+  const auto* wrapped = find_box_by_id(*result.tree(), "wrapped");
+  const auto* wide = find_box_by_id(*result.tree(), "wide");
+  const auto* short_item = find_box_by_id(*result.tree(), "short");
+  const auto* tall = find_box_by_id(*result.tree(), "tall");
+  check(wrapped && wide && short_item && tall && wrapped->rect.width == 54 &&
+        wrapped->rect.height == 37 && wide->rect.x == wrapped->rect.x && wide->rect.y == wrapped->rect.y &&
+        short_item->rect.y == wrapped->rect.y + 21 && tall->rect.y == wrapped->rect.y + 17 &&
+        short_item->rect.x + short_item->rect.width + 4 == tall->rect.x,
+        "row planner wraps before overflow, honors gaps, and centers within the second line");
+  check(result.paragraphs()[0].origin_y_q1000 == std::int64_t(wide->content_geometry.y) &&
+        result.paragraphs()[1].origin_y_q1000 == std::int64_t(short_item->content_geometry.y) &&
+        result.paragraphs()[2].origin_y_q1000 == std::int64_t(tall->content_geometry.y),
+        "paragraph baselines use the committed wrapped item positions");
+  LayerCapture wrapped_capture;
+  check(LayerTreeBuilder().build_contextual(result, wrapped_capture), "capture wrapped contextual rows");
+  FrameBuffer expected_wrapped(viewport.width, viewport.height, {255, 255, 255, 255});
+  for (const auto& paragraph : result.paragraphs()) paint_paragraph(paragraph, expected_wrapped);
+  const auto wrapped_pixels = draw_capture(wrapped_capture);
+  check(same_pixels(wrapped_pixels, expected_wrapped),
+        "wrapped contextual pixels match the final-geometry paint oracle");
+  const auto known_wrapped_ink = wrapped_pixels.pixel(4, 6);
+  check(known_wrapped_ink.r == 0 && known_wrapped_ink.g == 0 && known_wrapped_ink.b == 0,
+        "wrapped row paints the known Noto A pixel at its first-line origin");
+  auto exact_doc = HtmlParser().parse(
+      "<body><main id='exact'><div id='left'>A</div><div id='right'>A</div></main></body>");
+  StyleResolver exact_styles(CssParser().parse(
+      "body{margin:0}main{display:flex;flex-direction:row;flex-wrap:wrap;width:54px;column-gap:4px}"
+      "#left,#right{width:25px;min-width:0;flex:0 0 25px;font-size:16px;line-height:12px}"));
+  auto exact_render = RenderTreeBuilder(exact_styles).build(*exact_doc);
+  work = budget;
+  check(LayoutEngine(exact_styles).layout_contextual(
+            *exact_render, viewport.width, viewport.height, options, work, result) == Status::ok,
+        "exact-fit wrapped row lays out");
+  const auto* exact = find_box_by_id(*result.tree(), "exact");
+  const auto* left = find_box_by_id(*result.tree(), "left");
+  const auto* right = find_box_by_id(*result.tree(), "right");
+  check(exact && left && right && right->rect.x == left->rect.x + 29 &&
+        right->rect.y == left->rect.y && exact->rect.height == 12,
+        "exact-fit row includes its inter-item gap without wrapping");
+  const auto* previous_exact = result.tree();
+  previous = previous_exact;
+  auto overfull_doc = HtmlParser().parse("<body><main><div>A</div></main></body>");
+  StyleResolver overfull_styles(CssParser().parse(
+      "body{margin:0}main{display:flex;flex-direction:row;flex-wrap:wrap;width:19px}"
+      "div{width:20px;min-width:0;flex:0 0 20px;font-size:16px;line-height:12px}"));
+  auto overfull_render = RenderTreeBuilder(overfull_styles).build(*overfull_doc);
+  work = budget;
+  check(LayoutEngine(overfull_styles).layout_contextual(
+            *overfull_render, viewport.width, viewport.height, options, work, result) == Status::invalid &&
+        result.tree() == previous_exact,
+        "overfull fixed item refusal preserves the previously committed result");
   refuse("main{display:flex;flex-direction:column;flex-wrap:nowrap;width:160px}div{height:24px}", items,
          "auto-height column refusal preserves prior result");
   refuse("main{display:flex;flex-flow:row nowrap;width:auto}div{width:60px}", items,
