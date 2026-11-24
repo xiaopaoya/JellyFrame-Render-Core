@@ -359,6 +359,64 @@ void check_nowrap_flex_row(const char* fixture_root) {
         "Flex-disabled contextual layout refuses flex row and preserves prior result");
 #endif
 }
+
+void check_centered_flex_line_heights(const char* fixture_root) {
+#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
+  Fixture fixture(fixture_root, "regular", true);
+  LayoutOptions options;
+  auto work = budget;
+  check(create_binding(fixture.as_inputs(), {}, work, options.binding) == Status::ok,
+        "centered Flex binding");
+  auto doc = HtmlParser().parse(
+      "<body><main id='row'><div id='short'>A</div><div id='tall'>A</div></main></body>");
+  StyleResolver styles(CssParser().parse(
+      "body{margin:0}main{display:flex;flex-flow:row nowrap;width:80px;align-items:center}"
+      "#short{width:20px;min-width:0;font-size:16px;line-height:24px;color:#000000}"
+      "#tall{width:30px;min-width:0;font-size:24px;line-height:48px;color:#000000}"));
+  auto render = RenderTreeBuilder(styles).build(*doc);
+  LayoutResult result;
+  work = budget;
+  check(LayoutEngine(styles).layout_contextual(
+            *render, viewport.width, viewport.height, options, work, result) == Status::ok &&
+        result.paragraphs().size() == 2,
+        "centered Flex row prepares contextual paragraphs");
+
+  const auto* row = find_box_by_id(*result.tree(), "row");
+  const auto* short_item = find_box_by_id(*result.tree(), "short");
+  const auto* tall_item = find_box_by_id(*result.tree(), "tall");
+  check(row && short_item && tall_item && row->rect.height == 48 &&
+        short_item->rect.height == 24 && short_item->rect.y == 12 &&
+        tall_item->rect.height == 48 && tall_item->rect.y == 0,
+        "align-items center places the 24px line box halfway in the 48px row");
+
+  // The packaged Noto Sans SC hhea metrics are ascent 1160 and descent 288
+  // in 1000 units per em. CSS line-height supplies 24px/48px line boxes.
+  // Descent is positive and extends below the baseline. Therefore paragraph
+  // baselines are 12 + (24 - 16*(1160-288)/1000)/2
+  // + 16*1160/1000 = 35.584px and
+  // (48 - 24*(1160-288)/1000)/2 + 24*1160/1000 = 41.376px.
+  const auto& short_line = result.paragraphs()[0].paragraph.lines().front();
+  const auto& tall_line = result.paragraphs()[1].paragraph.lines().front();
+  check(result.paragraphs()[0].origin_y_q1000 == 12000 &&
+        result.paragraphs()[1].origin_y_q1000 == 0 &&
+        short_line.baseline_y_q1000 == 23584 &&
+        tall_line.baseline_y_q1000 == 41376,
+        "CSS line-height and centered item geometry reach JFSP2 baselines");
+
+  LayerCapture capture;
+  check(LayerTreeBuilder().build_contextual(result, capture),
+        "capture centered Flex paragraphs");
+  const auto pixels = draw_capture(capture);
+  // The packaged U+0041 bitmap has bearing (0,-12), size 10x12, and full
+  // coverage at bitmap pixel (4,0). Raster scaling puts that pixel at x=4/y=24
+  // for the 16px run and x+6/y=23 for the 24px run.
+  const auto short_ink = pixels.pixel(4, 24);
+  const auto tall_ink = pixels.pixel(tall_item->rect.x + 6, 23);
+  check(short_ink.r == 0 && short_ink.g == 0 && short_ink.b == 0 &&
+        tall_ink.r == 0 && tall_ink.g == 0 && tall_ink.b == 0,
+        "JFSP2 baselines place independently known Noto A ink pixels");
+#endif
+}
 }
 
 int main(int argc, char** argv) {
@@ -366,6 +424,7 @@ int main(int argc, char** argv) {
     check(argc == 2, "fixture root");
     check_capture(argv[1]);
     check_nowrap_flex_row(argv[1]);
+    check_centered_flex_line_heights(argv[1]);
     Fixture fixture(argv[1], "regular", true);
     auto work = budget;
     LayoutOptions options;
