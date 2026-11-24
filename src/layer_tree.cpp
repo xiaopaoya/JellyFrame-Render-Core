@@ -59,6 +59,29 @@ bool is_visible_background(Color color) {
     return color.a != 0;
 }
 
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+const LayoutBox* contextual_canvas_background_source(const LayoutBox& root) {
+    const LayoutBox* html = nullptr;
+    const LayoutBox* body = nullptr;
+    std::vector<const LayoutBox*> pending{&root};
+    while (!pending.empty()) {
+        const LayoutBox* box = pending.back();
+        pending.pop_back();
+        if (box->node != nullptr) {
+            if (box->node->tag_name == "html") html = box;
+            if (box->node->tag_name == "body") body = box;
+        }
+        for (auto it = box->children.rbegin(); it != box->children.rend(); ++it) {
+            pending.push_back(it->get());
+        }
+    }
+    if (html != nullptr && html->style.background_color.a != 0) {
+        return html;
+    }
+    return body != nullptr && body->style.background_color.a != 0 ? body : nullptr;
+}
+#endif
+
 std::uint32_t trace_owner_token_for(const LayoutBox& box, const LayerTreeBuilderOptions& options) {
     if (box.node == nullptr || options.trace_owner_resolver.resolve == nullptr) {
         return 0;
@@ -2105,9 +2128,16 @@ bool LayerTreeBuilder::build_contextual(const contextual_text::LayoutResult& lay
         auto& root = *draft->layer_tree;
         root.type = LayerType::Root;
         root.reasons = LayerReasonRoot;
-        root.bounds = layout.tree()->rect;
+        root.bounds = Rect{0, 0, layout.tree()->viewport_width, layout.tree()->viewport_height};
         root.clip_rect = root.bounds;
         draft->after_command_counts.reserve(layout.paragraphs().size());
+
+        const LayoutBox* canvas_background_source = contextual_canvas_background_source(*layout.tree());
+        if (canvas_background_source != nullptr) {
+            if (!remaining) return false;
+            push_fill_rect(root.display_list, root.bounds, canvas_background_source->style.background_color);
+            --remaining;
+        }
 
         // The admitted tree has only solid backgrounds and shaped text. Use
         // canonical background geometry without consulting host resources.
@@ -2122,7 +2152,7 @@ bool LayerTreeBuilder::build_contextual(const contextual_text::LayoutResult& lay
                 if (root.display_list.size() > std::numeric_limits<std::uint32_t>::max()) return false;
                 draft->after_command_counts.push_back(static_cast<std::uint32_t>(root.display_list.size()));
                 ++next_paragraph;
-            } else if (box->style.background_color.a) {
+            } else if (box != canvas_background_source && box->style.background_color.a) {
                 Rect area;
                 int radius = 0, radius_y = 0;
                 if (canonical_background_color_area(*box, box->style.background_layers[0].image.clip,

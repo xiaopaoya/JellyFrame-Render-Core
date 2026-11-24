@@ -73,7 +73,7 @@ void check_capture(const char* fixture_root) {
   LayoutResult expired_layout;
   check(!capture.valid() && !capture.layer_tree() && !capture.layout().valid() &&
         capture.after_command_counts().empty(), "empty capture accessors");
-  FrameBuffer expected(viewport.width, viewport.height, {255, 255, 255, 255});
+  FrameBuffer expected(viewport.width, viewport.height, {221, 221, 221, 255});
   {
     Fixture fixture(fixture_root, "regular", true);
     LayoutOptions options;
@@ -82,7 +82,8 @@ void check_capture(const char* fixture_root) {
     auto doc = HtmlParser().parse("<body><section><p>office AV fi</p><div>Second AV</div>"
                                  "<aside></aside></section></body>");
     StyleResolver styles(CssParser().parse(
-        "body{margin:4px;width:200px;background:#dddddd}section{padding:3px;background:#ffeeaa}"
+        "html{background:#dddddd}body{margin:4px;width:200px;background:#bbbbbb}"
+        "section{padding:3px;background:#ffeeaa}"
         "p,div{font-size:24px;line-height:5px;margin:0}p{background:#99ddff}div{background:#ffaaaa}"
         "aside{padding:5px;background-color:#009900;background-clip:content-box}"));
     auto render = RenderTreeBuilder(styles).build(*doc);
@@ -92,9 +93,20 @@ void check_capture(const char* fixture_root) {
                                                   options, work, layout) == Status::ok,
           "capture fixture layout");
     check(LayerTreeBuilder().build_contextual(layout, capture) && capture.valid(), "build contextual capture");
-    check(capture.layer_tree()->display_list.size() == 4 &&
-          capture.after_command_counts() == std::vector<std::uint32_t>({3, 4}),
-          "background order, empty clip emits no command");
+    check(capture.layer_tree()->bounds.x == 0 && capture.layer_tree()->bounds.y == 0 &&
+          capture.layer_tree()->bounds.width == viewport.width &&
+          capture.layer_tree()->bounds.height == viewport.height,
+          "contextual root layer covers the viewport");
+    check(!capture.layer_tree()->display_list.empty() &&
+          capture.layer_tree()->display_list.front().rect.x == 0 &&
+          capture.layer_tree()->display_list.front().rect.y == 0 &&
+          capture.layer_tree()->display_list.front().rect.width == viewport.width &&
+          capture.layer_tree()->display_list.front().rect.height == viewport.height &&
+          capture.layer_tree()->display_list.front().color.r == 221,
+          "canvas background uses the html background across the viewport");
+    check(capture.layer_tree()->display_list.size() == 5 &&
+          capture.after_command_counts() == std::vector<std::uint32_t>({4, 5}),
+          "background order and empty clip emit no command");
 
     // Independent traversal oracle: positive border-box backgrounds fill
     // their layout rects, while the empty content-box background is omitted.
@@ -121,7 +133,7 @@ void check_capture(const char* fixture_root) {
           !LayerTreeBuilder().build(*layout.paragraphs()[0].owner, arena),
           "scalar layer build refuses contextual root and subtree");
     LayerTreeBuilderOptions exact;
-    exact.max_display_commands = 4;
+    exact.max_display_commands = 5;
     for (const auto& p : layout.paragraphs()) for (const auto& line : p.paragraph.lines()) {
       if (line.metrics.has_ink) ++exact.max_display_commands;
     }
