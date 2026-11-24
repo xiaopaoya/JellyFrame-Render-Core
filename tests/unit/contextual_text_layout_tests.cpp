@@ -238,7 +238,7 @@ void check_nowrap_flex_row(const char* fixture_root) {
         "row cross-size preserves natural text host heights");
   check_markers(*result.tree(), true);
 
-  const auto* previous = result.tree();
+  const LayoutBox* previous = result.tree();
   auto limited_options = options;
   limited_options.paragraph.shape_calls = 1;
   work = budget;
@@ -257,10 +257,10 @@ void check_nowrap_flex_row(const char* fixture_root) {
           message);
   };
   const std::string items = "<body><main><div>First</div><div>Second</div></main></body>";
-  refuse("main{display:flex;flex-flow:row wrap;width:160px}div{width:60px}", items,
+  refuse("main{display:flex;flex-direction:row;flex-wrap:wrap;width:160px}div{width:60px}", items,
          "wrapped row refusal preserves prior result");
-  refuse("main{display:flex;flex-flow:column nowrap;width:160px}div{width:60px}", items,
-         "column refusal preserves prior result");
+  refuse("main{display:flex;flex-direction:column;flex-wrap:nowrap;width:160px}div{height:24px}", items,
+         "auto-height column refusal preserves prior result");
   refuse("main{display:flex;flex-flow:row nowrap;width:auto}div{width:60px}", items,
          "indefinite-width row refusal preserves prior result");
   refuse("main{display:flex;flex-flow:row nowrap;width:160px}div{width:60px}",
@@ -269,6 +269,48 @@ void check_nowrap_flex_row(const char* fixture_root) {
   refuse("main{display:flex;flex-flow:row nowrap;width:160px}div{width:60px}",
          "<body><main><div>First</div><span>Anonymous</span></main></body>",
          "anonymous flex item refusal preserves prior result");
+
+  auto column_doc = HtmlParser().parse(
+      "<body><main id='column'><div id='top'>First line</div><div id='bottom'>Second</div></main></body>");
+  StyleResolver column_styles(CssParser().parse(
+      "body{margin:0}main{display:flex;flex-direction:column;flex-wrap:nowrap;width:120px;height:100px;"
+      "row-gap:5px;align-items:stretch}"
+      "#top{width:120px;height:30px;min-height:0;color:#0000cc;font-size:20px;line-height:24px;text-align:center}"
+      "#bottom{width:120px;height:40px;min-height:0;color:#008800;font-size:16px;line-height:20px;text-align:end}"));
+  auto column_render = RenderTreeBuilder(column_styles).build(*column_doc);
+  work = budget;
+  LayoutUsage column_usage;
+  const auto column_status = LayoutEngine(column_styles).layout_contextual(
+            *column_render, viewport.width, viewport.height, options, work, result, &column_usage);
+  check(column_status == Status::ok &&
+        result.paragraphs().size() == 2 && column_usage.paragraphs == 2 && column_usage.lines >= 2,
+        "definite-size nowrap Flex column lays out contextual text");
+  previous = result.tree();
+  const auto* column = find_box_by_id(*result.tree(), "column");
+  const auto* top = find_box_by_id(*result.tree(), "top");
+  const auto* bottom = find_box_by_id(*result.tree(), "bottom");
+  check(column && top && bottom && column->rect.width == 120 && column->rect.height == 100 &&
+        top->rect.width == 120 && top->rect.height == 30 && top->rect.y == column->content_geometry.y / 1000 &&
+        bottom->rect.width == 120 && bottom->rect.height == 40 && bottom->rect.y == top->rect.y + 35,
+        "column allocator preserves definite item geometry and row gap");
+  check(result.paragraphs()[0].origin_y_q1000 == std::int64_t(top->content_geometry.y) &&
+        result.paragraphs()[1].origin_y_q1000 == std::int64_t(bottom->content_geometry.y) &&
+        result.paragraphs()[0].content_width_q1000 == 120000 &&
+        result.paragraphs()[1].content_width_q1000 == 120000,
+        "column paragraphs use final stretched cross-axis width and item origin");
+  LayerCapture column_capture;
+  check(LayerTreeBuilder().build_contextual(result, column_capture) &&
+        column_capture.layer_tree()->display_list.empty(), "capture definite-size text-only column");
+  FrameBuffer expected_column(viewport.width, viewport.height, {255, 255, 255, 255});
+  for (const auto& paragraph : result.paragraphs()) paint_paragraph(paragraph, expected_column);
+  check(same_pixels(draw_capture(column_capture), expected_column),
+        "captured column pixels match direct final-paragraph painting");
+  const auto* previous_column = result.tree();
+  refuse("main{display:flex;flex-direction:column;flex-wrap:nowrap;width:160px;height:100px}div{height:60px}", items,
+         "overflowing definite column refusal preserves prior result");
+  refuse("main{display:flex;flex-direction:column;flex-wrap:nowrap;width:160px;height:100px}div{height:40%}", items,
+         "percentage item height refusal preserves prior result");
+  check(result.tree() == previous_column, "column refusals preserve committed layout");
 #else
   Fixture fixture(fixture_root, "regular", true);
   LayoutOptions options;

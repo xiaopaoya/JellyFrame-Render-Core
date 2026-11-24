@@ -24,7 +24,7 @@ bool ordinary(std::string_view name) {
     if(name==allowed)return true;
   return name.empty();
 }
-bool plain(const Style& s) {
+bool plain(const Style& s, bool allow_height = false) {
   if(s.visibility_hidden||s.position_type!=PositionType::Static||s.opacity!=1||
      !s.transform.empty()||(!s.overflow.empty()&&s.overflow!="visible")||
      s.box_shadow.enabled||s.text_shadow.enabled||s.outline_width||
@@ -37,7 +37,8 @@ bool plain(const Style& s) {
      s.background_layer_count!=1||s.background_layers[0].kind!=BackgroundLayerKind::None||
      !s.z_index_auto||(s.table_properties & kTableUnqualifiedSizingMask))return false;
   if(!s.computed_sizes.empty())return false;
-  if(s.height>=0||s.min_height>=0||s.max_height>=0||s.height_percent>=0||
+  if((!allow_height&&s.height>=0)||(s.min_height>=0&&!(allow_height&&s.min_height==0))||
+     s.max_height>=0||s.height_percent>=0||
      s.min_height_percent>=0||s.max_height_percent>=0)return false;
   return true;
 }
@@ -50,15 +51,17 @@ contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,st
      options.max_text_result_bytes>8U*1024U*1024U||!max_boxes||!max_depth||
      !options.paragraph.shape_calls||!options.paragraph.shaping.work||work>options.paragraph.shaping.work)
     return status=Status::limit;
-  struct Pending {const RenderObject* object;std::size_t depth;};
-  std::vector<Pending> pending{{&root,1}};
+  struct Pending {const RenderObject* object;std::size_t depth;bool flex_item;};
+  std::vector<Pending> pending{{&root,1,false}};
   while(!pending.empty()) {
     const auto next=pending.back();pending.pop_back();
     if(usage.boxes==max_boxes||next.depth>max_depth||!work)return status=Status::limit;
     ++usage.boxes;--work;
     const auto& o=*next.object;
     if(o.children.size()>max_boxes-usage.boxes||pending.size()>max_boxes-usage.boxes-o.children.size())return status=Status::limit;
-    if(!plain(o.style)||!o.node||o.contents_sources)return status=Status::invalid;
+    if(!plain(o.style, (o.style.display == Display::Flex && o.style.flex_direction == FlexDirection::Column) ||
+                     next.flex_item) ||
+       !o.node||o.contents_sources)return status=Status::invalid;
     if(o.type==RenderObjectType::Text) {
       const auto q=std::int64_t(o.style.font_size)*1000;
       if(o.node->type!=NodeType::Text||!o.children.empty()||o.style.font_family_hash!=options.font_family_hash||
@@ -70,14 +73,36 @@ contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,st
       if((o.type!=RenderObjectType::View&&o.type!=RenderObjectType::Block)||
          o.node->type!=NodeType::Element||!ordinary(o.node->tag_name))return status=Status::invalid;
       if(o.style.display==Display::Flex) {
-        if(o.style.flex_direction!=FlexDirection::Row||o.style.flex_wrap!=0||o.style.width<0||
-           o.children.empty())return status=Status::invalid;
+        const bool row = o.style.flex_direction == FlexDirection::Row;
+        if(o.style.flex_wrap!=0||o.style.width<0||o.children.empty()||
+           (!row&&(o.style.height<0||o.style.height_percent>=0)))return status=Status::invalid;
+        if (!row && (o.style.width_percent >= 0 || o.style.min_width >= 0 || o.style.max_width >= 0))
+          return status=Status::invalid;
+        if (!row && (!zero(o.style.padding) || !zero(o.style.border_width) || o.style.box_sizing_border_box))
+          return status=Status::invalid;
+        if (!row && (o.style.min_height >= 0 || o.style.max_height >= 0))
+          return status=Status::invalid;
+        std::int64_t column_occupied = static_cast<std::int64_t>(o.style.row_gap) *
+            static_cast<std::int64_t>(o.children.size() - 1);
         for(const auto& item:o.children) {
           if(!item||item->type!=RenderObjectType::Block||item->style.display!=Display::Block||
              item->node==nullptr||item->node->type!=NodeType::Element||item->children.size()!=1||
              item->children[0]==nullptr||item->children[0]->type!=RenderObjectType::Text)
             return status=Status::invalid;
+          if (!row) {
+            if (!plain(item->style, true) || item->style.height < 0 || item->style.flex_grow != 0 ||
+                item->style.flex_basis >= 0 || item->style.flex_basis_kind != FlexBasisKind::Length ||
+                item->style.width < 0 || item->style.width_percent >= 0 ||
+                item->style.min_width >= 0 || item->style.max_width >= 0 ||
+                item->style.min_width_percent >= 0 || item->style.max_width_percent >= 0 ||
+                (item->style.min_height >= 0 && item->style.min_height != 0) || item->style.max_height >= 0 ||
+                !zero(item->style.margin) || !zero(item->style.padding) ||
+                !zero(item->style.border_width) || item->style.box_sizing_border_box)
+              return status=Status::invalid;
+            column_occupied += item->style.height;
+          }
         }
+        if (!row && column_occupied > o.style.height) return status=Status::invalid;
       } else if(o.style.display!=Display::Block) return status=Status::invalid;
       std::size_t texts=0;
       for(const auto& child:o.children)if(child&&child->type==RenderObjectType::Text)++texts;
@@ -85,7 +110,8 @@ contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,st
     }
     for(auto i=o.children.rbegin();i!=o.children.rend();++i) {
       if(!*i)return status=Status::invalid;
-      pending.push_back({i->get(),next.depth+1});
+      pending.push_back({i->get(),next.depth+1,
+          o.style.display==Display::Flex && o.style.flex_direction==FlexDirection::Column});
     }
   }
   draft=std::make_shared<contextual_text::LayoutResult::State>();
