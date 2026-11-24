@@ -31,6 +31,19 @@ are evidence for their stated scope only.
 - Core PR #102 merged as
   `87509da0195275983a3e5281a2b07e2e09b4b77a` and corrected this document's
   references to merged work.
+- Core PR #106 merged as
+  `508992200070f38b394b1b9d258031eec7d2f844`; it propagates the HTML or BODY
+  canvas background across the contextual viewport.
+- Core PR #107 merged as
+  `c9bf73df950abea43072e618f69b62c492fc1575` and records the #106 qualification
+  and WS147 candidate state.
+- Core PR #108 merged as
+  `69b6e28673d1b00c8175c5f3431969b739fe0eaa`; it tests CSS line-height,
+  Flex cross-axis centering, JFSP2 baselines, and final glyph pixels.
+- Core PR #109 merged as
+  `2ae16b2f190c54ccc0aa0803b0f53a2fd254c7f2`. Its merge did not include the
+  contextual row-wrap implementation. The implementation is now proposed in
+  Core PR #111 and awaits CI and review.
 - WS147 production-trust V0 and V1 screen checks were observed successfully.
   They validate trust QA presentation and do not qualify contextual layout or
   JFSP2 paint-list output.
@@ -47,12 +60,16 @@ are evidence for their stated scope only.
 
 ## Parallel execution
 
-The bounded Flex column change and Runtime Worker regression are merged. The
-paired full/cropped/OFF host qualification also passes against the post-#106
-Core source identity. Contextual Flex wrap is not ready to integrate because
-there is no contextual plan interface that proves line assignment and final
-geometry before publication. The next open gates are the board observation for
-the exact built firmware and the larger shaped-inline owner/cluster integration.
-The production lock remains unchanged. This checklist supersedes older ABI9 notes
-that still describe the pre-ABI11 migration state; those files remain historical
-records unless explicitly updated with newer evidence.
+Core #109 did not contain the row-wrap implementation. Core PR #111 now carries
+the actual Core changes and awaits CI. Runtime PR #158 carries a candidate-only
+qualification matrix pinned to Core #111's exact commit. The local package
+matrix passed, but the first GitHub run failed before testing because the
+qualification script required evidence outside the Runtime checkout. That path
+was corrected and a new run is in progress.
+
+The owner-map adapter remains experimental because it stores mapping data but
+has no shaped-glyph consumer. Remaining gates are Core #111 review/CI, Runtime
+#158 candidate CI, official Core package/release planning, production lock
+review, and WS147 firmware/app visual verification. The production Runtime lock
+remains unchanged. Older ABI9 notes remain historical records unless explicitly
+updated with newer evidence.
