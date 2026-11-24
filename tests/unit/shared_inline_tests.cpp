@@ -2234,6 +2234,18 @@ void generated_flex_grid_items_from_contents() {
               "destroying the origin invalidates the generated text without dereferencing the source");
 
         auto empty_dom = HtmlParser{}.parse("<div id=parent>A<span></span>A<i id=tail></i></div>");
+        StyleResolver hidden_styles(CssParser{}.parse(
+            "*{margin:0;padding:0}#parent{display:" + display +
+            ";width:180px;grid-template-columns:40px 40px;gap:4px}"
+            "#tail{display:block;width:10px;height:12px}"
+            "span{display:contents}span::before{display:none;content:'B'}"));
+        const auto hidden_layout = LayoutEngine(hidden_styles, fixture.options).layout(*empty_dom, 200, 100);
+        check(find(*hidden_layout, "parent").children.size() == 2 &&
+              (display != "grid" || find(*hidden_layout, "tail").rect.x == 44),
+              "a hidden pseudo-element does not split anonymous text or occupy a track");
+        const auto hidden_glyphs = glyphs(*LayerTreeBuilder(fixture.layers).build(*hidden_layout));
+        check(hidden_glyphs.size() == 2 && std::get<0>(hidden_glyphs[0]) == 'A' &&
+              std::get<0>(hidden_glyphs[1]) == 'A', "hidden generated text is not painted");
         for (const std::string value : {"''", "' '", "none"}) {
             StyleResolver empty_styles(CssParser{}.parse(
                 "*{margin:0;padding:0}#parent{display:" + display +

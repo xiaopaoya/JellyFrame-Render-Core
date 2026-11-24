@@ -1415,6 +1415,23 @@ void after_generated_content_and_text_overflow_apply() {
     check(style.after_left_specified && style.after_left == 4, "after left parsed");
 }
 
+void generated_display_cascades_independently() {
+    auto badge = make_element("span");
+    badge->attributes["id"] = "badge";
+    StyleResolver resolver(parse(
+        "span::before { display: none !important; }"
+        "#badge::before { display: inline; content: 'hidden' !important; left: 4px; }"
+        "#badge::after { display: none; content: 'shown'; }"
+        "#badge::after { display: inline; display: invalid; }"));
+    const Style style = resolver.resolve(*badge);
+    check(style.before_content_kind == GeneratedContentKind::None &&
+          style.before_content_text.empty() && !style.before_left_specified,
+          "winning hidden display suppresses even important content and its positioning");
+    check(style.after_content_kind == GeneratedContentKind::Text &&
+          style.after_content_text == "shown",
+          "later inline restores content and an invalid declaration leaves it visible");
+}
+
 void per_corner_border_radius_applies() {
     auto card = make_element("div");
     card->attributes["class"] = "card";
@@ -2065,6 +2082,7 @@ int main() {
         bounded_word_spacing_cascade();
         font_family_declares_runtime_family_hash_and_inherits();
         after_generated_content_and_text_overflow_apply();
+        generated_display_cascades_independently();
         per_corner_border_radius_applies();
         elliptical_border_radius_axes_apply_and_refuse_unsupported_values();
         invalid_elliptical_radius_preserves_prior_winner();

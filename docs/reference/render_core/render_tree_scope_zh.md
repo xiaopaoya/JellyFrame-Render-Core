@@ -60,6 +60,10 @@ DOM + computed style
 - `flex` 和 `grid` 保持 block-like render object 形态，但 computed style 中保留
   原 display value。Layout 随后会对常见 flex row 和响应式 grid card 应用小型专用算法。
 - Layout 消费 render tree，不再直接遍历 DOM。
+- `display: none` 在级联结束后抑制 `::before` 和 `::after` 的生成内容。
+  `inline`、`initial` 和 `unset` 恢复默认显示方式。
+- 在标量 Flex/Grid 布局中，`display: contents` 元素上默认的
+  `::before` 和 `::after` 生成纯文本时，各自形成独立项。
 
 ## 明确延后
 
