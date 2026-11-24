@@ -39,6 +39,26 @@ void maps_ordered_clusters_and_cross_owner_spans() {
         "one ligature cluster preserves its two source owners");
 }
 
+void maps_multibyte_cluster_across_inline_owners() {
+    const std::string text = "\xc3\xa9\xe4\xb8\xad"; // é中
+    const CoreTextClusterMapToken tokens[] = {
+        {0, 2, 21, 3, 5, false},
+        {2, 5, 22, 9, 12, false},
+    };
+    const CoreTextClusterMapGlyph glyphs[] = {{41, 0, 5}};
+    CoreTextClusterMap result;
+    check(map_core_text_clusters(text, tokens, 2, glyphs, 1, result) ==
+        CoreTextClusterMapStatus::Complete, "multibyte cross-owner cluster maps");
+    check(result.clusters.size() == 1 && result.clusters[0].text_begin == 0 &&
+        result.clusters[0].text_end == 5 && result.clusters[0].owner_span_count == 2,
+        "shaping cluster retains complete UTF-8 byte interval and both owners");
+    const auto& first = result.owner_spans[result.clusters[0].first_owner_span];
+    const auto& second = result.owner_spans[result.clusters[0].first_owner_span + 1];
+    check(first.owner == 21 && first.source_begin == 3 && first.source_end == 5 &&
+        second.owner == 22 && second.source_begin == 9 && second.source_end == 12,
+        "owner source ranges retain source order across independent byte offsets");
+}
+
 void coalesces_only_contiguous_same_owner_sources() {
     const std::string text = "abcd";
     const CoreTextClusterMapToken tokens[] = {
@@ -237,6 +257,7 @@ void shaped_wrap_enforces_progress_and_resource_bounds() {
 
 int main() {
     maps_ordered_clusters_and_cross_owner_spans();
+    maps_multibyte_cluster_across_inline_owners();
     coalesces_only_contiguous_same_owner_sources();
     omitted_source_stays_out_of_glyph_owner_spans();
     rejects_invalid_utf8_and_non_scalar_boundaries_transactionally();
