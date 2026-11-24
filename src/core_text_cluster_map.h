@@ -63,9 +63,14 @@ enum class CoreTextClusterMapStatus {
 };
 
 // Builds a value-only cluster and owner map. Tokens must cover the complete
-// normalized run in order; omitted tokens have an empty text interval and a
-// nonempty original source interval. Output publishes only on success; usage
-// reports attempted work and capacity on both success and refusal.
+// normalized run in source order; their source intervals use each DOM owner's
+// original UTF-8 byte offsets. Omitted tokens preserve collapsed source gaps
+// with an empty text interval and a nonempty source interval. Paragraph
+// adapters must attribute normalized CRLF to the CR source and omit the LF
+// source when CRLF crosses owners. Glyph clusters must cover normalized bytes
+// completely, and each cluster maps atomically to its ordered contributing
+// owner spans. Output publishes only on success; usage reports attempted work
+// and capacity on both success and refusal.
 CoreTextClusterMapStatus map_core_text_clusters(
     std::string_view normalized_text,
     const CoreTextClusterMapToken* tokens, std::size_t token_count,
