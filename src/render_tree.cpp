@@ -657,6 +657,7 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
     struct TextSeparator {
         const Node* node;
         Style style;
+        std::shared_ptr<const ContentsSourceTopology> owner;
     };
     RenderObject* text_parent = nullptr;
     RenderObject* text_group = nullptr;
@@ -665,35 +666,95 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         text_group = nullptr;
         text_separators.clear();
     };
+    const auto append_text = [&](RenderObject& parent, const Node& node, Style style,
+                                 std::shared_ptr<const ContentsSourceTopology> owner) {
+        auto leaf = make_render_object(arena);
+        leaf->type = RenderObjectType::Text;
+        leaf->node = &node;
+        leaf->style = std::move(style);
+        leaf->contents_sources = std::move(owner);
+        parent.children.push_back(std::move(leaf));
+        ++render_object_count;
+    };
+    const auto append_anonymous_text = [&](RenderObject& parent, const Node& node, Style style,
+                                           std::shared_ptr<const ContentsSourceTopology> owner = {}) {
+        if (node.text.empty()) return;
+        if (is_collapsible_whitespace_text(node)) {
+            if (text_group && text_separators.size() < max_render_objects - render_object_count)
+                text_separators.push_back({&node, std::move(style), std::move(owner)});
+            return;
+        }
+        const auto required = text_group ? text_separators.size() + 1 : 2;
+        if (required > max_render_objects - render_object_count) {
+            if (!budget_reported) {
+                report_diagnostic(options_.diagnostics, DiagnosticStage::RenderTree,
+                    DiagnosticSeverity::Warning, "render-object-limit",
+                    "Render object budget cannot admit the anonymous text item",
+                    "Increase max_render_objects or simplify the view hierarchy.");
+                budget_reported = true;
+            }
+            finish_text_group();
+            return;
+        }
+        if (!text_group) {
+            auto group = make_render_object(arena);
+            group->type = RenderObjectType::Block;
+            group->style.display = Display::Block;
+            inherit_text_style(group->style, parent.style);
+            group->style.text_overflow_ellipsis = false;
+            text_group = group.get();
+            parent.children.push_back(std::move(group));
+            ++render_object_count;
+        }
+        for (auto& separator : text_separators)
+            append_text(*text_group, *separator.node, std::move(separator.style), std::move(separator.owner));
+        text_separators.clear();
+        append_text(*text_group, node, std::move(style), std::move(owner));
+    };
     const auto append_generated_item = [&](RenderObject& parent, const Node& origin,
                                             const Style& style, bool after) {
-        if ((after ? style.after_content_kind : style.before_content_kind) != GeneratedContentKind::Text)
-            return;
-        finish_text_group();
+        const auto kind = after ? style.after_content_kind : style.before_content_kind;
+        if (!is_generated_text(kind)) return;
         const auto& source = after ? style.after_content_text : style.before_content_text;
+        const bool flatten = kind == GeneratedContentKind::ContentsText;
+        if (flatten && source.empty()) return;
+        if (!flatten) {
+            finish_text_group();
+            if (max_render_objects - render_object_count < 2) {
+                if (!budget_reported) {
+                    report_diagnostic(options_.diagnostics, DiagnosticStage::RenderTree,
+                        DiagnosticSeverity::Warning, "render-object-limit",
+                        "Render object budget cannot admit the generated text item",
+                        "Increase max_render_objects or simplify the view hierarchy.");
+                    budget_reported = true;
+                }
+                return;
+            }
+        }
         auto text = std::make_shared<detail::GeneratedFlexGridText>(origin);
         text->text = source;
+        std::shared_ptr<const ContentsSourceTopology> owner(text, &detail::generated_text_owner);
+        Style pseudo_style;
+        pseudo_style.display = Display::Inline;
+        inherit_text_style(pseudo_style, style);
+        pseudo_style.text_overflow_ellipsis = false;
+        if (after ? style.after_color_specified : style.before_color_specified)
+            pseudo_style.color = after ? style.after_color : style.before_color;
+        if (after ? style.after_font_weight_specified : style.before_font_weight_specified)
+            pseudo_style.font_weight = after ? style.after_font_weight : style.before_font_weight;
+        if (flatten) {
+            append_anonymous_text(parent, *text, std::move(pseudo_style), std::move(owner));
+            return;
+        }
         if (is_collapsible_whitespace_text(*text)) text->text.clear();
         auto item = make_render_object(arena);
         item->type = RenderObjectType::Block;
+        item->style = pseudo_style;
         item->style.display = Display::Block;
-        inherit_text_style(item->style, style);
-        item->style.text_overflow_ellipsis = false;
-        if (after ? style.after_color_specified : style.before_color_specified)
-            item->style.color = after ? style.after_color : style.before_color;
-        if (after ? style.after_font_weight_specified : style.before_font_weight_specified)
-            item->style.font_weight = after ? style.after_font_weight : style.before_font_weight;
-        auto child = make_render_object(arena);
-        child->type = RenderObjectType::Text;
-        child->node = text.get();
-        child->contents_sources = std::shared_ptr<const ContentsSourceTopology>(text,
-            &detail::generated_text_owner);
-        child->style.display = Display::Inline;
-        inherit_text_style(child->style, item->style);
-        child->style.text_indent = 0;
-        item->children.push_back(std::move(child));
+        pseudo_style.text_indent = 0;
+        append_text(*item, *text, std::move(pseudo_style), std::move(owner));
         parent.children.push_back(std::move(item));
-        render_object_count += 2;
+        ++render_object_count;
     };
 #endif
     const auto record_source = [&](ContentsSourceRecord record) {
@@ -726,14 +787,14 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         }
         const bool flex_grid_text = node.type == NodeType::Text &&
             (parent.style.display == Display::Flex || parent.style.display == Display::Grid);
+        if (pending_node.generated_after) {
+            append_generated_item(parent, node, *pending_node.parent_style, true);
+            continue;
+        }
 #else
         constexpr bool flex_grid_text = false;
 #endif
-        std::size_t required_objects = 1;
-#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
-        if (pending_node.generated_after) required_objects = 2;
-#endif
-        if (required_objects > max_render_objects - render_object_count) {
+        if (render_object_count >= max_render_objects) {
             if (!budget_reported) {
                 report_diagnostic(options_.diagnostics,
                                   DiagnosticStage::RenderTree,
@@ -745,13 +806,6 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
             }
             continue;
         }
-
-#if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
-        if (pending_node.generated_after) {
-            append_generated_item(parent, node, *pending_node.parent_style, true);
-            continue;
-        }
-#endif
 
         // These sources are discarded independently of their computed style.
         // Keep overrides on the established path and preserve budget diagnostics.
@@ -789,18 +843,8 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
             const Style* inherited_style = &contents_styles.back();
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
             if (parent.style.display == Display::Flex || parent.style.display == Display::Grid) {
-                if (style.before_content_kind == GeneratedContentKind::Text) {
-                    if (max_render_objects - render_object_count >= 2) {
-                        append_generated_item(parent, node, style, false);
-                    } else if (!budget_reported) {
-                        report_diagnostic(options_.diagnostics, DiagnosticStage::RenderTree,
-                            DiagnosticSeverity::Warning, "render-object-limit",
-                            "Render object budget cannot admit the generated text item",
-                            "Increase max_render_objects or simplify the view hierarchy.");
-                        budget_reported = true;
-                    }
-                }
-                if (style.after_content_kind == GeneratedContentKind::Text)
+                append_generated_item(parent, node, style, false);
+                if (is_generated_text(style.after_content_kind))
                     pending.push_back(PendingNode{&node, &parent, inherited_style, true,
                         pending_node.dom_index, true});
             }
@@ -814,46 +858,10 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
             continue;
         }
 
-        RenderObject* destination = &parent;
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
         if (flex_grid_text && style.display != Display::None && !node.text.empty()) {
-            if (is_collapsible_whitespace_text(node)) {
-                if (text_group && text_separators.size() < max_render_objects - render_object_count)
-                    text_separators.push_back({&node, std::move(style)});
-                continue;
-            }
-            const auto required = text_group ? text_separators.size() + 1 : 2;
-            if (required > max_render_objects - render_object_count) {
-                if (!budget_reported) {
-                    report_diagnostic(options_.diagnostics, DiagnosticStage::RenderTree,
-                        DiagnosticSeverity::Warning, "render-object-limit",
-                        "Render object budget cannot admit the anonymous text item",
-                        "Increase max_render_objects or simplify the view hierarchy.");
-                    budget_reported = true;
-                }
-                finish_text_group();
-                continue;
-            }
-            if (!text_group) {
-                auto group = make_render_object(arena);
-                group->type = RenderObjectType::Block;
-                group->style.display = Display::Block;
-                inherit_text_style(group->style, parent.style);
-                group->style.text_overflow_ellipsis = false;
-                text_group = group.get();
-                parent.children.push_back(std::move(group));
-                ++render_object_count;
-            }
-            for (auto& separator : text_separators) {
-                auto text = make_render_object(arena);
-                text->type = RenderObjectType::Text;
-                text->node = separator.node;
-                text->style = std::move(separator.style);
-                text_group->children.push_back(std::move(text));
-                ++render_object_count;
-            }
-            text_separators.clear();
-            destination = text_group;
+            append_anonymous_text(parent, node, std::move(style));
+            continue;
         }
 #endif
         if (!flex_grid_text && pending_node.under_contents && node.type == NodeType::Text &&
@@ -876,7 +884,7 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         object->type = render_type_for(node, style);
         object->node = &node;
         object->style = style;
-        destination->children.push_back(std::move(object));
+        parent.children.push_back(std::move(object));
 
         if (!is_replaced_control(node)) {
             for (std::size_t i = node.children.size(); i > 0; --i) {

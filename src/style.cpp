@@ -4864,6 +4864,8 @@ bool apply_generated_declaration(Style& style,
         const std::string keyword = lowercase(trim(value));
         if (keyword == "none") {
             display = Display::None;
+        } else if (keyword == "contents") {
+            display = Display::Contents;
         } else if (keyword == "inline" || keyword == "initial" || keyword == "unset") {
             display = Display::Inline;
         } else {
@@ -6362,6 +6364,9 @@ Style StyleResolver::resolve_uncached(const Node& node,
         style.before_counter_suffix.clear();
         style.before_left = 0;
         style.before_left_specified = false;
+    } else if (slots.before_display == Display::Contents &&
+               style.before_content_kind == GeneratedContentKind::Text) {
+        style.before_content_kind = GeneratedContentKind::ContentsText;
     }
     if (slots.after_display == Display::None) {
         style.after_content_kind = GeneratedContentKind::None;
@@ -6370,6 +6375,9 @@ Style StyleResolver::resolve_uncached(const Node& node,
         style.after_counter_suffix.clear();
         style.after_left = 0;
         style.after_left_specified = false;
+    } else if (slots.after_display == Display::Contents &&
+               style.after_content_kind == GeneratedContentKind::Text) {
+        style.after_content_kind = GeneratedContentKind::ContentsText;
     }
     return style;
 }

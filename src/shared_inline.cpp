@@ -1,6 +1,7 @@
 #include "render_core/text_normalization.h"
 #include "render_core/text_backend.h"
 #include "computed_size_geometry.h"
+#include "generated_flex_grid_text.h"
 #include "natural_image_sizing.h"
 #include "shared_inline.h"
 #include <algorithm>
@@ -280,7 +281,7 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
 bool generated_source_eligible(const Style& style, bool host) {
     const auto supported = [](GeneratedContentKind kind, const std::string& counter_name) {
         return kind == GeneratedContentKind::None ||
-            kind == GeneratedContentKind::Text ||
+            is_generated_text(kind) ||
             (kind == GeneratedContentKind::Counter && counter_name == "list-num");
     };
     return supported(style.before_content_kind, style.before_counter_name) &&
@@ -370,10 +371,10 @@ struct Collector {
         if (!box.node || box.node->type != NodeType::Element ||
             !generated_source_eligible(style, member == 0)) return false;
         const auto& source_proof = snapshot.members[member].proof;
-        const auto& source = kind == GeneratedContentKind::Text
+        const auto& source = is_generated_text(kind)
             ? (after ? style.after_content_text : style.before_content_text)
             : (after ? source_proof.after_counter_text : source_proof.before_counter_text);
-        if (kind == GeneratedContentKind::Text && source.empty()) return true;
+        if (is_generated_text(kind) && source.empty()) return true;
         if (source.empty() || source.size() > max_source - bytes) return false;
         Style pseudo_style = style;
         if (after ? style.after_font_weight_specified : style.before_font_weight_specified)
@@ -475,8 +476,8 @@ struct Collector {
         const auto kind = after ? style.after_content_kind : style.before_content_kind;
         if (kind == GeneratedContentKind::None) return true;
         const auto& source = after ? style.after_content_text : style.before_content_text;
-        if (kind == GeneratedContentKind::Text && source.empty()) return true;
-        if (kind != GeneratedContentKind::Text || wrapper.node == nullptr ||
+        if (is_generated_text(kind) && source.empty()) return true;
+        if (!is_generated_text(kind) || wrapper.node == nullptr ||
             wrapper.node->type != NodeType::Element ||
             style.text_transform != TextTransform::None || style.visibility_hidden ||
             style.white_space_nowrap != snapshot.members[0].proof.nowrap ||
@@ -594,7 +595,12 @@ struct Collector {
             if (marker) span.kind = box.node->tag_name == "br"
                 ? CoreTextParagraphSpanKind::ForcedBreak : CoreTextParagraphSpanKind::Opportunity;
             spans.push_back(span);
-            snapshot.owners.push_back({member, snapshot.members[member].proof.node,
+            const Node* source_node = box.node;
+            if (owns_generated_text(box.text_layout_cache.contents_sources)) {
+                source_node = current_generated_text_origin(*box.node);
+                if (!source_node) return false;
+            }
+            snapshot.owners.push_back({member, source_node,
                 static_cast<std::size_t>(-1)});
             SharedInlineSnapshot::OwnerPaint paint;
             paint.color = box.style.color;
@@ -636,7 +642,12 @@ struct Collector {
         ++budget.statistics.members;
         for (std::size_t i = 0; i < host.children.size(); ++i) {
             auto& child = *host.children[i];
-            if (!child.node || child.node->type != NodeType::Text || !child.node->parent) return false;
+            if (!child.node || child.node->type != NodeType::Text) return false;
+            if (owns_generated_text(child.text_layout_cache.contents_sources)) {
+                if (!collect(child, 0, 1, 0, i)) return false;
+                continue;
+            }
+            if (!child.node->parent) return false;
             const auto& siblings = child.node->parent->children;
             std::size_t dom_index = 0;
             for (; dom_index < siblings.size(); ++dom_index) {
@@ -754,6 +765,9 @@ bool layout_shared_inline(LayoutBox& host, int x, int y, int width,
         snapshot->system = options.text_system;
         snapshot->generation = options.text_system->generation();
         snapshot->dom_root = anonymous ? host.children.front()->node : host.node;
+        if (anonymous && owns_generated_text(host.children.front()->text_layout_cache.contents_sources)) {
+            snapshot->dom_root = current_generated_text_origin(*snapshot->dom_root);
+        }
         snapshot->contents_sources = host.text_layout_cache.contents_sources;
         std::size_t ancestors = 0;
         while (snapshot->dom_root && snapshot->dom_root->parent) {
@@ -1013,7 +1027,6 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
     if (system != snapshot.system || !system || system->generation() != snapshot.generation) return false;
     const auto& host = *snapshot.members[0].proof.box;
     const bool anonymous = snapshot.members[0].proof.node == nullptr;
-    if (anonymous && !is_anonymous_flex_grid_text(host)) return false;
     const auto* root = anonymous ? snapshot.dom_root : snapshot.members[0].proof.node;
     if (!root) return false;
     std::size_t ancestors = 0;
@@ -1022,6 +1035,7 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
         root = root->parent;
     }
     if (root != snapshot.dom_root || root->mutation_generation != snapshot.dom_generation) return false;
+    if (anonymous && !is_anonymous_flex_grid_text(host)) return false;
     if (host.text_layout_cache.contents_sources != snapshot.contents_sources ||
         (snapshot.contents_sources && !snapshot.contents_sources->complete)) return false;
     if ((host.content_geometry.width >= 0 && host.content_geometry.width != snapshot.width_units) ||
@@ -1031,15 +1045,16 @@ bool shared_inline_current(const SharedInlineBinding& binding, const TextSystem*
     const auto origin_y = static_cast<std::int64_t>(host.rect.y)+snapshot.content_offset_y;
     for (std::size_t i = 0; i < snapshot.members.size(); ++i) {
         const auto& p = snapshot.members[i].proof;
-        // Validate membership against the still-owned layout tree before any
-        // descendant Node dereference. Detached/destroyed child pointers fail.
-        if (i && (!p.parent || p.parent->children.size() != p.parent_dom_children ||
-            p.dom_index >= p.parent_dom_children ||
-            p.parent->children[p.dom_index].get() != p.node)) return false;
         if (i) {
             const auto& parent_box = *snapshot.members[p.parent_member].proof.box;
             if (p.render_index >= parent_box.children.size() ||
                 parent_box.children[p.render_index].get() != p.box) return false;
+            const auto& child = *p.box;
+            if (anonymous && owns_generated_text(child.text_layout_cache.contents_sources)) {
+                if (!p.node || child.node != p.node || !current_generated_text_origin(*p.node)) return false;
+            } else if (!p.parent || p.parent->children.size() != p.parent_dom_children ||
+                p.dom_index >= p.parent_dom_children ||
+                p.parent->children[p.dom_index].get() != p.node) return false;
         }
         const auto& box = *p.box;
         if (i == 0 && anonymous) {
