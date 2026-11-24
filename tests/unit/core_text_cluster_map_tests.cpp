@@ -98,6 +98,38 @@ void omitted_source_stays_out_of_glyph_owner_spans() {
         "omitted whitespace contributes no glyph owner span and breaks coalescing");
 }
 
+void normalized_crlf_keeps_cr_owner_and_omits_cross_owner_lf() {
+    // CoreTextParagraph coalesces CRLF to one normalized LF. When the pair
+    // crosses DOM owners, its source record belongs to CR and LF contributes
+    // no source record to the shaped run.
+    const std::string text = "A\nB";
+    const CoreTextClusterMapToken tokens[] = {
+        {0, 1, 30, 0, 1, false},
+        {1, 2, 30, 1, 2, false},
+        {2, 2, 31, 0, 1, true},
+        {2, 3, 31, 1, 2, false},
+    };
+    const CoreTextClusterMapGlyph glyphs[] = {
+        {1, 0, 1}, {2, 1, 2}, {3, 2, 3},
+    };
+    CoreTextClusterMap result;
+    check(map_core_text_clusters(text, tokens, 4, glyphs, 3, result) ==
+        CoreTextClusterMapStatus::Complete, "cross-owner CRLF normalized map completes");
+    check(result.clusters.size() == 3 && result.owner_spans.size() == 3,
+        "normalized LF remains a distinct cluster and omitted LF has no glyph span");
+    const auto& newline = result.clusters[1];
+    const auto& newline_owner = result.owner_spans[newline.first_owner_span];
+    check(newline.text_begin == 1 && newline.text_end == 2 &&
+        newline.owner_span_count == 1 && newline_owner.owner == 30 &&
+        newline_owner.source_begin == 1 && newline_owner.source_end == 2,
+        "normalized LF resolves to the original CR owner range");
+    const auto& after = result.clusters[2];
+    const auto& after_owner = result.owner_spans[after.first_owner_span];
+    check(after_owner.owner == 31 && after_owner.source_begin == 1 &&
+        after_owner.source_end == 2,
+        "source after cross-owner CRLF retains its owner's local offset");
+}
+
 void rejects_invalid_utf8_and_non_scalar_boundaries_transactionally() {
     CoreTextClusterMap result;
     const std::string good = "A";
@@ -260,6 +292,7 @@ int main() {
     maps_multibyte_cluster_across_inline_owners();
     coalesces_only_contiguous_same_owner_sources();
     omitted_source_stays_out_of_glyph_owner_spans();
+    normalized_crlf_keeps_cr_owner_and_omits_cross_owner_lf();
     rejects_invalid_utf8_and_non_scalar_boundaries_transactionally();
     rejects_gaps_overlaps_and_bad_token_partitions();
     omitted_only_run_and_limits_are_bounded();
