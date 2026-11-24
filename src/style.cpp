@@ -3136,10 +3136,12 @@ enum class CascadeProperty : std::size_t {
     AnimationDirection,
     AnimationFillMode,
     BeforeContent,
+    BeforeDisplay,
     BeforeColor,
     BeforeFontWeight,
     BeforeLeft,
     AfterContent,
+    AfterDisplay,
     AfterColor,
     AfterFontWeight,
     AfterLeft,
@@ -3150,6 +3152,8 @@ struct CascadeSlots {
     std::array<CascadeSlot, static_cast<std::size_t>(CascadeProperty::Count)> slots;
     std::array<std::array<BackgroundImageStyleValues, 4>, 5> background_lists{};
     std::array<std::size_t, 5> background_list_counts{};
+    Display before_display = Display::Inline;
+    Display after_display = Display::Inline;
     CascadeSlots() {
         for (auto& list : background_lists)
             for (auto& item : list) item.position_x_percent = item.position_y_percent = 0;
@@ -3307,6 +3311,9 @@ CascadeSlot* cascade_slot_for_generated_property(CascadeSlots& slots,
     const bool after = pseudo == CssPseudoElement::After;
     if (property == "content") {
         return &cascade_slot(slots, after ? CascadeProperty::AfterContent : CascadeProperty::BeforeContent);
+    }
+    if (property == "display") {
+        return &cascade_slot(slots, after ? CascadeProperty::AfterDisplay : CascadeProperty::BeforeDisplay);
     }
     if (property == "color") {
         return &cascade_slot(slots, after ? CascadeProperty::AfterColor : CascadeProperty::BeforeColor);
@@ -4847,10 +4854,23 @@ bool parse_counter_content(const std::string& raw_value, std::string& name, std:
 }
 
 bool apply_generated_declaration(Style& style,
+                                 CascadeSlots& slots,
                                  CssPseudoElement pseudo,
                                  const std::string& property,
                                  const std::string& value,
                                  const LengthResolutionContext& context) {
+    if (property == "display") {
+        auto& display = pseudo == CssPseudoElement::After ? slots.after_display : slots.before_display;
+        const std::string keyword = lowercase(trim(value));
+        if (keyword == "none") {
+            display = Display::None;
+        } else if (keyword == "inline" || keyword == "initial" || keyword == "unset") {
+            display = Display::Inline;
+        } else {
+            return false;
+        }
+        return true;
+    }
     GeneratedContentKind& content_kind = pseudo == CssPseudoElement::After
         ? style.after_content_kind
         : style.before_content_kind;
@@ -4930,6 +4950,7 @@ bool apply_generated_declaration(Style& style,
 }
 
 bool apply_cascaded_generated_declaration(Style& style,
+                                          CascadeSlots& slots,
                                           CssPseudoElement pseudo,
                                           CascadeSlot& slot,
                                           const CssDeclaration& declaration,
@@ -4939,7 +4960,7 @@ bool apply_cascaded_generated_declaration(Style& style,
     if (!declaration_wins(slot, declaration, specificity, source_order)) {
         return true;
     }
-    if (apply_generated_declaration(style, pseudo, declaration.property, declaration.value, context)) {
+    if (apply_generated_declaration(style, slots, pseudo, declaration.property, declaration.value, context)) {
         mark_slot(slot, declaration, specificity, source_order);
         return true;
     }
@@ -5111,6 +5132,7 @@ void apply_declarations(Style& style,
             CascadeSlot* slot = cascade_slot_for_generated_property(slots, pseudo_element, applied_declaration.property);
             if (slot != nullptr) {
                 if (!apply_cascaded_generated_declaration(style,
+                                                          slots,
                                                           pseudo_element,
                                                           *slot,
                                                           applied_declaration,
@@ -6331,6 +6353,23 @@ Style StyleResolver::resolve_uncached(const Node& node,
                            inline_specificity,
                            static_cast<std::size_t>(-1), CssPseudoElement::None, custom_properties,
                            options_.diagnostics, this, options_.max_resolved_value_bytes, length_context);
+    }
+    // Lower hidden pseudo-elements after both properties finish cascading.
+    if (slots.before_display == Display::None) {
+        style.before_content_kind = GeneratedContentKind::None;
+        style.before_content_text.clear();
+        style.before_counter_name.clear();
+        style.before_counter_suffix.clear();
+        style.before_left = 0;
+        style.before_left_specified = false;
+    }
+    if (slots.after_display == Display::None) {
+        style.after_content_kind = GeneratedContentKind::None;
+        style.after_content_text.clear();
+        style.after_counter_name.clear();
+        style.after_counter_suffix.clear();
+        style.after_left = 0;
+        style.after_left_specified = false;
     }
     return style;
 }
