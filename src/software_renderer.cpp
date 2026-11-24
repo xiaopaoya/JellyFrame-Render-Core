@@ -1353,6 +1353,102 @@ void SoftwareRasterizer::rasterize(const DisplayList& display_list,
     }
 }
 
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED
+void SoftwareRasterizer::rasterize(const ContextualTextDisplayList& display_list,
+                                   FrameBuffer& target, Rect clip,
+                                   int offset_x, int offset_y,
+                                   SoftwareRasterizerScratch* scratch) const {
+    if (display_list.empty()) return;
+    if (target.width <= 0 || target.height <= 0 || clip.width < 0 || clip.height < 0 ||
+        std::size_t(target.width) > SIZE_MAX / std::size_t(target.height) ||
+        target.pixels.size() != std::size_t(target.width) * std::size_t(target.height)) {
+        report_diagnostic(diagnostics_, DiagnosticStage::Paint, DiagnosticSeverity::Warning,
+                          "paint-contextual-frame-invalid",
+                          "Contextual display list requires a valid framebuffer");
+        return;
+    }
+    const auto overlaps = [](std::uintptr_t a, std::size_t an,
+                             std::uintptr_t b, std::size_t bn) noexcept {
+        return an && bn && (a >= b ? a - b < bn : b - a < an);
+    };
+    const auto pixel_begin = reinterpret_cast<std::uintptr_t>(target.pixels.data());
+    if (target.pixels.size() > SIZE_MAX / sizeof(Color)) {
+        report_diagnostic(diagnostics_, DiagnosticStage::Paint, DiagnosticSeverity::Warning,
+                          "paint-contextual-frame-invalid",
+                          "Contextual display list framebuffer storage exceeds addressable size");
+        return;
+    }
+    const auto pixel_bytes = target.pixels.size() * sizeof(Color);
+    contextual_text::Limits limits;
+    std::uint64_t preflight_work = limits.work;
+    for (const auto& command : display_list) {
+        const auto packet_begin = reinterpret_cast<std::uintptr_t>(command.packet.data());
+        const auto baseline_x = std::int64_t(command.baseline_x_q1000) +
+            std::int64_t(offset_x) * 1000;
+        const auto baseline_y = std::int64_t(command.baseline_y_q1000) +
+            std::int64_t(offset_y) * 1000;
+        const auto rect_x = std::int64_t(command.rect.x) + offset_x;
+        const auto rect_y = std::int64_t(command.rect.y) + offset_y;
+        if (!command.binding.valid() || command.rect.width < 0 || command.rect.height < 0 ||
+            baseline_x < INT32_MIN || baseline_x > INT32_MAX ||
+            baseline_y < INT32_MIN || baseline_y > INT32_MAX ||
+            rect_x < INT_MIN || rect_x > INT_MAX || rect_y < INT_MIN || rect_y > INT_MAX ||
+            overlaps(packet_begin, command.packet.size(), pixel_begin, pixel_bytes)) {
+            report_diagnostic(diagnostics_, DiagnosticStage::Paint, DiagnosticSeverity::Warning,
+                              "paint-contextual-command-invalid",
+                              "Contextual command has invalid ownership, geometry or packet storage");
+            return;
+        }
+        const auto status = contextual_text::validate_packet(command.binding, command.packet,
+                                                               limits, preflight_work);
+        if (status != contextual_text::Status::ok) {
+            report_diagnostic(diagnostics_, DiagnosticStage::Paint, DiagnosticSeverity::Warning,
+                              "paint-contextual-preflight-refused",
+                              "Contextual display list failed packet or binding preflight");
+            return;
+        }
+    }
+
+    // Render to private storage so any later per-command raster refusal also
+    // preserves the caller's complete frame. Caller scratch retains capacity
+    // between frames. The local path remains available when scratch is absent.
+    FrameBuffer local_staged;
+    FrameBuffer& staged = scratch ? scratch->transformed_surface : local_staged;
+    try {
+        staged.width = target.width;
+        staged.height = target.height;
+        staged.pixels = target.pixels;
+    } catch (...) {
+        report_diagnostic(diagnostics_, DiagnosticStage::Paint, DiagnosticSeverity::Warning,
+                          "paint-contextual-allocation-refused",
+                          "Contextual display list staging allocation failed");
+        return;
+    }
+    std::uint64_t paint_work = preflight_work;
+    for (const auto& command : display_list) {
+        Rect bounds = command.rect;
+        const auto translated_x = std::int64_t(bounds.x) + offset_x;
+        const auto translated_y = std::int64_t(bounds.y) + offset_y;
+        bounds.x = static_cast<int>(translated_x);
+        bounds.y = static_cast<int>(translated_y);
+        const Rect command_clip = intersect_rect(clip, bounds);
+        const auto status = contextual_text::paint(command.binding, command.packet, staged,
+            static_cast<std::int32_t>(std::int64_t(command.baseline_x_q1000) +
+                                      std::int64_t(offset_x) * 1000),
+            static_cast<std::int32_t>(std::int64_t(command.baseline_y_q1000) +
+                                      std::int64_t(offset_y) * 1000),
+            command_clip, command.color, limits, paint_work);
+        if (status != contextual_text::Status::ok) {
+            report_diagnostic(diagnostics_, DiagnosticStage::Paint, DiagnosticSeverity::Warning,
+                              "paint-contextual-command-refused",
+                              "Contextual command rasterization failed before frame publication");
+            return;
+        }
+    }
+    target.pixels.swap(staged.pixels);
+}
+#endif
+
 void SoftwareRasterizer::rasterize(const DisplayCommand& command,
                                    FrameBuffer& target,
                                    Rect clip,

@@ -5,6 +5,10 @@
 #include "render_core/host.h"
 #include "render_core/layer_tree.h"
 #include "render_core/text_system.h"
+#include "render_core/feature_config.h"
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED
+#include "render_core/contextual_text.h"
+#endif
 
 #include <array>
 #include <cstddef>
@@ -39,6 +43,22 @@ struct SoftwareRasterizerScratch {
 
     void release();
 };
+
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED
+// An owning display-list entry for a JFSP2 packet. The Binding pins the
+// authenticated font/shaping resources for as long as the command is retained.
+// Keep this wrapper separate from DisplayCommand so existing command layout
+// and scalar-profile consumers retain their ABI.
+struct ContextualTextDisplayCommand {
+    Rect rect;
+    Color color;
+    std::int32_t baseline_x_q1000 = 0;
+    std::int32_t baseline_y_q1000 = 0;
+    std::string packet;
+    contextual_text::Binding binding;
+};
+using ContextualTextDisplayList = std::vector<ContextualTextDisplayCommand>;
+#endif
 
 // Optional caller-owned counters for diagnosing rounded value-frame clips.
 // They are intentionally plain counters: rasterizer instances are task-local.
@@ -200,6 +220,14 @@ public:
                    int offset_x,
                    int offset_y,
                    SoftwareRasterizerScratch* scratch) const;
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED
+    // Validates every packet, binding identity and translated baseline before
+    // painting any command. Packet and resource ownership is retained by list.
+    void rasterize(const ContextualTextDisplayList& display_list,
+                   FrameBuffer& target, Rect clip, int offset_x = 0,
+                   int offset_y = 0,
+                   SoftwareRasterizerScratch* scratch = nullptr) const;
+#endif
     void rasterize(const DisplayCommand& command,
                    FrameBuffer& target,
                    Rect clip,

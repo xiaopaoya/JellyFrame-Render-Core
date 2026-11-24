@@ -67,8 +67,18 @@ contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,st
       if(++expected_paragraphs>options.max_paragraphs||o.node->text.size()>options.max_source_bytes-usage.source_bytes)return status=Status::limit;
       usage.source_bytes+=o.node->text.size();
     } else {
-      if((o.type!=RenderObjectType::View&&o.type!=RenderObjectType::Block)||o.style.display!=Display::Block||
+      if((o.type!=RenderObjectType::View&&o.type!=RenderObjectType::Block)||
          o.node->type!=NodeType::Element||!ordinary(o.node->tag_name))return status=Status::invalid;
+      if(o.style.display==Display::Flex) {
+        if(o.style.flex_direction!=FlexDirection::Row||o.style.flex_wrap!=0||o.style.width<0||
+           o.children.empty())return status=Status::invalid;
+        for(const auto& item:o.children) {
+          if(!item||item->type!=RenderObjectType::Block||item->style.display!=Display::Block||
+             item->node==nullptr||item->node->type!=NodeType::Element||item->children.size()!=1||
+             item->children[0]==nullptr||item->children[0]->type!=RenderObjectType::Text)
+            return status=Status::invalid;
+        }
+      } else if(o.style.display!=Display::Block) return status=Status::invalid;
       std::size_t texts=0;
       for(const auto& child:o.children)if(child&&child->type==RenderObjectType::Text)++texts;
       if(texts&&(texts!=1||o.children.size()!=1))return status=Status::invalid;
@@ -100,8 +110,19 @@ contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,st
 std::int64_t ContextualLayoutFrame::prepare(LayoutBox& box,std::int64_t x,std::int64_t y,std::int64_t width) {
   using contextual_text::Status;
   if(status!=Status::ok)return 0;
-  if(x<INT_MIN||x>INT_MAX||y<INT_MIN||y>INT_MAX||width<0||width>INT_MAX||
-     usage.paragraphs>=expected_paragraphs||usage.lines>=options.max_lines||
+  if(x<INT_MIN||x>INT_MAX||y<INT_MIN||y>INT_MAX||width<0||width>INT_MAX) {
+    status=Status::limit;return 0;
+  }
+  for(auto& entry:draft->paragraphs)if(entry.owner==&box) {
+    if(entry.content_width_q1000!=width) {status=Status::invalid;return 0;}
+    const auto height=std::int64_t(entry.paragraph.height_q1000());
+    box.rect={project_size_edge(x),project_size_edge(y),
+        project_size_extent(x,width),project_size_extent(y,height)};
+    box.content_geometry={x,y,width,height,false};
+    entry.color=box.style.color;entry.align=box.style.text_align;
+    return height;
+  }
+  if(usage.paragraphs>=expected_paragraphs||usage.lines>=options.max_lines||
      usage.shape_calls>=options.paragraph.shape_calls||usage.text_result_bytes>=options.max_text_result_bytes) {
     status=Status::limit;return 0;
   }
