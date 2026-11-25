@@ -69,14 +69,27 @@ and successful tests are evidence for their stated scope only.
   qualification passed 41/41 in each profile against the candidate, with the
   production lock unchanged.
 
+- Core PRs #119 and #120 added the JFSP2 source-owner mapper and glyph
+  geometry based on the contextual painter. Core PR #121 added opt-in
+  capture of glyph bounds and original UTF-8 byte spans for the existing
+  direct-text topology. Local Core suites passed 47/47 with contextual
+  layout enabled, 45/45 with layout disabled, and 41/41 with contextual
+  text disabled. PR CI and post-merge CI passed for #121.
+- Core PR #122 corrected contextual line height and baselines to use positive
+  font descent. PR and post-merge CI passed. A desktop capture of the exact
+  Contextual Flex 0.1.4 page at 172 × 320 and an Edge capture with the same
+  Noto Sans SC source font put A/V ink on rows 161–172. The previous Core
+  put it on rows 166–177. The four Flex item bounds agreed and Chinese glyph
+  pixel bounds still differed.
+
 ## Migration gates and workstreams
 
 | Workstream | Current evidence | Required next evidence |
 | --- | --- | --- |
-| Shared inline ownership for shaped text | Core's `CoreTextClusterMap` maps one JFSP2 cluster to ordered source-owner spans, and `CoreTextParagraph` already records normalized per-owner byte ranges. Production shared-inline still emits scalar `PreparedText`; the contextual layout route only admits a block with one direct text child, and Runtime's contextual worker serializes `LayoutResult::paragraphs()` plus a separate scalar display list. The owner map therefore has no production shaped-glyph consumer. | Follow `docs/evaluation/abi11_shared_inline_contextual_integration_2026-11-26.md`. The first implementation must route contextual packets through an ordered layer/worker output while retaining owner fragments for hit testing. Paint each cross-owner cluster once. Refuse a cluster whose contributing owners disagree on paint style, plus unsupported normalization/atomics, transactionally. Qualify Core pixels and owner hit ranges before Runtime full/cropped/off and device gates. |
+| Shared inline ownership for shaped text | Core #119–#121 cover source-owner mapping, glyph bounds and opt-in capture for direct text, including wrapping, original byte ranges and rollback. The installed Worker currently uses the paint-only capture path. | Admit runs spanning multiple inline owners with uniform geometry and paint. Verify a shared cluster paints once and retains all contributing source spans. Then connect the capture to Worker input and qualify full/cropped/off packages. |
 | Contextual Flex topology | Core #100 and Runtime #156 cover a definite-width nowrap row. Core #101 adds bounded definite-pixel columns. Core #111 adds bounded row wrapping with geometry, baseline, pixel, refusal, and replay coverage. Core #117 adds per-line `justify-content` distribution for the same admitted wrapped-row topology and tests all six supported modes against exact Q1000 geometry and final pixels. Contextual Core CTest passed 46/46 and the default build passed 43/43. Runtime full/off/cropped installed-package qualification passed 41/41 for each profile against Core commit `8e4ac459ca7398dc0a786cb297e7e46f28f172eb`, with full/cropped signed shaped routes and desktop consumers passing and the production lock unchanged. Core PR #117 and post-merge CI passed. The route remains limited to admitted direct text items and fixed geometry; unsupported Flex combinations still refuse. | Broader topology and any device claim remain separate gates, with device claims limited to layouts exercised on that device. |
 | Paired host qualification and release adoption | Runtime #158's exact installed-package qualification passed 41/41 in full, cropped, and disabled-feature profiles against the published Core 0.13.0 archive. Core standalone full/cropped/off suites passed 46/46, 45/45, and 42/42. Runtime PR #159 updated the production lock to Core 0.13.0 / ABI11 / source hash `290ff2ded3619d8be23e1320ad9530c07c81593cd5b94a8ff25faccb745e4dfd`; its 26 CI jobs passed, and post-merge master CI also passed 26/26. Signed `v0.13.0` points to Core master commit `0861c451ff5cb81ea23e0b523b19f57aa0048f79`; archive SHA-256 is `ec1773ad7d35b88f5e84903259433a6e5ceb922b6a391caec2cdcf2c453cf1f9`. | Complete. Future Core releases require their own package qualification and reviewed Runtime lock change. |
-| WS147 contextual device acceptance | The latest reported device observation for Contextual Flex 0.1.4 showed the full background, centered/bottom-aligned A/V and left/bottom-aligned Chinese lines. The user noted that the browser alignment may differ. | Re-render the exact 0.1.4 app in a browser at the device viewport and compare the two alignment results before making a parity claim. Host rendering does not establish device parity. |
+| WS147 contextual device acceptance | Contextual Flex 0.1.4 has a full background on the device. The Core #122 baseline correction agrees with Edge for A/V in the matched desktop comparison. The WS147 candidate is `0.6.2-abi11-contextual-baseline1` (Core source SHA-256 prefix `78e1559d`, app BIN SHA-256 prefix `160ac23d`). Its partition table matches the existing 5 MiB storage build. | Run the original signed 0.1.4 package on the candidate and verify the background and text alignment on screen. |
 
 ## Parallel execution
 
@@ -87,11 +100,10 @@ published, and Runtime #159 has adopted its exact source identity
 `290ff2ded3619d8be23e1320ad9530c07c81593cd5b94a8ff25faccb745e4dfd` as the
 production lock. PR and post-merge Runtime CI both passed 26/26 jobs.
 
-The owner-map adapter remains experimental because it stores mapping data but
-has no shaped-glyph consumer. Remaining work includes the shared-inline
-layout/paint integration described by the design document and a browser
-comparison for the latest WS147 Contextual Flex app. Core PR #117 and its
-Runtime package qualification are complete. The Core 0.13.0 release and
-Runtime production-lock migration are complete.
+Core #121 retains direct-text hit fragments in an opt-in capture. Admission
+for multiple inline owners and Worker pointer dispatch remain open. The
+desktop baseline comparison and the WS147 candidate build are complete.
+Device observation of that candidate is pending.
+
 Older ABI9 notes remain historical records unless explicitly updated with
 newer evidence.
