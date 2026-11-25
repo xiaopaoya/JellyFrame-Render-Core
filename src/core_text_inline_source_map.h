@@ -39,8 +39,7 @@ CoreTextInlineSourceMapStatus project_core_text_inline_line_tokens(
 
 // End-to-end Stage A adapter for one real JFSP2 paragraph line. It verifies
 // exact normalized-text identity and packet binding, projects source tokens,
-// decodes cluster/glyph intervals and transactionally maps owners. It is not
-// called by LayerCapture or Runtime until Stage B retains the resulting map.
+// decodes cluster/glyph intervals and transactionally maps owners.
 CoreTextInlineSourceMapStatus map_experimental_contextual_inline_line(
     const CoreTextParagraph& source_paragraph,
     const std::string_view* owner_sources, std::size_t owner_count,
@@ -48,5 +47,11 @@ CoreTextInlineSourceMapStatus map_experimental_contextual_inline_line(
     CoreTextClusterMap& output,
     CoreTextClusterMapLimits limits = {},
     std::uint64_t* remaining_work = nullptr) noexcept;
+
+// Reconstructs original UTF-8 intervals for the single direct text owner
+// admitted by contextual layout. Build once for all lines of a paragraph.
+CoreTextInlineSourceMapStatus build_contextual_single_owner_source(
+    const contextual_text::Paragraph&, CoreTextParagraph& output,
+    std::uint64_t& work) noexcept;
 
 } // namespace jellyframe::detail

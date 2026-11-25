@@ -18,7 +18,7 @@ namespace jellyframe {
 struct LayerNode;
 struct StyleOverride;
 #if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
-namespace contextual_text { class LayoutResult; class LayerCapture; }
+namespace contextual_text { class LayoutResult; class LayerCapture; struct TextHitCaptureOptions; }
 #endif
 
 struct LayerNodeDeleter {
@@ -172,6 +172,9 @@ public:
 #if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
     bool build_contextual(const contextual_text::LayoutResult& layout,
                           contextual_text::LayerCapture& output) const noexcept;
+    bool build_contextual(const contextual_text::LayoutResult& layout,
+                          const contextual_text::TextHitCaptureOptions& options,
+                          contextual_text::LayerCapture& output) const noexcept;
 #endif
     // Legacy flatten approximates overflow by cropping command rectangles.
     DisplayList flatten(const LayerNode& root) const;
@@ -181,6 +184,11 @@ public:
     FlattenedLayerTree flatten_with_clip_metadata(const LayerNode& root) const;
 
 private:
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    bool build_contextual_impl(const contextual_text::LayoutResult&,
+                              const contextual_text::TextHitCaptureOptions*,
+                              contextual_text::LayerCapture&) const noexcept;
+#endif
     LayerTreeBuilderOptions options_;
 
     LayerNodePtr build_with_arena(const LayoutBox& root, MonotonicArena* arena,

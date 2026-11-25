@@ -68,6 +68,72 @@ FrameBuffer draw_capture(const LayerCapture& capture, bool all_backgrounds_first
   return target;
 }
 
+void check_text_hit_capture(const char* fixture_root) {
+  Fixture fixture(fixture_root, "regular", true);
+  LayoutOptions options;
+  auto work = budget;
+  check(create_binding(fixture.as_inputs(), {}, work, options.binding) == Status::ok,
+        "hit capture binding");
+  auto doc = HtmlParser().parse("<div>  A  \xE4\xB8\xAD  </div>");
+  StyleResolver styles(CssParser().parse(
+      "*{margin:0}div{width:20px;font-size:16px;line-height:22px;text-align:center}"));
+  auto render = RenderTreeBuilder(styles).build(*doc);
+  LayoutResult layout;
+  work = budget;
+  check(LayoutEngine(styles).layout_contextual(*render, viewport.width, viewport.height,
+                                                options, work, layout) == Status::ok,
+        "build wrapped UTF-8 hit capture fixture");
+  check(layout.paragraphs().size() == 1 && layout.paragraphs()[0].paragraph.lines().size() == 2,
+        "hit capture fixture wraps to two lines");
+
+  LayerTreeBuilder builder;
+  LayerCapture paint_only;
+  check(builder.build_contextual(layout, paint_only) && paint_only.text_hit_fragments().empty(),
+        "ordinary contextual capture leaves hit capture disabled");
+  TextHitCaptureOptions hit_options;
+  LayerCapture capture;
+  check(builder.build_contextual(layout, hit_options, capture), "capture text hits");
+  const auto& hits = capture.text_hit_fragments();
+  check(hits.size() == 2 && hits[0].line_index == 0 && hits[0].source_begin == 2 &&
+        hits[0].source_end == 3 && hits[1].line_index == 1 && hits[1].source_begin == 5 &&
+        hits[1].source_end == 8 && hits[0].owner_index == 0 && hits[1].owner_index == 0 &&
+        hits[0].paragraph_index == 0 && hits[1].paragraph_index == 0,
+        "hit fragments retain original byte ranges across whitespace collapse and wrap");
+  check(hits[0].ink.x > 0 && hits[1].ink.x > 0 &&
+        hits[0].ink.y + hits[0].ink.height <= hits[1].ink.y,
+        "hit bounds follow aligned and wrapped glyph placement");
+
+  const auto pixels = draw_capture(capture);
+  check(same_pixels(pixels, draw_capture(paint_only)), "text hit capture preserves pixels");
+  for (const auto& hit : hits) {
+    std::size_t ink_pixels = 0;
+    for (int y = hit.ink.y; y < hit.ink.y + hit.ink.height; ++y) {
+      for (int x = hit.ink.x; x < hit.ink.x + hit.ink.width; ++x) {
+        if (pixels.pixel(x, y).r < 255) ++ink_pixels;
+      }
+    }
+    check(ink_pixels > 0, "each retained hit bound covers painted ink");
+  }
+  hit_options.max_fragments = 2;
+  check(builder.build_contextual(layout, hit_options, capture) &&
+        capture.text_hit_fragments().size() == 2, "fragment limit is inclusive");
+  const auto* prior_tree = capture.layer_tree();
+  const auto* prior_hits = capture.text_hit_fragments().data();
+  hit_options.max_fragments = 1;
+  check(!builder.build_contextual(layout, hit_options, capture) &&
+        capture.layer_tree() == prior_tree && capture.text_hit_fragments().data() == prior_hits,
+        "fragment limit preserves prior capture and hit data");
+  hit_options.max_fragments = 2;
+  hit_options.max_work = 1;
+  check(!builder.build_contextual(layout, hit_options, capture) &&
+        capture.layer_tree() == prior_tree && capture.text_hit_fragments().data() == prior_hits,
+        "work limit preserves prior capture and hit data");
+  doc->set_attribute("data-change", "1");
+  check(!builder.build_contextual(layout, TextHitCaptureOptions{}, capture) &&
+        capture.layer_tree() == prior_tree && capture.text_hit_fragments().data() == prior_hits,
+        "stale document preserves prior capture and hit data");
+}
+
 void check_capture(const char* fixture_root) {
   LayerCapture capture;
   LayoutResult expired_layout;
@@ -530,6 +596,7 @@ int main(int argc, char** argv) {
   try {
     check(argc == 2, "fixture root");
     check_capture(argv[1]);
+    check_text_hit_capture(argv[1]);
     check_nowrap_flex_row(argv[1]);
     check_centered_flex_line_heights(argv[1]);
     Fixture fixture(argv[1], "regular", true);

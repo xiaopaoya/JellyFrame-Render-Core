@@ -2,10 +2,12 @@
 #include "render_core/contextual_text_paragraph.h"
 #include "render_core/layout.h"
 #include "render_core/layer_tree.h"
+#include <vector>
 #if !JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
 #error "Contextual layout requires JELLYFRAME_ENABLE_CONTEXTUAL_LAYOUT"
 #endif
 #define JELLYFRAME_CONTEXTUAL_TEXT_LAYOUT_API_VERSION 1
+#define JELLYFRAME_CONTEXTUAL_TEXT_HIT_CAPTURE_API_VERSION 1
 namespace jellyframe::contextual_text {
 // Explicit resource selection for every admitted paragraph. There is no scalar
 // fallback. Static ordinary blocks may nest; each text host has one direct Text
@@ -36,6 +38,22 @@ struct LayoutParagraph {
   // All admitted final pen coordinates fit signed Q1000 int32.
   Color color;
 };
+// Limits for the explicit hit capture overload. The original overload captures
+// paint only. Each admitted paragraph currently has one direct text owner.
+struct TextHitCaptureOptions {
+  std::uint64_t max_work = 262144;
+  std::size_t max_fragments = 16384;
+};
+// Raster-space glyph bounds clipped to the capture viewport and associated
+// with an original UTF-8 source range.
+// paragraph_index selects LayoutResult::paragraphs(); owner_index is local to
+// that paragraph. The current admitted topology has one direct text owner.
+struct ContextualTextHitFragment {
+  std::uint32_t paragraph_index = 0, line_index = 0;
+  std::uint32_t owner_index = 0, cluster_index = 0, glyph_index = 0;
+  std::uint32_t source_begin = 0, source_end = 0;
+  Rect ink{};
+};
 class LayoutResult {
 public:
   struct State;
@@ -65,6 +83,9 @@ public:
   // pointers reachable through layout().tree() keep their borrowed lifetime.
   const LayoutResult& layout() const noexcept;
   const std::vector<std::uint32_t>& after_command_counts() const noexcept;
+  // Value-owned, paragraph-local source hit fragments. They are committed with
+  // the same capture as the background commands and shaped line packets.
+  const std::vector<ContextualTextHitFragment>& text_hit_fragments() const noexcept;
 private:
   std::shared_ptr<const State> state_;
   friend class ::jellyframe::LayerTreeBuilder;

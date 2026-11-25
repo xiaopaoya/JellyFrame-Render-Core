@@ -81,16 +81,15 @@ geometry and binding admission checks remain responsibilities of Stage B.
 
 ### Stage B: retained contextual inline result
 
-Status: the private per-glyph ink-geometry primitive is implemented. It uses
-the contextual painter's exact packet placement, raster scaling and rounding,
-and a real-packet regression verifies that its output bounds contain all pixels
-painted by that packet. The helper also retains the packet cluster index for
-each glyph and refuses transactionally on invalid packets or exhausted work.
+The opt-in hit capture overload retains viewport-clipped glyph bounds and
+original UTF-8 byte ranges for direct text owners alongside the painted
+snapshot. The existing paint-only overload skips hit capture. A work or
+fragment limit preserves the prior capture. Tests verify source ranges
+across collapsed whitespace and wrapping, alignment, and pixel parity with
+the paint-only path.
 
-The primitive is not yet associated with owner spans or retained in
-`LayerCapture`. It does not yet perform cross-owner admission, produce owner hit
-fragments, or route pointer input. Those remain the next Stage B integration
-steps.
+Multi-owner admission, paint-once verification and pointer dispatch remain
+open. The current capture exposes only one owner per paragraph.
 
 Add an opt-in contextual inline result owned by the existing contextual layout
 transaction. It carries JFSP2 commands and per-owner hit fragments with glyph
