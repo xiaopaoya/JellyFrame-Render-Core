@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.14.0 / ABI11
+
+- Shape uniformly styled text across DOM text nodes and neutral inline spans
+  in ordinary blocks through the explicit contextual inline layout API.
+- Capture glyph bounds and original UTF-8 spans for pointer and wheel
+  dispatch. Reject captures whose source document changed or expired.
+- Correct contextual line heights and baselines for fonts with positive
+  descent, and support all six justify-content values in admitted Flex rows
+  with wrapping.
+- Add opt-in decimal CSS counters for ordinary block flow, including counter
+  text in generated content.
+
 ## 0.13.0 / ABI11
 
 - Add opt-in contextual Flex row wrapping for definite-width, definite-height
