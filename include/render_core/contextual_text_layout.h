@@ -8,10 +8,11 @@
 #endif
 #define JELLYFRAME_CONTEXTUAL_TEXT_LAYOUT_API_VERSION 1
 #define JELLYFRAME_CONTEXTUAL_TEXT_HIT_CAPTURE_API_VERSION 1
+#define JELLYFRAME_CONTEXTUAL_SHARED_INLINE_API_VERSION 1
 namespace jellyframe::contextual_text {
 // Explicit resource selection for every admitted paragraph. There is no scalar
-// fallback. Static ordinary blocks may nest; each text host has one direct Text
-// child. Mixed inline/atomic/effect/clip/contents topology is not admitted.
+// fallback. Static ordinary blocks may nest. A block can contain direct text
+// or a shared run of uniformly styled text and neutral inline spans.
 struct LayoutOptions {
   Binding binding;
   std::uint32_t font_family_hash = 0;
@@ -39,7 +40,7 @@ struct LayoutParagraph {
   Color color;
 };
 // Limits for the explicit hit capture overload. The original overload captures
-// paint only. Each admitted paragraph currently has one direct text owner.
+// paint only for direct-text layouts. Shared inline runs require hit capture.
 struct TextHitCaptureOptions {
   std::uint64_t max_work = 262144;
   std::size_t max_fragments = 16384;
@@ -47,7 +48,7 @@ struct TextHitCaptureOptions {
 // Raster-space glyph bounds clipped to the capture viewport and associated
 // with an original UTF-8 source range.
 // paragraph_index selects LayoutResult::paragraphs(); owner_index is local to
-// that paragraph. The current admitted topology has one direct text owner.
+// that paragraph. Resolve an owner through LayoutResult::text_owner().
 struct ContextualTextHitFragment {
   std::uint32_t paragraph_index = 0, line_index = 0;
   std::uint32_t owner_index = 0, cluster_index = 0, glyph_index = 0;
@@ -62,6 +63,8 @@ public:
   // Nodes remain borrowed under ordinary LayoutBox DOM lifetime rules.
   const LayoutBox* tree() const noexcept;
   const std::vector<LayoutParagraph>& paragraphs() const noexcept;
+  // Requires a live document and the source generation used to build this layout.
+  const Node* text_owner(std::size_t paragraph, std::size_t owner) const noexcept;
   std::uint64_t source_generation() const noexcept;
 private:
   std::shared_ptr<const State> state_;

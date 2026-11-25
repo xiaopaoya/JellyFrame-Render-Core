@@ -17,9 +17,8 @@ enum class CoreTextInlineSourceMapStatus {
     AllocationFailure
 };
 
-// Experimental, currently unwired Stage A adapter. It builds a token stream
-// for a text-only, white-space:normal paragraph. The
-// owner views use CoreTextParagraphSource::owner as their index. Dropped source
+// Builds a token stream for a text-only, white-space:normal paragraph.
+// The owner views use CoreTextParagraphSource::owner as their index. Dropped source
 // bytes become omitted tokens at the corresponding normalized byte position.
 // Output is replaced only on success.
 CoreTextInlineSourceMapStatus build_core_text_inline_source_tokens(
@@ -48,10 +47,9 @@ CoreTextInlineSourceMapStatus map_experimental_contextual_inline_line(
     CoreTextClusterMapLimits limits = {},
     std::uint64_t* remaining_work = nullptr) noexcept;
 
-// Reconstructs original UTF-8 intervals for the single direct text owner
-// admitted by contextual layout. Build once for all lines of a paragraph.
-CoreTextInlineSourceMapStatus build_contextual_single_owner_source(
-    const contextual_text::Paragraph&, CoreTextParagraph& output,
-    std::uint64_t& work) noexcept;
+// Reconstructs original UTF-8 intervals across ordered source owners.
+CoreTextInlineSourceMapStatus build_contextual_owner_source(
+    const contextual_text::Paragraph&, const std::string_view* owners,
+    std::size_t owner_count, CoreTextParagraph& output, std::uint64_t& work) noexcept;
 
 } // namespace jellyframe::detail

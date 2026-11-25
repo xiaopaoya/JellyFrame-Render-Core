@@ -1357,8 +1357,20 @@ LayoutBoxPtr LayoutEngine::build_with_arena(const RenderObject& render_tree,
 contextual_text::Status LayoutEngine::layout_contextual(const RenderObject& root, int width, int height,
     const contextual_text::LayoutOptions& options, std::uint64_t& work,
     contextual_text::LayoutResult& output, contextual_text::LayoutUsage* usage) const noexcept {
+    return layout_contextual_impl(root, width, height, options, work, output, usage, false);
+}
+
+contextual_text::Status LayoutEngine::layout_contextual_inline(const RenderObject& root, int width, int height,
+    const contextual_text::LayoutOptions& options, std::uint64_t& work,
+    contextual_text::LayoutResult& output, contextual_text::LayoutUsage* usage) const noexcept {
+    return layout_contextual_impl(root, width, height, options, work, output, usage, true);
+}
+
+contextual_text::Status LayoutEngine::layout_contextual_impl(const RenderObject& root, int width, int height,
+    const contextual_text::LayoutOptions& options, std::uint64_t& work,
+    contextual_text::LayoutResult& output, contextual_text::LayoutUsage* usage, bool shared_inline) const noexcept {
     using contextual_text::Status;
-    detail::ContextualLayoutFrame frame(options, work);
+    detail::ContextualLayoutFrame frame(options, work, shared_inline);
     struct Report {
         detail::ContextualLayoutFrame& frame;
         std::uint64_t initial;
@@ -2287,12 +2299,11 @@ int LayoutEngine::layout_precise_block(LayoutBox& box, int height, std::size_t d
 #if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
     if (context.contextual && has_only_inline_children(box)) {
         auto& frame = *context.contextual;
-        if (box.children.size() != 1 || !box.children[0]->node ||
-            box.children[0]->node->type != NodeType::Text) {
-            frame.status = contextual_text::Status::invalid;
-            return 0;
-        }
-        children_units = frame.prepare(*box.children[0], content_x_units, content_y_units, content_width_units);
+        const bool direct = box.children.size() == 1 && box.children[0]->node &&
+            box.children[0]->node->type == NodeType::Text;
+        children_units = direct
+            ? frame.prepare(*box.children[0], content_x_units, content_y_units, content_width_units)
+            : frame.prepare_shared(box, content_x_units, content_y_units, content_width_units);
     } else
 #endif
     if (has_only_inline_children(box)) {

@@ -59,9 +59,8 @@ installed app.
 
 ### Stage A: source-map adapter
 
-Status: implemented in the current integration branch as an experimental,
-private adapter. It is included only when contextual text is enabled and is not
-called by `LayerCapture` or Runtime.
+The private adapter is compiled with contextual text and is used by
+`LayerCapture` when the caller requests text hit fragments.
 
 The adapter builds owner tokens from `CoreTextParagraph::sources` and original
 owner strings, admits only text-only source spans, and maps each real
@@ -88,18 +87,19 @@ fragment limit preserves the prior capture. Tests verify source ranges
 across collapsed whitespace and wrapping, alignment, and pixel parity with
 the paint-only path.
 
-Multi-owner admission, paint-once verification and pointer dispatch remain
-open. The current capture exposes only one owner per paragraph.
+The explicit `LayoutEngine::layout_contextual_inline` entry point also admits
+ordinary blocks containing uniformly styled text and neutral inline spans.
+It shapes each run as one paragraph, recovers standalone collapsible
+whitespace in DOM order and retains the source owner table. Capture inserts
+the paragraph after the host background and validates its viewport-clipped
+hit fragments before publishing. A ligature can have multiple source owners
+with the same glyph bounds. Each owner resolves only while the document and
+its recorded generation are valid.
 
-Add an opt-in contextual inline result owned by the existing contextual layout
-transaction. It carries JFSP2 commands and per-owner hit fragments with glyph
-ink rectangles derived from decoded packet positions and the bound font
-catalog's glyph metrics. Keep existing `Style`, `RenderObject`, `LayoutBox` and
-`DisplayCommand` footprints unchanged. Layer capture must match the current
-scalar shared-inline paint order and final pixels. A cross-owner glyph command
-uses the uniform paint style proven by Stage A, while its mapped source
-fragments update each owner's hit region through a private retained side table
-and an explicit Runtime input adapter.
+Core verifies one real JFSP2 ligature spanning two DOM text nodes, equal
+packets and pixels against the unsplit text, and rejection of mixed styles or
+unsupported structure. Worker pointer dispatch and its overlap policy remain
+Stage C work.
 
 ### Stage C: installed Runtime path
 

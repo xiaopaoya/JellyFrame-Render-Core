@@ -134,6 +134,90 @@ void check_text_hit_capture(const char* fixture_root) {
         "stale document preserves prior capture and hit data");
 }
 
+void check_shared_inline_capture(const char* fixture_root) {
+  Fixture fixture(fixture_root, "regular", true);
+  LayoutOptions options;
+  auto work = budget;
+  check(create_binding(fixture.as_inputs(), {}, work, options.binding) == Status::ok,
+        "shared inline binding");
+  StyleResolver styles(CssParser().parse(
+      "*{margin:0}div{width:170px;padding:3px;background:#ddebff;"
+      "font-size:24px;line-height:30px;text-align:center}"));
+  auto doc = HtmlParser().parse("<div>of<span>fice</span>  <span>AV</span></div>");
+  auto reference = HtmlParser().parse("<div>office AV</div>");
+  auto render = RenderTreeBuilder(styles).build(*doc);
+  auto reference_render = RenderTreeBuilder(styles).build(*reference);
+  LayoutEngine engine(styles);
+  LayoutResult layout, direct;
+  work = budget;
+  check(engine.layout_contextual_inline(*render, viewport.width, viewport.height,
+        options, work, layout) == Status::ok && layout.paragraphs().size() == 1,
+        "shared inline layout shapes multiple owners in one paragraph");
+  work = budget;
+  check(engine.layout_contextual(*reference_render, viewport.width, viewport.height,
+        options, work, direct) == Status::ok && direct.paragraphs().size() == 1,
+        "direct text reference");
+  const auto& shared = layout.paragraphs().front().paragraph;
+  const auto& direct_paragraph = direct.paragraphs().front().paragraph;
+  check(shared.source() == "office  AV" && shared.text() == "office AV" &&
+        shared.lines().size() == 1 && direct_paragraph.lines().size() == 1 &&
+        shared.lines().front().packet == direct_paragraph.lines().front().packet,
+        "standalone DOM whitespace survives and contextual shaping crosses the span");
+
+  LayerTreeBuilder builder;
+  LayerCapture capture, direct_capture;
+  check(builder.build_contextual(direct, direct_capture) &&
+        !builder.build_contextual(layout, direct_capture) &&
+        direct_capture.layout().tree() == direct.tree(),
+        "shared capture requires owner data and refusal preserves direct capture");
+  check(builder.build_contextual(layout, TextHitCaptureOptions{}, capture) &&
+        same_pixels(draw_capture(capture), draw_capture(direct_capture)),
+        "shared packet paints once after the host background");
+  const auto* first_owner = layout.text_owner(0, 0);
+  const auto* second_owner = layout.text_owner(0, 1);
+  const auto* whitespace_owner = layout.text_owner(0, 2);
+  check(first_owner && first_owner->text == "of" && second_owner &&
+        second_owner->text == "fice" && second_owner->parent->tag_name == "span" &&
+        whitespace_owner && whitespace_owner->text == "  " &&
+        layout.text_owner(0, 3) && layout.text_owner(0, 3)->text == "AV" &&
+        !layout.text_owner(0, 4), "shared owners resolve to original DOM text nodes");
+
+  bool ligature = false;
+  const auto& hits = capture.text_hit_fragments();
+  for (std::size_t i = 1; i < hits.size(); ++i) {
+    const auto& left = hits[i - 1];
+    const auto& right = hits[i];
+    if (left.owner_index != 0 || right.owner_index != 1 ||
+        left.glyph_index != right.glyph_index || left.cluster_index != right.cluster_index)
+      continue;
+    check(left.source_begin == 1 && left.source_end == 2 &&
+          right.source_begin == 0 && right.source_end == 2 &&
+          left.ink.x == right.ink.x && left.ink.y == right.ink.y &&
+          left.ink.width == right.ink.width && left.ink.height == right.ink.height,
+          "one ligature retains both owner-local ranges and their shared ink");
+    ligature = true;
+  }
+  check(ligature, "real JFSP2 ligature spans two text owners");
+
+  const auto* previous = layout.tree();
+  for (const char* html : {"<div>of<span style='color:red'>fice</span></div>",
+                           "<div>of<span style='font-size:16px'>fice</span></div>",
+                           "<div>of<span style='background:red'>fice</span></div>",
+                           "<div>of<br>fice</div>"}) {
+    auto rejected = HtmlParser().parse(html);
+    auto rejected_render = RenderTreeBuilder(styles).build(*rejected);
+    work = budget;
+    check(engine.layout_contextual_inline(*rejected_render, viewport.width, viewport.height,
+          options, work, layout) == Status::invalid && layout.tree() == previous,
+          "shared inline rejects unsupported style and structure transactionally");
+  }
+  doc->set_attribute("data-change", "1");
+  check(!layout.text_owner(0, 0) &&
+        !builder.build_contextual(layout, TextHitCaptureOptions{}, capture) &&
+        capture.layout().tree() == previous,
+        "DOM mutation invalidates owner resolution and preserves the prior capture");
+}
+
 void check_capture(const char* fixture_root) {
   LayerCapture capture;
   LayoutResult expired_layout;
@@ -596,6 +680,7 @@ int main(int argc, char** argv) {
     check(argc == 2, "fixture root");
     check_capture(argv[1]);
     check_text_hit_capture(argv[1]);
+    check_shared_inline_capture(argv[1]);
     check_nowrap_flex_row(argv[1]);
     check_centered_flex_line_heights(argv[1]);
     Fixture fixture(argv[1], "regular", true);

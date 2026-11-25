@@ -231,48 +231,57 @@ CoreTextInlineSourceMapStatus map_experimental_contextual_inline_line(
     }
 }
 
-CoreTextInlineSourceMapStatus build_contextual_single_owner_source(
-    const contextual_text::Paragraph& paragraph, CoreTextParagraph& output,
-    std::uint64_t& work) noexcept {
+CoreTextInlineSourceMapStatus build_contextual_owner_source(
+    const contextual_text::Paragraph& paragraph, const std::string_view* owners,
+    std::size_t owner_count, CoreTextParagraph& output, std::uint64_t& work) noexcept {
     using Status = CoreTextInlineSourceMapStatus;
-    if (!paragraph.valid()) return Status::InvalidInput;
-    const auto source = paragraph.source();
-    const auto normalized = paragraph.text();
-    if (source.size() > 65536 || normalized.size() > 65536)
+    if (!paragraph.valid() || !owners || !owner_count || owner_count > 128)
         return Status::InvalidInput;
-    if (!take_work(work, source.size() + normalized.size())) return Status::WorkLimit;
+    const auto original = paragraph.source();
+    const auto normalized = paragraph.text();
+    if (original.size() > 65536 || normalized.size() > 65536)
+        return Status::InvalidInput;
+    if (!take_work(work, original.size() + normalized.size() + owner_count))
+        return Status::WorkLimit;
 
     try {
         CoreTextParagraph draft;
         draft.normalized.assign(normalized);
-        std::size_t at = 0;
         std::size_t offset = 0;
-        std::size_t pending_space = std::string_view::npos;
-        const auto append = [&](std::size_t start, std::size_t end, std::string_view text) {
+        std::size_t consumed = 0;
+        CoreTextParagraphSource pending_space{};
+        const auto append = [&](CoreTextParagraphSource range, std::string_view text) {
             if (text.size() > normalized.size() - offset ||
                 normalized.substr(offset, text.size()) != text) return false;
             draft.byte_offsets.push_back(static_cast<std::uint16_t>(offset));
-            draft.sources.push_back({0, start, end});
+            draft.sources.push_back(range);
             offset += text.size();
             return true;
         };
-        while (at < source.size()) {
-            const auto start = at;
-            std::uint32_t scalar = 0;
-            if (!read_utf8_scalar(source, at, scalar)) return Status::InvalidInput;
-            if (scalar < 128 && ascii_whitespace(static_cast<unsigned char>(scalar))) {
-                if (offset && pending_space == std::string_view::npos) pending_space = start;
-                continue;
-            }
-            if (pending_space != std::string_view::npos) {
-                if (!append(pending_space, pending_space + 1, " "))
+        for (std::size_t owner = 0; owner < owner_count; ++owner) {
+            const auto input = owners[owner];
+            if (input.size() > original.size() - consumed ||
+                input != original.substr(consumed, input.size()))
+                return Status::InvalidInput;
+            consumed += input.size();
+            for (std::size_t at = 0; at < input.size();) {
+                const auto start = at;
+                std::uint32_t scalar = 0;
+                if (!read_utf8_scalar(input, at, scalar)) return Status::InvalidInput;
+                if (scalar < 128 && ascii_whitespace(static_cast<unsigned char>(scalar))) {
+                    if (offset && !pending_space.end) pending_space = {owner, start, at};
+                    continue;
+                }
+                if (pending_space.end) {
+                    if (!append(pending_space, " ")) return Status::UnsupportedNormalization;
+                    pending_space = {};
+                }
+                if (!append({owner, start, at}, input.substr(start, at - start)))
                     return Status::UnsupportedNormalization;
-                pending_space = std::string_view::npos;
             }
-            if (!append(start, at, source.substr(start, at - start)))
-                return Status::UnsupportedNormalization;
         }
-        if (offset != normalized.size()) return Status::UnsupportedNormalization;
+        if (consumed != original.size() || offset != normalized.size())
+            return Status::UnsupportedNormalization;
         output = std::move(draft);
         return Status::Complete;
     } catch (const std::bad_alloc&) {

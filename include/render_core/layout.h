@@ -240,9 +240,18 @@ public:
     contextual_text::Status layout_contextual(const RenderObject&, int viewport_width,
         int viewport_height, const contextual_text::LayoutOptions&, std::uint64_t& work,
         contextual_text::LayoutResult&, contextual_text::LayoutUsage* = nullptr) const noexcept;
+    // Shared-inline output requires the explicit text hit capture overload.
+    contextual_text::Status layout_contextual_inline(const RenderObject&, int viewport_width,
+        int viewport_height, const contextual_text::LayoutOptions&, std::uint64_t& work,
+        contextual_text::LayoutResult&, contextual_text::LayoutUsage* = nullptr) const noexcept;
 #endif
 
 private:
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    contextual_text::Status layout_contextual_impl(const RenderObject&, int width, int height,
+        const contextual_text::LayoutOptions&, std::uint64_t& work,
+        contextual_text::LayoutResult&, contextual_text::LayoutUsage*, bool shared_inline) const noexcept;
+#endif
     const StyleResolver& style_resolver_;
     LayoutEngineOptions options_;
     detail::IntrinsicSourceQueryLedger* intrinsic_queries_ = nullptr;
