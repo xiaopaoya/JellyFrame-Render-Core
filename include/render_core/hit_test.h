@@ -21,6 +21,10 @@ class HitTester {
 public:
     HitTestResult hit_test(const LayoutBox& root, int x, int y) const;
     HitTestResult hit_test(const LayerNode& root, int x, int y) const;
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    // Uses glyph fragments in reverse paint order and rejects stale captures.
+    HitTestResult hit_test(const contextual_text::LayerCapture& capture, int x, int y) const;
+#endif
 
 private:
     HitTestResult hit_test_box(const LayoutBox& box, int x, int y,

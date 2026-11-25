@@ -5,6 +5,9 @@
 #include "render_core/raster_primitives.h"
 #include "layout_clip_geometry.h"
 #include "generated_flex_grid_text.h"
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+#include "contextual_text_layout_internal.h"
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -86,6 +89,46 @@ HitTestResult HitTester::hit_test(const LayoutBox& root, int x, int y) const {
 HitTestResult HitTester::hit_test(const LayerNode& root, int x, int y) const {
     return hit_test_layer(root, x, y, Rect{}, false, 0, 0);
 }
+
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+HitTestResult HitTester::hit_test(const contextual_text::LayerCapture& capture, int x, int y) const {
+    const auto& layout = capture.layout();
+    const auto* layer = capture.layer_tree();
+    if (!layer || !layout.state_->source_is_current() || !contains(layer->bounds, x, y))
+        return {};
+
+    // Contextual captures have one static viewport layer. Their admitted
+    // topology has no positioned boxes, nested clips, transforms or scrolling.
+    const auto& paragraphs = layout.paragraphs();
+    const auto& fragments = capture.text_hit_fragments();
+    std::size_t paragraph = paragraphs.size();
+    std::size_t fragment = fragments.size();
+    const auto visit = [&](auto&& self, const LayoutBox& box) -> HitTestResult {
+        for (auto child = box.children.rbegin(); child != box.children.rend(); ++child) {
+            auto hit = self(self, **child);
+            if (hit) return hit;
+        }
+        if (paragraph && paragraphs[paragraph - 1].owner == &box) {
+            --paragraph;
+            while (fragment && fragments[fragment - 1].paragraph_index == paragraph) {
+                const auto& ink = fragments[--fragment];
+                if (!contains(ink.ink, x, y)) continue;
+                // For a cluster with shared ink, the last contributing owner
+                // in source order wins. Report coordinates in its run's box.
+                const auto* owner = layout.text_owner(paragraph, ink.owner_index);
+                if (owner) {
+                    auto hit = make_result(box, x, y);
+                    hit.node = event_target_for(owner);
+                    return hit;
+                }
+            }
+        }
+        return box.node && !box.style.visibility_hidden && contains(box.rect, x, y)
+            ? make_result(box, x, y) : HitTestResult{};
+    };
+    return visit(visit, *layout.tree());
+}
+#endif
 
 HitTestResult HitTester::hit_test_box(const LayoutBox& box, int x, int y,
                                     const LayerNode* owner) const {
