@@ -1,8 +1,8 @@
 # ABI11 contextual migration status
 
-Last updated 2026-11-25. This file tracks the in-progress migration beyond the
-signed Core 0.12.1 / ABI11 production baseline. Merged PRs and successful tests
-are evidence for their stated scope only.
+Last updated 2026-11-25. This file tracks the ABI11 contextual migration after
+the signed Core 0.13.0 release and Runtime production-lock adoption. Merged PRs
+and successful tests are evidence for their stated scope only.
 
 ## Merged work
 
@@ -48,29 +48,32 @@ are evidence for their stated scope only.
 - WS147 production-trust V0 and V1 screen checks were observed successfully.
   They validate trust QA presentation and do not qualify contextual layout or
   JFSP2 paint-list output.
+- Core PR #114 merged the 0.13.0 release candidate as
+  `0861c451ff5cb81ea23e0b523b19f57aa0048f79`. Signed tag `v0.13.0` and the
+  deterministic source archive are published. Runtime PR #159 adopted that
+  package as the production lock, and both PR and post-merge CI passed 26/26.
 
 ## Remaining gates and workstreams
 
 | Workstream | Current evidence | Required next evidence |
 | --- | --- | --- |
 | Shared inline ownership for shaped text | Core already maps shaping clusters to multiple UTF-8 source owners. Core PR #101 adds a regression for one cluster spanning two multibyte owners. Existing shared-inline spacing tests pass. | The shaped paragraph/source-range model is still not connected to shared-inline layout and paint. Implement this as a separate integration after an owner/cluster paint contract is designed. Preserve per-owner source ranges and refuse unsupported mixed-owner cases until geometry and pixel parity are proven. |
-| Contextual Flex topology | Core #100 and Runtime #156 cover a definite-width nowrap row. Core #101 adds bounded definite-pixel columns. Core #111 adds bounded row wrapping with geometry, baseline, pixel, refusal, and replay coverage. The wrap route is limited to admitted direct text items and fixed geometry; unsupported Flex combinations still refuse. Runtime #158 merged after its candidate package matrix passed. | Qualify Core 0.13.0 under the new source identity. Any retained device gate needs an app built from the matching Core package. |
-| Paired host qualification | Runtime #158 is merged and pins Core implementation commit `dd7d57b04e0d7d8a8df850e64bb4e5610416ed4c` with source hash `ff9e0ac52a701191dce6a90b508b682b9a9abb8750d432865d779c0ef954abce`. Full/cropped/off installed consumers passed 39/39 per profile with zero skips. Signed scalar passed 9/9 in each profile; signed contextual passed 22/22 in full and cropped. Linux qualified `jellyframe_pseudo_browser`; Windows qualified the desktop shell and native route. For Core 0.13.0, the versioned candidate hash is `290ff2ded3619d8be23e1320ad9530c07c81593cd5b94a8ff25faccb745e4dfd`; local Core full/cropped/off suites passed 46/46, 45/45, and 42/42. Production remains on Core 0.12.1 / ABI11 source hash `d74b28ca…`. | Qualify the exact Core 0.13.0 installed package against Runtime full/cropped/off, then complete release review before the separate Runtime production-lock update. |
-| WS147 contextual device path | The 3 MiB/811,676-byte candidate was invalid because `catalog.jfcat` contained only six bytes (`broken`). The corrected full-resource candidate uses the real 733,641-byte `catalog.jfcat1`, companion, complete font, and Unicode/eligibility tables. A 5 MiB storage layout gives a 1,744,896-byte package slot. Image `0.6.2-abi11-contextual-column5m` is on COM19 and verified by factory-image readback. It advertises ABI11 contextual JFSP2/layout, a 1,744,896-byte slot, and 5,234,688 bytes available. Candidate 1 failed contextual layout admission due to unsupported `flex-flow` shorthand and out-of-profile dimensions. Candidate 2 version 0.1.1 then launched and rendered with `presents_failed=0`. The user later reported that the lower blank viewport stayed white and A/V sat low, while the browser showed centered text. Core PR #106 (`Propagate contextual canvas background to viewport`) merged as `508992200070f38b394b1b9d258031eec7d2f844` after all CI checks passed. It propagates the HTML root background, or body background when the root is transparent, across the contextual viewport, and tests canvas precedence and paint order. Local full contextual CTest passes 46/46 and Flex/Grid-off cropped passes 45/45. Runtime native contextual desktop and installed-bundle consumer tests pass 1/1 each with the patched Core source. Test firmware `0.6.2-abi11-contextual-column5m-bg2` was rebuilt from the merged Core source identity `4b1a9ce2…7e01dfaa`, BIN SHA-256 `6a3b292f…5d9990c`, and is packaged with a verified 16 MiB factory image. App candidate 0.1.2 uses `line-height` matching each card height to center Chinese and A/V text. A real Edge headless render at 172×320 shows the Chinese glyphs and A/V text centered in their cards. The latest board report still finds a white empty viewport and bottom-aligned A/V text, but bg2/0.1.2 has not been installed, so device parity remains unverified. Runtime package check reports zero layout diagnostics; rendered bottom and empty-viewport pixels are dark. JFAPP is 1,595,968 bytes, below the 1,744,896-byte slot. Its signed JFSG still requires a local PEM unlock. The device remains on 0.1.1 pending signing and visual retest. Production Runtime lock is unchanged.|
-| Release adoption | The production lock remains on Core 0.12.1 / ABI11 hash `d74b28ca…`. Contextual layout remains opt-in. | Review the Core 0.13.0 API, recomputed source manifest and deterministic archive, then complete Runtime package qualification before release and a separate production-lock update. |
+| Contextual Flex topology | Core #100 and Runtime #156 cover a definite-width nowrap row. Core #101 adds bounded definite-pixel columns. Core #111 adds bounded row wrapping with geometry, baseline, pixel, refusal, and replay coverage. The route remains limited to admitted direct text items and fixed geometry; unsupported Flex combinations still refuse. Core 0.13.0 is signed and published, and Runtime #158 consumes it. | Broader Flex topology support remains a separate feature expansion. Any device claim is limited to the layouts actually exercised on that device. |
+| Paired host qualification and release adoption | Runtime #158's exact installed-package qualification passed 41/41 in full, cropped, and disabled-feature profiles against the published Core 0.13.0 archive. Core standalone full/cropped/off suites passed 46/46, 45/45, and 42/42. Runtime PR #159 updated the production lock to Core 0.13.0 / ABI11 / source hash `290ff2ded3619d8be23e1320ad9530c07c81593cd5b94a8ff25faccb745e4dfd`; its 26 CI jobs passed, and post-merge master CI also passed 26/26. Signed `v0.13.0` points to Core master commit `0861c451ff5cb81ea23e0b523b19f57aa0048f79`; archive SHA-256 is `ec1773ad7d35b88f5e84903259433a6e5ceb922b6a391caec2cdcf2c453cf1f9`. | Complete. Future Core releases require their own package qualification and reviewed Runtime lock change. |
+| WS147 contextual device acceptance | Core 0.13.0 host and Runtime package checks confirm dark viewport pixels, and browser rendering centers Chinese/A/V text. Device acceptance remains unresolved: the last observed device app was 0.1.1, which showed a white empty viewport and bottom-aligned A/V text. The bg2 firmware and app 0.1.2 fit the 5 MiB slot, but the signed JFSG still needs the local PEM unlock and has not been installed. | Sign/install the exact bg2/0.1.2 candidate and record on-device background and text alignment. Host rendering does not establish device parity. |
 
 ## Parallel execution
 
 Core #111's bounded row-wrap implementation and Core #112/#113 migration status
-corrections are merged. Runtime #158's candidate worker and full/cropped/off
-installed package matrix are also merged after all CI checks passed. Its
-candidate identity is Core 0.12.1 plus an isolated source hash. This release
-candidate introduces the implementation under Core 0.13.0 with a recomputed
-source identity of `290ff2ded3619d8be23e1320ad9530c07c81593cd5b94a8ff25faccb745e4dfd`.
+corrections are merged. Runtime #158's installed-worker regression and
+full/cropped/off package matrix are merged. Core `v0.13.0` is signed and
+published, and Runtime #159 has adopted its exact source identity
+`290ff2ded3619d8be23e1320ad9530c07c81593cd5b94a8ff25faccb745e4dfd` as the
+production lock. PR and post-merge Runtime CI both passed 26/26 jobs.
 
 The owner-map adapter remains experimental because it stores mapping data but
-has no shaped-glyph consumer. Remaining gates are Core 0.13.0 Runtime package
-qualification and release, then a separate Runtime production-lock and archive-
-digest update. WS147 app visual verification remains a device gate if retained
-for this feature. The production Runtime lock remains unchanged. Older ABI9 notes remain historical records unless explicitly
-updated with newer evidence.
+has no shaped-glyph consumer. Remaining work is the separate shared-inline
+layout/paint integration and the WS147 bg2/0.1.2 visual retest after signing.
+The Core 0.13.0 release and Runtime production-lock migration are complete.
+Older ABI9 notes remain historical records unless explicitly updated with
+newer evidence.
