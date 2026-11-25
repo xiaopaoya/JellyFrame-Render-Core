@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <new>
+#include <stdexcept>
 
 namespace jellyframe {
 namespace contextual_painter {
@@ -58,6 +60,57 @@ bool position(const shaped_packet::Glyph &pg, std::int32_t size,
   return out.width >= 0 && out.height >= 0;
 }
 } // namespace
+
+Status glyph_ink_bounds(const shaped_packet::View &packet,
+                        const shaping_binding::Snapshot &binding,
+                        std::int32_t baseline_x, std::int32_t baseline_y,
+                        std::vector<Rect> &output,
+                        std::uint64_t &work) noexcept {
+  if (!packet.valid() || !binding.valid()) return Status::invalid;
+  const auto header = packet.header();
+  if (header.resource_id != binding.resource_id() ||
+      header.binding_generation != binding.generation() ||
+      header.binding_identity != binding.content_identity())
+    return Status::identity_mismatch;
+  const auto raster_size = binding.catalog().metadata().raster_pixel_size;
+  if (header.size_q1000 <= 0 || !raster_size) return Status::invalid;
+  const auto count = packet.glyph_count();
+  if (count > 4096) return Status::limit;
+  const std::uint64_t cost = count * 18U;
+  if (cost > work) return Status::limit;
+
+  try {
+    std::vector<Rect> draft;
+    draft.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+      shaped_packet::Glyph pg;
+      if (!packet.glyph(i, pg)) return Status::invalid;
+      FontGlyphView glyph;
+      if (pg.gid > std::numeric_limits<std::uint16_t>::max() ||
+          !binding.catalog().find_gid(static_cast<std::uint16_t>(pg.gid), glyph))
+        return Status::missing_glyph;
+      Positioned placed;
+      if (!position(pg, header.size_q1000, raster_size, glyph,
+                    baseline_x, baseline_y, placed))
+        return Status::invalid;
+      if (placed.x < INT32_MIN || placed.x > INT32_MAX ||
+          placed.y < INT32_MIN || placed.y > INT32_MAX ||
+          placed.width > INT32_MAX || placed.height > INT32_MAX ||
+          placed.x + placed.width > INT32_MAX ||
+          placed.y + placed.height > INT32_MAX)
+        return Status::limit;
+      draft.push_back({static_cast<int>(placed.x), static_cast<int>(placed.y),
+                       static_cast<int>(placed.width), static_cast<int>(placed.height)});
+    }
+    output.swap(draft);
+    work -= cost;
+    return Status::ok;
+  } catch (const std::bad_alloc &) {
+    return Status::limit;
+  } catch (const std::length_error &) {
+    return Status::limit;
+  }
+}
 
 Status paint(const shaped_packet::View &packet,
              const shaping_binding::Snapshot &binding, FrameBuffer &target,
