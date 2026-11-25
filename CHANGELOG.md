@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0 / ABI11
+
+- Add opt-in contextual Flex row wrapping for definite-width, definite-height
+  rows with fixed-size direct text items. The bounded route handles line
+  grouping, row gaps and cross-axis alignment. Unsupported sizing, decoration,
+  growth/shrink, ordering, and column-wrap cases continue to refuse.
+
 ## 0.12.1 / ABI11
 
 - Preserve intrinsic image dimensions for start-aligned block images with
