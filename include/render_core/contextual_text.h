@@ -36,6 +36,7 @@ struct Limits {
   std::size_t clusters = 4096, glyphs = 4096;
 };
 struct Metrics {
+  // Ascent and descent are nonnegative distances from the baseline.
   std::int32_t advance_x = 0, advance_y = 0, ascent = 0, descent = 0, line_gap = 0;
   std::int32_t ink_left = 0, ink_top = 0, ink_right = 0, ink_bottom = 0;
   std::size_t glyph_count = 0, cluster_count = 0;
