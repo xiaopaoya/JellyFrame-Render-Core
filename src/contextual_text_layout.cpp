@@ -1,5 +1,6 @@
 #include "contextual_text_layout_internal.h"
 #include "computed_size_geometry.h"
+#include "render_core/text_normalization.h"
 #include <algorithm>
 #include <climits>
 
@@ -8,6 +9,17 @@ const LayoutBox* LayoutResult::tree() const noexcept {return state_?state_->tree
 const std::vector<LayoutParagraph>& LayoutResult::paragraphs() const noexcept {
   static const std::vector<LayoutParagraph> empty;
   return state_?state_->paragraphs:empty;
+}
+const Node* LayoutResult::text_owner(std::size_t paragraph, std::size_t owner) const noexcept {
+  if (!state_ || paragraph >= state_->paragraphs.size() || !state_->source_lifetime.active() ||
+      state_->source_root->parent || state_->source_root->mutation_generation != state_->source_generation)
+    return nullptr;
+  const auto& shared = state_->shared_owners;
+  const auto entry = std::lower_bound(shared.begin(), shared.end(), paragraph,
+      [](const SharedTextOwners& run, std::size_t index) { return run.paragraph_index < index; });
+  if (entry != shared.end() && entry->paragraph_index == paragraph)
+    return owner < entry->owners.size() ? entry->owners[owner].node : nullptr;
+  return owner == 0 ? state_->paragraphs[paragraph].owner->node : nullptr;
 }
 std::uint64_t LayoutResult::source_generation() const noexcept {return state_?state_->source_generation:0;}
 }
@@ -42,6 +54,15 @@ bool plain(const Style& s, bool allow_height = false) {
      s.min_height_percent>=0||s.max_height_percent>=0)return false;
   return true;
 }
+bool uniform_inline_style(const Style& run, const Style& member) {
+  return member.display == Display::Inline && zero(member.margin) && zero(member.padding) &&
+      !member.background_color.a && member.font_size == run.font_size &&
+      member.font_weight == run.font_weight && member.font_family_hash == run.font_family_hash &&
+      member.line_height == run.line_height && member.text_align == run.text_align &&
+      !member.white_space_nowrap && member.overflow_wrap_anywhere == run.overflow_wrap_anywhere &&
+      member.color.r == run.color.r && member.color.g == run.color.g &&
+      member.color.b == run.color.b && member.color.a == run.color.a;
+}
 }
 contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,std::size_t max_boxes,std::size_t max_depth) {
   using contextual_text::Status;
@@ -51,7 +72,12 @@ contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,st
      options.max_text_result_bytes>8U*1024U*1024U||!max_boxes||!max_depth||
      !options.paragraph.shape_calls||!options.paragraph.shaping.work||work>options.paragraph.shaping.work)
     return status=Status::limit;
-  struct Pending {const RenderObject* object;std::size_t depth;bool flex_item;};
+  struct Pending {
+    const RenderObject* object;
+    std::size_t depth;
+    bool flex_item;
+    const Style* shared_style = nullptr;
+  };
   std::vector<Pending> pending{{&root,1,false}};
   while(!pending.empty()) {
     const auto next=pending.back();pending.pop_back();
@@ -62,13 +88,22 @@ contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,st
     if(!plain(o.style, (o.style.display == Display::Flex && o.style.flex_direction == FlexDirection::Column) ||
                      next.flex_item) ||
        !o.node||o.contents_sources)return status=Status::invalid;
+    auto* shared_style = next.shared_style;
+    if (shared_style && !uniform_inline_style(*shared_style, o.style)) return status = Status::invalid;
     if(o.type==RenderObjectType::Text) {
       const auto q=std::int64_t(o.style.font_size)*1000;
       if(o.node->type!=NodeType::Text||!o.children.empty()||o.style.font_family_hash!=options.font_family_hash||
          o.style.font_weight!=options.binding.weight()||q<=0||q>INT_MAX||
          !zero(o.style.margin)||!zero(o.style.padding)||o.style.background_color.a)return status=Status::invalid;
-      if(++expected_paragraphs>options.max_paragraphs||o.node->text.size()>options.max_source_bytes-usage.source_bytes)return status=Status::limit;
+      if((!shared_style && ++expected_paragraphs>options.max_paragraphs) ||
+         o.node->text.size()>options.max_source_bytes-usage.source_bytes)return status=Status::limit;
       usage.source_bytes+=o.node->text.size();
+    } else if (shared_style) {
+      if (o.type != RenderObjectType::Inline || o.node->type != NodeType::Element ||
+          o.node->tag_name != "span" || o.style.width >= 0 || o.style.width_percent >= 0 ||
+          o.style.min_width >= 0 || o.style.max_width >= 0 ||
+          o.style.min_width_percent >= 0 || o.style.max_width_percent >= 0)
+        return status = Status::invalid;
     } else {
       if((o.type!=RenderObjectType::View&&o.type!=RenderObjectType::Block)||
          o.node->type!=NodeType::Element||!ordinary(o.node->tag_name))return status=Status::invalid;
@@ -121,14 +156,28 @@ contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,st
         }
         if (!row && column_occupied > o.style.height) return status=Status::invalid;
       } else if(o.style.display!=Display::Block) return status=Status::invalid;
-      std::size_t texts=0;
-      for(const auto& child:o.children)if(child&&child->type==RenderObjectType::Text)++texts;
-      if(texts&&(texts!=1||o.children.size()!=1))return status=Status::invalid;
+      std::size_t inline_children = 0;
+      for (const auto& child : o.children) {
+        if (child && (child->type == RenderObjectType::Text || child->type == RenderObjectType::Inline))
+          ++inline_children;
+      }
+      const bool direct_text = o.children.size() == 1 && o.children.front() &&
+          o.children.front()->type == RenderObjectType::Text;
+      if (inline_children && !direct_text) {
+        const auto font_size = std::int64_t(o.style.font_size) * 1000;
+        if (!shared_inline || inline_children != o.children.size() || o.style.display != Display::Block ||
+            o.style.white_space_nowrap || font_size <= 0 || font_size > INT_MAX ||
+            o.style.font_family_hash != options.font_family_hash ||
+            o.style.font_weight != options.binding.weight())
+          return status = Status::invalid;
+        if (++expected_paragraphs > options.max_paragraphs) return status = Status::limit;
+        shared_style = &o.style;
+      }
     }
     for(auto i=o.children.rbegin();i!=o.children.rend();++i) {
       if(!*i)return status=Status::invalid;
       pending.push_back({i->get(),next.depth+1,
-          o.style.display==Display::Flex && o.style.flex_direction==FlexDirection::Column});
+          o.style.display==Display::Flex && o.style.flex_direction==FlexDirection::Column, shared_style});
     }
   }
   draft=std::make_shared<contextual_text::LayoutResult::State>();
@@ -151,17 +200,105 @@ contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,st
   return status;
 }
 std::int64_t ContextualLayoutFrame::prepare(LayoutBox& box,std::int64_t x,std::int64_t y,std::int64_t width) {
+  return prepare_paragraph(box, box.node->text, x, y, width, false);
+}
+
+std::int64_t ContextualLayoutFrame::prepare_shared(LayoutBox& host, std::int64_t x,
+    std::int64_t y, std::int64_t width) {
+  using contextual_text::Status;
+  if (status != Status::ok) return 0;
+  for (const auto& entry : draft->paragraphs) {
+    if (entry.owner == &host) return prepare_paragraph(host, {}, x, y, width, true);
+  }
+  const auto index = draft->paragraphs.size();
+  contextual_text::SharedTextOwners shared{index, {}};
+  std::string source;
+  const auto collect = [&](auto&& self, const LayoutBox& parent) -> bool {
+    if (parent.node->children.size() > work) {
+      work = 0;
+      status = Status::limit;
+      return false;
+    }
+    work -= parent.node->children.size();
+    auto rendered = parent.children.begin();
+    for (const auto& child : parent.node->children) {
+      if (rendered != parent.children.end() && (*rendered)->node == child.get()) {
+        const auto& box = **rendered++;
+        if (child->type != NodeType::Text) {
+          if (!self(self, box)) return false;
+          continue;
+        }
+      } else {
+        // RenderTree drops standalone collapsible whitespace.
+        if (child->type != NodeType::Text) {
+          status = Status::invalid;
+          return false;
+        }
+        if (child->text.size() > work) {
+          work = 0;
+          status = Status::limit;
+          return false;
+        }
+        work -= child->text.size();
+        if (!is_collapsible_whitespace_text(*child)) {
+          status = Status::invalid;
+          return false;
+        }
+        if (child->text.size() > options.max_source_bytes - usage.source_bytes) {
+          status = Status::limit;
+          return false;
+        }
+        usage.source_bytes += child->text.size();
+      }
+      if (shared.owners.size() == 128 || child->text.size() > options.max_source_bytes - source.size() ||
+          child->text.size() > work) {
+        status = Status::limit;
+        return false;
+      }
+      work -= child->text.size();
+      if (!child->text.empty()) {
+        shared.owners.push_back({child.get(), child->text.size()});
+        source += child->text;
+      }
+    }
+    if (rendered != parent.children.end()) {
+      status = Status::invalid;
+      return false;
+    }
+    return true;
+  };
+  if (!collect(collect, host)) return 0;
+
+  const auto old_capacity = draft->shared_owners.capacity();
+  draft->shared_owners.push_back(std::move(shared));
+  const auto owner_bytes = draft->shared_owners.back().owners.capacity() * sizeof(contextual_text::InlineTextOwner);
+  const auto table_bytes = (draft->shared_owners.capacity() - old_capacity) * sizeof(contextual_text::SharedTextOwners);
+  if (owner_bytes + table_bytes > options.max_text_result_bytes - usage.text_result_bytes) {
+    status = Status::limit;
+    return 0;
+  }
+  usage.text_result_bytes += owner_bytes + table_bytes;
+  return prepare_paragraph(host, source, x, y, width, true);
+}
+
+std::int64_t ContextualLayoutFrame::prepare_paragraph(LayoutBox& box, std::string_view source,
+    std::int64_t x, std::int64_t y, std::int64_t width, bool shared) {
   using contextual_text::Status;
   if(status!=Status::ok)return 0;
   if(x<INT_MIN||x>INT_MAX||y<INT_MIN||y>INT_MAX||width<0||width>INT_MAX) {
     status=Status::limit;return 0;
   }
+  const auto place = [&](std::int64_t height) {
+    box.content_geometry = {x, y, width, height, false};
+    if (!shared) {
+      box.rect = {project_size_edge(x), project_size_edge(y),
+          project_size_extent(x, width), project_size_extent(y, height)};
+    }
+  };
   for(auto& entry:draft->paragraphs)if(entry.owner==&box) {
     if(entry.content_width_q1000!=width) {status=Status::invalid;return 0;}
     const auto height=std::int64_t(entry.paragraph.height_q1000());
-    box.rect={project_size_edge(x),project_size_edge(y),
-        project_size_extent(x,width),project_size_extent(y,height)};
-    box.content_geometry={x,y,width,height,false};
+    place(height);
     entry.color=box.style.color;entry.align=box.style.text_align;
     return height;
   }
@@ -180,16 +317,14 @@ std::int64_t ContextualLayoutFrame::prepare(LayoutBox& box,std::int64_t x,std::i
   limits.result_bytes=std::min(limits.result_bytes,options.max_text_result_bytes-usage.text_result_bytes);
   contextual_text::LayoutParagraph entry;
   contextual_text::ParagraphUsage local;
-  status=contextual_text::layout_paragraph(options.binding,box.node->text,p,limits,work,entry.paragraph,&local);
+  status=contextual_text::layout_paragraph(options.binding,source,p,limits,work,entry.paragraph,&local);
   usage.shape_calls+=local.shape_calls;usage.text_result_bytes+=local.result_bytes;
   if(status!=Status::ok)return 0;
   usage.lines+=entry.paragraph.lines().size();++usage.paragraphs;
   entry.owner=&box;entry.color=box.style.color;entry.align=box.style.text_align;
   entry.content_width_q1000=static_cast<std::int32_t>(width);
   const auto height=std::int64_t(entry.paragraph.height_q1000());
-  box.rect={project_size_edge(x),project_size_edge(y),
-      project_size_extent(x,width),project_size_extent(y,height)};
-  box.content_geometry={x,y,width,height,false};
+  place(height);
   draft->paragraphs.push_back(std::move(entry));
   return height;
 }

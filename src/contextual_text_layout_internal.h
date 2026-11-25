@@ -1,9 +1,20 @@
 #pragma once
 #include "render_core/contextual_text_layout.h"
 namespace jellyframe::contextual_text {
+// A shared paragraph records byte lengths in the owned Paragraph::source()
+// and borrowed DOM identities under the layout's document lifetime guard.
+struct InlineTextOwner {
+  const Node* node;
+  std::size_t length;
+};
+struct SharedTextOwners {
+  std::size_t paragraph_index;
+  std::vector<InlineTextOwner> owners;
+};
 struct LayoutResult::State {
   LayoutBoxPtr tree;
   std::vector<LayoutParagraph> paragraphs;
+  std::vector<SharedTextOwners> shared_owners;
   const Node* source_root = nullptr;
   std::uint64_t source_generation = 0;
   NodeLifetimeObserverRegistration source_lifetime;
@@ -28,9 +39,14 @@ struct ContextualLayoutFrame {
   contextual_text::Status status = contextual_text::Status::ok;
   std::shared_ptr<contextual_text::LayoutResult::State> draft;
   std::size_t expected_paragraphs = 0;
-  ContextualLayoutFrame(const contextual_text::LayoutOptions& o, std::uint64_t& w) : options(o), work(w) {}
+  const bool shared_inline;
+  ContextualLayoutFrame(const contextual_text::LayoutOptions& o, std::uint64_t& w, bool shared)
+      : options(o), work(w), shared_inline(shared) {}
   contextual_text::Status admit(const RenderObject&, std::size_t max_boxes, std::size_t max_depth);
   std::int64_t prepare(LayoutBox&, std::int64_t x, std::int64_t y, std::int64_t width);
+  std::int64_t prepare_shared(LayoutBox&, std::int64_t x, std::int64_t y, std::int64_t width);
+  std::int64_t prepare_paragraph(LayoutBox&, std::string_view source, std::int64_t x,
+      std::int64_t y, std::int64_t width, bool shared);
   bool finalize(LayoutBoxPtr);
 };
 }

@@ -2115,27 +2115,45 @@ contextual_text::LayerCapture::text_hit_fragments() const noexcept {
 }
 
 namespace {
-bool capture_contextual_text_hits(const contextual_text::LayoutResult& layout, Rect clip,
+bool capture_contextual_text_hits(const contextual_text::LayoutResult::State& layout, Rect clip,
                                   const contextual_text::TextHitCaptureOptions& options,
                                   std::vector<contextual_text::ContextualTextHitFragment>& fragments) {
     if (options.max_work > 32U * 1024U * 1024U || options.max_fragments > 16384) return false;
     auto work = options.max_work;
-    const auto& paragraphs = layout.paragraphs();
+    const auto& paragraphs = layout.paragraphs;
+    auto next_shared = layout.shared_owners.begin();
     for (std::size_t paragraph_index = 0; paragraph_index < paragraphs.size(); ++paragraph_index) {
         const auto& paragraph = paragraphs[paragraph_index];
         const auto& lines = paragraph.paragraph.lines();
+        const auto* shared = next_shared != layout.shared_owners.end() &&
+            next_shared->paragraph_index == paragraph_index ? &*next_shared++ : nullptr;
         if (!paragraph.color.a || lines.empty()) continue;
+        const auto original = paragraph.paragraph.source();
+        std::vector<std::string_view> shared_sources;
+        if (shared) {
+            if (shared->owners.size() > work) return false;
+            work -= shared->owners.size();
+            shared_sources.reserve(shared->owners.size());
+            std::size_t offset = 0;
+            for (const auto& owner : shared->owners) {
+                if (owner.length > original.size() - offset) return false;
+                shared_sources.push_back(original.substr(offset, owner.length));
+                offset += owner.length;
+            }
+        }
+        const auto* owner_sources = shared ? shared_sources.data() : &original;
+        const auto owner_count = shared ? shared_sources.size() : 1;
         detail::CoreTextParagraph source;
-        if (detail::build_contextual_single_owner_source(paragraph.paragraph, source, work) !=
+        if (detail::build_contextual_owner_source(paragraph.paragraph,
+                owner_sources, owner_count, source, work) !=
                 detail::CoreTextInlineSourceMapStatus::Complete)
             return false;
-        const auto original = paragraph.paragraph.source();
         for (std::size_t line_index = 0; line_index < lines.size(); ++line_index) {
             const auto& line = lines[line_index];
             if (!line.metrics.has_ink) continue;
             detail::CoreTextClusterMap owner_map;
             if (detail::map_experimental_contextual_inline_line(
-                    source, &original, 1, paragraph.paragraph, line_index, owner_map, {}, &work) !=
+                    source, owner_sources, owner_count, paragraph.paragraph, line_index, owner_map, {}, &work) !=
                     detail::CoreTextInlineSourceMapStatus::Complete)
                 return false;
 
@@ -2189,7 +2207,8 @@ bool LayerTreeBuilder::build_contextual(const contextual_text::LayoutResult& lay
 bool LayerTreeBuilder::build_contextual_impl(const contextual_text::LayoutResult& layout,
                                              const contextual_text::TextHitCaptureOptions* hit_options,
                                              contextual_text::LayerCapture& output) const noexcept {
-    if (!layout.valid() || !layout.tree() || !options_.max_layers) return false;
+    if (!layout.valid() || !layout.tree() || !options_.max_layers ||
+        (!hit_options && !layout.state_->shared_owners.empty())) return false;
     const auto source_is_current = [&]() {
         const auto& source = *layout.state_;
         return source.source_lifetime.active() && !source.source_root->parent &&
@@ -2231,12 +2250,7 @@ bool LayerTreeBuilder::build_contextual_impl(const contextual_text::LayoutResult
             const auto* box = pending.back();
             pending.pop_back();
             if (!box || !detail::is_contextual_layout_box(*box)) return false;
-            if (next_paragraph < layout.paragraphs().size() &&
-                layout.paragraphs()[next_paragraph].owner == box) {
-                if (root.display_list.size() > std::numeric_limits<std::uint32_t>::max()) return false;
-                draft->after_command_counts.push_back(static_cast<std::uint32_t>(root.display_list.size()));
-                ++next_paragraph;
-            } else if (box != canvas_background_source && box->style.background_color.a) {
+            if (box != canvas_background_source && box->style.background_color.a) {
                 Rect area;
                 int radius = 0, radius_y = 0;
                 if (canonical_background_color_area(*box, box->style.background_layers[0].image.clip,
@@ -2247,11 +2261,17 @@ bool LayerTreeBuilder::build_contextual_impl(const contextual_text::LayoutResult
                     --remaining;
                 }
             }
+            if (next_paragraph < layout.paragraphs().size() &&
+                layout.paragraphs()[next_paragraph].owner == box) {
+                if (root.display_list.size() > std::numeric_limits<std::uint32_t>::max()) return false;
+                draft->after_command_counts.push_back(static_cast<std::uint32_t>(root.display_list.size()));
+                ++next_paragraph;
+            }
             for (auto it = box->children.rbegin(); it != box->children.rend(); ++it) {
                 pending.push_back(it->get());
             }
         }
-        if (hit_options && !capture_contextual_text_hits(layout, root.bounds, *hit_options,
+        if (hit_options && !capture_contextual_text_hits(*layout.state_, root.bounds, *hit_options,
                                                         draft->text_hit_fragments))
             return false;
         if (next_paragraph != layout.paragraphs().size() || !source_is_current()) return false;
