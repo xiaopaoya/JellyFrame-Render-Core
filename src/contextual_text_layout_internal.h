@@ -12,6 +12,7 @@ struct LayerCapture::State {
   LayoutResult layout;
   LayerNodePtr layer_tree;
   std::vector<std::uint32_t> after_command_counts;
+  std::vector<ContextualTextHitFragment> text_hit_fragments;
 };
 }
 namespace jellyframe::detail {

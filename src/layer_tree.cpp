@@ -15,6 +15,8 @@
 #include "prepared_text_internal.h"
 #if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
 #include "contextual_text_layout_internal.h"
+#include "contextual_text_inline_geometry.h"
+#include "core_text_inline_source_map.h"
 #endif
 
 #include <algorithm>
@@ -2106,8 +2108,87 @@ const std::vector<std::uint32_t>& contextual_text::LayerCapture::after_command_c
     return state_ ? state_->after_command_counts : empty;
 }
 
+const std::vector<contextual_text::ContextualTextHitFragment>&
+contextual_text::LayerCapture::text_hit_fragments() const noexcept {
+    static const std::vector<contextual_text::ContextualTextHitFragment> empty;
+    return state_ ? state_->text_hit_fragments : empty;
+}
+
+namespace {
+bool capture_contextual_text_hits(const contextual_text::LayoutResult& layout, Rect clip,
+                                  const contextual_text::TextHitCaptureOptions& options,
+                                  std::vector<contextual_text::ContextualTextHitFragment>& fragments) {
+    if (options.max_work > 32U * 1024U * 1024U || options.max_fragments > 16384) return false;
+    auto work = options.max_work;
+    const auto& paragraphs = layout.paragraphs();
+    for (std::size_t paragraph_index = 0; paragraph_index < paragraphs.size(); ++paragraph_index) {
+        const auto& paragraph = paragraphs[paragraph_index];
+        const auto& lines = paragraph.paragraph.lines();
+        if (!paragraph.color.a || lines.empty()) continue;
+        detail::CoreTextParagraph source;
+        if (detail::build_contextual_single_owner_source(paragraph.paragraph, source, work) !=
+                detail::CoreTextInlineSourceMapStatus::Complete)
+            return false;
+        const auto original = paragraph.paragraph.source();
+        for (std::size_t line_index = 0; line_index < lines.size(); ++line_index) {
+            const auto& line = lines[line_index];
+            if (!line.metrics.has_ink) continue;
+            detail::CoreTextClusterMap owner_map;
+            if (detail::map_experimental_contextual_inline_line(
+                    source, &original, 1, paragraph.paragraph, line_index, owner_map, {}, &work) !=
+                    detail::CoreTextInlineSourceMapStatus::Complete)
+                return false;
+
+            const auto slack = std::int64_t(paragraph.content_width_q1000) - line.metrics.advance_x;
+            const auto offset = paragraph.align == TextAlign::Center ? slack / 2
+                : paragraph.align == TextAlign::End ? slack : 0;
+            // Contextual layout finalization has already checked both origins.
+            const auto baseline_x = static_cast<std::int32_t>(paragraph.origin_x_q1000 + offset);
+            const auto baseline_y = paragraph.origin_y_q1000 + line.baseline_y_q1000;
+            std::vector<detail::ContextualTextGlyphInk> glyph_ink;
+            if (detail::contextual_text_line_glyph_ink(paragraph.paragraph, line_index,
+                    baseline_x, baseline_y, glyph_ink, work) != detail::ContextualTextInkStatus::Complete)
+                return false;
+
+            for (const auto& glyph : glyph_ink) {
+                const auto ink = intersect_rect(glyph.bounds, clip);
+                if (ink.width == 0 || ink.height == 0) continue;
+                if (glyph.cluster_index >= owner_map.clusters.size()) return false;
+                const auto& cluster = owner_map.clusters[glyph.cluster_index];
+                const auto first = std::size_t(cluster.first_owner_span);
+                const auto count = std::size_t(cluster.owner_span_count);
+                if (first > owner_map.owner_spans.size() ||
+                    count > owner_map.owner_spans.size() - first ||
+                    count > options.max_fragments - fragments.size() || count > work)
+                    return false;
+                work -= count;
+                for (std::size_t i = first; i < first + count; ++i) {
+                    const auto& owner = owner_map.owner_spans[i];
+                    fragments.push_back({static_cast<std::uint32_t>(paragraph_index),
+                        static_cast<std::uint32_t>(line_index), owner.owner, glyph.cluster_index,
+                        glyph.glyph_index, owner.source_begin, owner.source_end, ink});
+                }
+            }
+        }
+    }
+    return true;
+}
+} // namespace
+
 bool LayerTreeBuilder::build_contextual(const contextual_text::LayoutResult& layout,
                                         contextual_text::LayerCapture& output) const noexcept {
+    return build_contextual_impl(layout, nullptr, output);
+}
+
+bool LayerTreeBuilder::build_contextual(const contextual_text::LayoutResult& layout,
+                                        const contextual_text::TextHitCaptureOptions& options,
+                                        contextual_text::LayerCapture& output) const noexcept {
+    return build_contextual_impl(layout, &options, output);
+}
+
+bool LayerTreeBuilder::build_contextual_impl(const contextual_text::LayoutResult& layout,
+                                             const contextual_text::TextHitCaptureOptions* hit_options,
+                                             contextual_text::LayerCapture& output) const noexcept {
     if (!layout.valid() || !layout.tree() || !options_.max_layers) return false;
     const auto source_is_current = [&]() {
         const auto& source = *layout.state_;
@@ -2170,6 +2251,9 @@ bool LayerTreeBuilder::build_contextual(const contextual_text::LayoutResult& lay
                 pending.push_back(it->get());
             }
         }
+        if (hit_options && !capture_contextual_text_hits(layout, root.bounds, *hit_options,
+                                                        draft->text_hit_fragments))
+            return false;
         if (next_paragraph != layout.paragraphs().size() || !source_is_current()) return false;
         output.state_ = std::move(draft);
         return true;
