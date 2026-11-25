@@ -55,7 +55,9 @@ int main(int argc, char** argv) {
     check(paragraph.source() == " \tA \n A\rA  " && paragraph.text() == "A A A", "normal whitespace");
     check(line_text(paragraph) == std::vector<std::string>({"A", "A", "A"}), "three lines");
     check(paragraph.width_q1000() == a.advance_x && paragraph.height_q1000() == 69003, "Q1000 geometry");
-    check(paragraph.lines()[1].baseline_y_q1000 - paragraph.lines()[0].baseline_y_q1000 == 23001, "baseline step");
+    check(paragraph.lines()[0].baseline_y_q1000 == 18695 &&
+          paragraph.lines()[1].baseline_y_q1000 - paragraph.lines()[0].baseline_y_q1000 == 23001,
+          "explicit line height applies negative half-leading to the Noto font extent");
     check(usage.shape_calls > paragraph.lines().size() + 1 && usage.work == budget - work && usage.result_bytes > 0, "charged candidate work");
     validate_lines(paragraph);
     auto retained = paragraph;
@@ -129,10 +131,10 @@ int main(int argc, char** argv) {
     check(prepare(binding, options.size_q1000, "A\xCC\x81", {}, work, final_packet, final_metrics) == Status::ok &&
           paragraph.lines()[0].packet == final_packet &&
           paragraph.lines()[0].metrics.advance_x == final_metrics.advance_x, "final line is direct shaping output");
-    const auto natural = std::int64_t(final_metrics.ascent) - final_metrics.descent + final_metrics.line_gap;
-    check(paragraph.height_q1000() == natural &&
-          paragraph.lines()[0].baseline_y_q1000 == final_metrics.ascent + final_metrics.line_gap / 2,
-          "natural baseline includes half leading");
+    // Noto Sans SC at 16.5 px has 19.140 px ascent and 4.752 px descent.
+    check(final_metrics.ascent == 19140 && final_metrics.descent == 4752 &&
+          paragraph.height_q1000() == 23892 && paragraph.lines()[0].baseline_y_q1000 == 19140,
+          "natural line height includes the positive descent");
     // A combining sequence is a single source cluster: emergency wrapping
     // must not split between A and its combining acute accent, even at width0.
     options.width_q1000 = 0;

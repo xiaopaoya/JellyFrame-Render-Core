@@ -127,7 +127,8 @@ Status layout_paragraph(const Binding& binding, std::string_view source,
       work = 0; return Status::limit;
     }
     if (whole.source() != text) return Status::invalid;
-    const auto natural_height = std::int64_t(whole_metrics.ascent) - whole_metrics.descent + whole_metrics.line_gap;
+    const auto font_extent = std::int64_t(whole_metrics.ascent) + whole_metrics.descent;
+    const auto natural_height = font_extent + whole_metrics.line_gap;
     const auto line_height = options.line_height_q1000 ? options.line_height_q1000 : natural_height;
     if (line_height <= 0 || line_height > INT32_MAX) return Status::invalid;
     // The packet remains live during candidate/final preparation, so reserve
@@ -213,8 +214,7 @@ Status layout_paragraph(const Binding& binding, std::string_view source,
       status = shape(std::string_view(text).substr(begin, line.source_end - begin), line.packet, line.metrics);
       if (status != Status::ok) return status;
       if (line.metrics.advance_x != chosen_width) return Status::invalid;
-      const auto half_leading = (line_height -
-          (std::int64_t(whole_metrics.ascent) - whole_metrics.descent)) / 2;
+      const auto half_leading = (line_height - font_extent) / 2;
       const auto baseline = half_leading + whole_metrics.ascent +
           std::int64_t(draft->lines.size()) * line_height;
       const auto height = (std::int64_t(draft->lines.size()) + 1) * line_height;

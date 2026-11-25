@@ -373,7 +373,7 @@ void check_nowrap_flex_row(const char* fixture_root) {
   const auto wrapped_pixels = draw_capture(wrapped_capture);
   check(same_pixels(wrapped_pixels, expected_wrapped),
         "wrapped contextual pixels match the final-geometry paint oracle");
-  const auto known_wrapped_ink = wrapped_pixels.pixel(4, 6);
+  const auto known_wrapped_ink = wrapped_pixels.pixel(4, 1);
   check(known_wrapped_ink.r == 0 && known_wrapped_ink.g == 0 && known_wrapped_ink.b == 0,
         "wrapped row paints the known Noto A pixel at its first-line origin");
   const auto check_justification = [&](const char* justify,
@@ -565,15 +565,14 @@ void check_centered_flex_line_heights(const char* fixture_root) {
   // The packaged Noto Sans SC hhea metrics are ascent 1160 and descent 288
   // in 1000 units per em. CSS line-height supplies 24px/48px line boxes.
   // Descent is positive and extends below the baseline. Therefore paragraph
-  // baselines are 12 + (24 - 16*(1160-288)/1000)/2
-  // + 16*1160/1000 = 35.584px and
-  // (48 - 24*(1160-288)/1000)/2 + 24*1160/1000 = 41.376px.
+  // baselines are 12 + 24/2 + 16*(1160-288)/2000 = 30.976px and
+  // 48/2 + 24*(1160-288)/2000 = 34.464px.
   const auto& short_line = result.paragraphs()[0].paragraph.lines().front();
   const auto& tall_line = result.paragraphs()[1].paragraph.lines().front();
   check(result.paragraphs()[0].origin_y_q1000 == 12000 &&
         result.paragraphs()[1].origin_y_q1000 == 0 &&
-        short_line.baseline_y_q1000 == 23584 &&
-        tall_line.baseline_y_q1000 == 41376,
+        short_line.baseline_y_q1000 == 18976 &&
+        tall_line.baseline_y_q1000 == 34464,
         "CSS line-height and centered item geometry reach JFSP2 baselines");
 
   LayerCapture capture;
@@ -581,10 +580,10 @@ void check_centered_flex_line_heights(const char* fixture_root) {
         "capture centered Flex paragraphs");
   const auto pixels = draw_capture(capture);
   // The packaged U+0041 bitmap has bearing (0,-12), size 10x12, and full
-  // coverage at bitmap pixel (4,0). Raster scaling puts that pixel at x=4/y=24
-  // for the 16px run and x+6/y=23 for the 24px run.
-  const auto short_ink = pixels.pixel(4, 24);
-  const auto tall_ink = pixels.pixel(tall_item->rect.x + 6, 23);
+  // coverage at bitmap pixel (4,0). Raster scaling puts that pixel at x=4/y=19
+  // for the 16px run and x+6/y=16 for the 24px run.
+  const auto short_ink = pixels.pixel(4, 19);
+  const auto tall_ink = pixels.pixel(tall_item->rect.x + 6, 16);
   check(short_ink.r == 0 && short_ink.g == 0 && short_ink.b == 0 &&
         tall_ink.r == 0 && tall_ink.g == 0 && tall_ink.b == 0,
         "JFSP2 baselines place independently known Noto A ink pixels");
