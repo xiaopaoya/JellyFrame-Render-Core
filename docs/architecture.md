@@ -45,6 +45,12 @@ the public headers and the generated capability profile. The package is a
 build artifact boundary; it does not include App Runtime, JerryScript, ports or
 device protocols.
 
+CSS counters are an opt-in Core feature. Configure with
+`-DJELLYFRAME_ENABLE_CSS_COUNTERS=ON` to include the bounded decimal counter
+subset for ordinary block-flow trees, including generated `::before` and
+`::after` content. The default build omits the counter runtime. Interactions
+with Flex, Grid and `display: contents` are refused with a diagnostic.
+
 For Core ABI `2`, all installed `render_core/*.h` headers are the C++ consumer
 surface. Consumers include those installed paths and link the exported target;
 they must not reach into a checkout through `src/` paths or compile Core source

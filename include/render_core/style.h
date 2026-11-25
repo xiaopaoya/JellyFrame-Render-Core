@@ -526,7 +526,7 @@ struct InteractionInvalidationHints {
 
 using CustomPropertyMap = std::unordered_map<std::string, std::string>;
 
-namespace detail { struct BackgroundResourceTransaction; struct ScalarCascadeCache; }
+namespace detail { struct BackgroundResourceTransaction; struct ScalarCascadeCache; struct RenderCounterPrograms; }
 class StyleResolver;
 
 struct StyleLengthResolutionContext {
@@ -578,6 +578,7 @@ public:
     std::uint64_t scoped_style_context_generation() const noexcept { return scoped_style_context_generation_; }
 
 private:
+    friend class RenderTreeBuilder;
     friend struct detail::BackgroundResourceTransaction;
     bool background_image_resource_ids_for(const std::array<std::string_view, 4>& urls,
                                            std::size_t count,
@@ -616,6 +617,8 @@ private:
     CustomPropertyMap custom_properties_for(const Node& node) const;
     const CustomPropertyMap& custom_properties_for(const Node& node, StyleResolveContext& context) const;
     const std::vector<const CssRule*>& matching_rules_for(const Node& node, StyleResolveContext& context) const;
+    Style resolve_for_tree(const Node& node, StyleResolveContext& context,
+                           detail::RenderCounterPrograms* counters) const;
     Style resolve_with_custom_properties(const Node& node,
                                          const CustomPropertyMap& custom_properties,
                                          const std::vector<const CssRule*>* matched_rules,
@@ -624,6 +627,11 @@ private:
                                          const CustomPropertyMap& custom_properties,
                                          const std::vector<const CssRule*>* matched_rules,
                                          const StyleLengthResolutionContext& length_context) const;
+    Style resolve_uncached_with_counters(const Node& node,
+                                         const CustomPropertyMap& custom_properties,
+                                         const std::vector<const CssRule*>* matched_rules,
+                                         const StyleLengthResolutionContext& length_context,
+                                         detail::RenderCounterPrograms* counters) const;
 };
 
 } // namespace jellyframe

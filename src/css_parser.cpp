@@ -1,6 +1,9 @@
 ﻿#include "render_core/css_parser.h"
 #include "css_aspect_ratio.h"
 #include "css_flex_values.h"
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+#include "css_counter_program.h"
+#endif
 #include "render_core/feature_config.h"
 #include "css_background_layers.h"
 
@@ -839,6 +842,12 @@ bool is_supported_declaration_feature(std::string_view feature) {
     if (property.rfind("--", 0) == 0) {
         return true;
     }
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+    if (property == "counter-reset" || property == "counter-set" ||
+        property == "counter-increment") {
+        return detail::counter_declaration_syntax_supported(property, value);
+    }
+#endif
 #if !JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
     if (property == "display") {
         return !supported_keyword(value, {"flex", "inline-flex", "grid", "inline-grid"});

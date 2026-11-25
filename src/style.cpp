@@ -11,6 +11,10 @@
 #include "css_background_layers.h"
 #include "background_resource_transaction.h"
 #include "css_flex_values.h"
+#include "css_selector_tokens.h"
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+#include "css_counter_program.h"
+#endif
 #include "computed_size_values.h"
 #include "grid_track_provenance.h"
 
@@ -3028,6 +3032,14 @@ struct CascadeSlot {
     std::size_t source_order = 0;
 };
 
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+struct CounterCascadeSlots {
+    std::array<CascadeSlot, 3> element;
+    std::array<CascadeSlot, 3> before;
+    std::array<CascadeSlot, 3> after;
+};
+#endif
+
 enum class CascadeProperty : std::size_t {
     Display,
     TableLayout,
@@ -4836,6 +4848,9 @@ bool apply_cascaded_declaration(Style& style,
 }
 
 bool parse_counter_content(const std::string& raw_value, std::string& name, std::string& suffix) {
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+    return detail::parse_decimal_counter_content(raw_value, name, suffix);
+#else
     const std::string value = trim(raw_value);
     constexpr std::string_view prefix = "counter(";
     if (value.rfind(prefix, 0) != 0) {
@@ -4851,6 +4866,7 @@ bool parse_counter_content(const std::string& raw_value, std::string& name, std:
         suffix = unquote(suffix);
     }
     return !name.empty();
+#endif
 }
 
 bool apply_generated_declaration(Style& style,
@@ -4906,6 +4922,13 @@ bool apply_generated_declaration(Style& style,
             content_text.clear();
             return true;
         }
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+        const std::string counter_token = trim(value);
+        if (counter_token.size() >= 8 &&
+            detail::css_ascii_case_equal(std::string_view(counter_token).substr(0, 8), "counter(")) {
+            return false;
+        }
+#endif
         const std::string token = trim(value);
         const std::string keyword = lowercase(token);
         if (token.empty() || keyword == "none" || keyword == "normal") {
@@ -5105,7 +5128,12 @@ void apply_declarations(Style& style,
                         DiagnosticSink* diagnostics,
                         const StyleResolver* resolver,
                         std::size_t max_resolved_value_bytes,
-                        const LengthResolutionContext& context) {
+                        const LengthResolutionContext& context
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+                        , detail::RenderCounterPrograms* counters = nullptr,
+                        CounterCascadeSlots* counter_slots = nullptr
+#endif
+                        ) {
     CssDeclaration resolved_scratch;
     for (const CssDeclaration& declaration : declarations) {
         if (is_custom_property_name(declaration.property)) {
@@ -5114,6 +5142,43 @@ void apply_declarations(Style& style,
         const CssDeclaration& resolved_declaration =
             resolve_declaration_value(declaration, custom_properties, resolved_scratch,
                                       max_resolved_value_bytes);
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+        if (counters != nullptr && counter_slots != nullptr) {
+            detail::CounterProgram* counter_program = nullptr;
+            std::array<CascadeSlot, 3>* counter_property_slots = nullptr;
+            if (pseudo_element == CssPseudoElement::None) {
+                counter_program = &counters->element;
+                counter_property_slots = &counter_slots->element;
+            } else if (pseudo_element == CssPseudoElement::Before) {
+                counter_program = &counters->before;
+                counter_property_slots = &counter_slots->before;
+            } else if (pseudo_element == CssPseudoElement::After) {
+                counter_program = &counters->after;
+                counter_property_slots = &counter_slots->after;
+            }
+            std::size_t counter_index = 3;
+            if (resolved_declaration.property == "counter-reset") counter_index = 0;
+            else if (resolved_declaration.property == "counter-set") counter_index = 1;
+            else if (resolved_declaration.property == "counter-increment") counter_index = 2;
+            if (counter_program != nullptr && counter_property_slots != nullptr && counter_index < 3) {
+                CascadeSlot& slot = (*counter_property_slots)[counter_index];
+                if (!declaration_wins(slot, resolved_declaration, specificity, source_order)) continue;
+                if (!detail::counter_declaration_syntax_supported(resolved_declaration.property,
+                                                                  resolved_declaration.value)) {
+                    report_diagnostic(diagnostics, DiagnosticStage::Style, DiagnosticSeverity::Warning,
+                                      "style-counter-declaration-ignored",
+                                      "Counter declaration is outside the supported syntax",
+                                      resolved_declaration.property + ": " + resolved_declaration.value);
+                    continue;
+                }
+                if (detail::apply_counter_declaration(*counter_program, resolved_declaration.property,
+                                                       resolved_declaration.value)) {
+                    mark_slot(slot, resolved_declaration, specificity, source_order);
+                }
+                continue;
+            }
+        }
+#endif
         LogicalDeclarationExpansion expansion;
         const bool is_logical = expand_logical_declaration(resolved_declaration, expansion);
         if (is_logical && expansion.count == 0) {
@@ -6149,6 +6214,20 @@ Style StyleResolver::resolve(const Node& node, StyleResolveContext& context) con
                                           length_context_for(context));
 }
 
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+Style StyleResolver::resolve_for_tree(const Node& node, StyleResolveContext& context,
+                                      detail::RenderCounterPrograms* counters) const {
+    if (node.type == NodeType::Text) return default_style_for(node);
+    prepare_context(context, node);
+    const CustomPropertyMap& custom_properties = custom_properties_for(node, context);
+    const std::vector<const CssRule*>* matched_rules = has_custom_property_declarations_
+        ? &matching_rules_for(node, context)
+        : nullptr;
+    return resolve_uncached_with_counters(node, custom_properties, matched_rules,
+                                          length_context_for(context), counters);
+}
+#endif
+
 const std::vector<const CssRule*>& StyleResolver::matching_rules_for(const Node& node,
                                                                       StyleResolveContext& context) const {
     const auto existing = context.matched_rule_cache.find(&node);
@@ -6236,9 +6315,21 @@ Style StyleResolver::resolve_with_custom_properties(const Node& node,
 }
 
 Style StyleResolver::resolve_uncached(const Node& node,
+                                      const CustomPropertyMap& custom_properties,
+                                      const std::vector<const CssRule*>* matched_rules,
+                                      const LengthResolutionContext& length_context) const {
+    return resolve_uncached_with_counters(node, custom_properties, matched_rules,
+                                          length_context, nullptr);
+}
+
+Style StyleResolver::resolve_uncached_with_counters(const Node& node,
                                                     const CustomPropertyMap& custom_properties,
                                                     const std::vector<const CssRule*>* matched_rules,
-                                                    const LengthResolutionContext& length_context) const {
+                                                    const LengthResolutionContext& length_context,
+                                                    detail::RenderCounterPrograms* counters) const {
+#if !JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+    (void)counters;
+#endif
     Style style = default_style_for(node);
     if (node.type == NodeType::Element) {
         struct HtmlDimension {
@@ -6329,6 +6420,9 @@ Style StyleResolver::resolve_uncached(const Node& node,
         }
     }
     CascadeSlots slots;
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+    CounterCascadeSlots counter_slots;
+#endif
     const SelectorMatchContext context = selector_match_context_from_options(options_);
 
     const std::vector<const CssRule*>& rules = matched_rules != nullptr
@@ -6340,7 +6434,11 @@ Style StyleResolver::resolve_uncached(const Node& node,
         }
         apply_declarations(style, slots, rule->declarations, rule->specificity,
                            rule->source_order, rule->pseudo_element, custom_properties,
-                           options_.diagnostics, this, options_.max_resolved_value_bytes, length_context);
+                           options_.diagnostics, this, options_.max_resolved_value_bytes, length_context
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+                           , counters, counters != nullptr ? &counter_slots : nullptr
+#endif
+                           );
     }
     if (node.type == NodeType::Element) {
         CssSpecificity inline_specificity;
@@ -6354,7 +6452,11 @@ Style StyleResolver::resolve_uncached(const Node& node,
                                               options_.diagnostics),
                            inline_specificity,
                            static_cast<std::size_t>(-1), CssPseudoElement::None, custom_properties,
-                           options_.diagnostics, this, options_.max_resolved_value_bytes, length_context);
+                           options_.diagnostics, this, options_.max_resolved_value_bytes, length_context
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+                           , counters, counters != nullptr ? &counter_slots : nullptr
+#endif
+                           );
     }
     // Lower hidden pseudo-elements after both properties finish cascading.
     if (slots.before_display == Display::None) {

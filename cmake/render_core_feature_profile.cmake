@@ -91,6 +91,14 @@ else()
     set(JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_SOURCES_JSON
         "\"src/form_submission_disabled.cpp\"")
 endif()
+string(REPLACE ";" "\",\n      \"" _jellyframe_render_core_css_counters_sources_json
+    "${JELLYFRAME_RENDER_CORE_CSS_COUNTERS_IMPLEMENTATION}")
+if(JELLYFRAME_ENABLE_CSS_COUNTERS)
+    set(JELLYFRAME_RENDER_CORE_CSS_COUNTERS_SOURCES_JSON
+        "\"${_jellyframe_render_core_css_counters_sources_json}\"")
+else()
+    set(JELLYFRAME_RENDER_CORE_CSS_COUNTERS_SOURCES_JSON)
+endif()
 
 set(JELLYFRAME_RENDER_CORE_PROFILE_OUTPUT_DIR
     "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -110,3 +118,4 @@ unset(_jellyframe_render_core_modern_paint_sources_json)
 unset(_jellyframe_render_core_flex_grid_sources_json)
 unset(_jellyframe_render_core_canvas2d_sources_json)
 unset(_jellyframe_render_core_advanced_forms_sources_json)
+unset(_jellyframe_render_core_css_counters_sources_json)

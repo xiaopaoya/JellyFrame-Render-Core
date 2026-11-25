@@ -6,6 +6,13 @@
 #include "generated_flex_grid_text.h"
 #include "scalar_cascade_cache.h"
 #include "shared_inline.h"
+#include "render_core/feature_config.h"
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+#include "css_selector_tokens.h"
+#endif
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+#include "css_counter_program.h"
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -620,6 +627,9 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         const Style* parent_style = nullptr;
         bool under_contents = false;
         std::size_t dom_index = 0;
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+        const detail::RenderCounterPrograms* parent_counter_program = nullptr;
+#endif
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
         bool generated_after = false;
 #endif
@@ -633,13 +643,90 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
     view->type = RenderObjectType::View;
     view->node = &document;
     const Style* reusable_view_style = reuse != nullptr ? reuse->find(document) : nullptr;
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+    const auto is_counter_property = [](std::string_view property) {
+        return property == "counter-reset" || property == "counter-set" ||
+               property == "counter-increment";
+    };
+    const auto contains_counter_function = [](std::string_view value) {
+        if (value.size() < 8) return false;
+        for (std::size_t offset = 0; offset <= value.size() - 8; ++offset) {
+            if (detail::css_ascii_case_equal(value.substr(offset, 8), "counter(")) return true;
+        }
+        return false;
+    };
+    bool counter_stylesheet_present = false;
+    for (const auto& rule : style_resolver_.stylesheet_) {
+        for (const auto& declaration : rule.declarations) {
+            if (is_counter_property(declaration.property) ||
+                (declaration.property == "content" && contains_counter_function(declaration.value))) {
+                counter_stylesheet_present = true;
+                break;
+            }
+        }
+        if (counter_stylesheet_present) break;
+    }
+    bool counter_content_seen = false;
+    bool counter_topology_supported = true;
+    detail::CounterPrograms counter_programs;
+    std::deque<detail::RenderCounterPrograms> counter_program_storage;
+    detail::RenderCounterPrograms root_counter_program;
+    std::size_t counter_program_bytes = 0;
+    std::size_t counter_operation_count = 0;
+    constexpr std::size_t max_counter_program_bytes = 8192;
+    constexpr std::size_t max_counter_program_operations = 256;
+    const auto count_declaration = [](const detail::CounterDeclaration& declaration) {
+        std::size_t bytes = 0;
+        for (const auto& operation : declaration.operations) bytes += operation.name.size();
+        return std::pair<std::size_t, std::size_t>{declaration.operations.size(), bytes};
+    };
+    const auto count_program = [&](const detail::CounterProgram& program) {
+        const auto reset = count_declaration(program.reset);
+        const auto set = count_declaration(program.set);
+        const auto increment = count_declaration(program.increment);
+        return std::pair<std::size_t, std::size_t>{
+            reset.first + set.first + increment.first,
+            reset.second + set.second + increment.second};
+    };
+#endif
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+    if (counter_stylesheet_present) reusable_view_style = nullptr;
+#endif
     if (reusable_view_style != nullptr) {
         view->style = *reusable_view_style;
     } else {
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+        if (counter_stylesheet_present) {
+            view->style = style_resolver_.resolve_for_tree(document, style_context, &root_counter_program);
+            detail::inherit_counter_declarations(root_counter_program.before, &root_counter_program.element);
+            detail::inherit_counter_declarations(root_counter_program.after, &root_counter_program.element);
+        } else
+#endif
         view->style = style_resolver_.resolve(document, style_context);
         detail::finalize_inherited_aspect_ratio(view->style, nullptr);
         apply_style_override(view->style, document, options_.style_overrides);
     }
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+    if (!root_counter_program.empty()) {
+        const auto element = count_program(root_counter_program.element);
+        const auto before = count_program(root_counter_program.before);
+        const auto after = count_program(root_counter_program.after);
+        const std::size_t root_operations = element.first + before.first + after.first;
+        const std::size_t root_bytes = element.second + before.second + after.second;
+        if (root_operations > max_counter_program_operations ||
+            root_bytes > max_counter_program_bytes) {
+            counter_topology_supported = false;
+        } else {
+            counter_operation_count = root_operations;
+            counter_program_bytes = root_bytes;
+            counter_program_storage.push_back(std::move(root_counter_program));
+        }
+    }
+    const detail::RenderCounterPrograms* root_counter_program_ptr = counter_program_storage.empty()
+        ? nullptr : &counter_program_storage.back();
+    if (root_counter_program_ptr != nullptr)
+        counter_programs.emplace(view_raw, *root_counter_program_ptr);
+#endif
 
     std::size_t render_object_count = 1;
     bool budget_reported = false;
@@ -649,7 +736,11 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
     pending.reserve(document.children.size());
     for (std::size_t i = document.children.size(); i > 0; --i) {
         pending.push_back(PendingNode{document.children[i - 1].get(), view_raw,
-            &view_raw->style, false, i - 1});
+            &view_raw->style, false, i - 1
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+            , counter_stylesheet_present ? root_counter_program_ptr : nullptr
+#endif
+            });
     }
     std::deque<Style> contents_styles;
     std::shared_ptr<ContentsSourceTopology> contents_sources;
@@ -826,7 +917,52 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         }
 
         const Style* reusable_style = reuse != nullptr ? reuse->find(node) : nullptr;
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+        const std::string& inline_style = node.attribute("style");
+        const bool inline_counter_present = inline_style.find("counter-") != std::string::npos ||
+            contains_counter_function(inline_style);
+        const bool resolve_counter_program = node.type == NodeType::Element &&
+            (counter_stylesheet_present || inline_counter_present);
+        if (resolve_counter_program) reusable_style = nullptr;
+        Style style;
+        detail::RenderCounterPrograms node_counter_program;
+        if (resolve_counter_program) {
+            style = style_resolver_.resolve_for_tree(node, style_context, &node_counter_program);
+            detail::inherit_counter_declarations(node_counter_program.element,
+                                                  pending_node.parent_counter_program == nullptr
+                                                    ? nullptr
+                                                    : &pending_node.parent_counter_program->element);
+            detail::inherit_counter_declarations(node_counter_program.before, &node_counter_program.element);
+            detail::inherit_counter_declarations(node_counter_program.after, &node_counter_program.element);
+            if (style.before_content_kind == GeneratedContentKind::None)
+                node_counter_program.before = {};
+            if (style.after_content_kind == GeneratedContentKind::None)
+                node_counter_program.after = {};
+            const auto element = count_program(node_counter_program.element);
+            const auto before = count_program(node_counter_program.before);
+            const auto after = count_program(node_counter_program.after);
+            const std::size_t added_operations = element.first + before.first + after.first;
+            const std::size_t added_bytes = element.second + before.second + after.second;
+            if (added_operations > max_counter_program_operations -
+                    std::min(max_counter_program_operations, counter_operation_count) ||
+                added_bytes > max_counter_program_bytes -
+                    std::min(max_counter_program_bytes, counter_program_bytes)) {
+                counter_topology_supported = false;
+            } else {
+                counter_operation_count += added_operations;
+                counter_program_bytes += added_bytes;
+            }
+        } else {
+            style = reusable_style != nullptr ? *reusable_style : style_resolver_.resolve(node, style_context);
+        }
+        const detail::RenderCounterPrograms* node_counter_program_ptr = nullptr;
+        if (resolve_counter_program && !node_counter_program.empty() && counter_topology_supported) {
+            counter_program_storage.push_back(std::move(node_counter_program));
+            node_counter_program_ptr = &counter_program_storage.back();
+        }
+#else
         Style style = reusable_style != nullptr ? *reusable_style : style_resolver_.resolve(node, style_context);
+#endif
         if (reusable_style == nullptr) {
             if (node.type == NodeType::Text) {
                 inherit_text_style(style, *pending_node.parent_style);
@@ -844,7 +980,21 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
             style.display = Display::None;
         }
 
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+        if (style.display != Display::None && node_counter_program_ptr != nullptr)
+            counter_content_seen = true;
+        if (style.display != Display::None &&
+            is_generated_counter(style.before_content_kind) && style.before_counter_name != "list-num")
+            counter_content_seen = true;
+        if (style.display != Display::None &&
+            is_generated_counter(style.after_content_kind) && style.after_counter_name != "list-num")
+            counter_content_seen = true;
+#endif
+
         if (style.display == Display::Contents) {
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+            counter_topology_supported = false;
+#endif
             has_contents = true;
             record_source(ContentsSourceRecord{ContentsSourceKind::Wrapper, parent.node, &node,
                 node.parent, pending_node.dom_index, contents_source_style(style), {}});
@@ -855,13 +1005,21 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
                 append_generated_item(parent, node, style, false);
                 if (supports_generated_item(style, true))
                     pending.push_back(PendingNode{&node, &parent, inherited_style, true,
-                        pending_node.dom_index, true});
+                        pending_node.dom_index
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+                        , node_counter_program_ptr
+#endif
+                        , true});
             }
 #endif
             for (std::size_t i = node.children.size(); i > 0; --i) {
                 if (should_descend_into_child(node, *node.children[i - 1])) {
                     pending.push_back(PendingNode{node.children[i - 1].get(), &parent,
-                        inherited_style, true, i - 1});
+                        inherited_style, true, i - 1
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+                        , node_counter_program_ptr
+#endif
+                        });
                 }
             }
             continue;
@@ -884,6 +1042,12 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
             continue;
         }
 
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+        if (style.display == Display::Flex || style.display == Display::Grid) {
+            counter_topology_supported = false;
+        }
+#endif
+
 #if JELLYFRAME_RENDER_CORE_FLEX_GRID_ENABLED
         if (!flex_grid_text) finish_text_group();
 #endif
@@ -894,12 +1058,20 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         object->node = &node;
         object->style = style;
         parent.children.push_back(std::move(object));
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+        if (resolve_counter_program && node_counter_program_ptr != nullptr && counter_topology_supported)
+            counter_programs.emplace(object_raw, *node_counter_program_ptr);
+#endif
 
         if (!is_replaced_control(node)) {
             for (std::size_t i = node.children.size(); i > 0; --i) {
                 if (should_descend_into_child(node, *node.children[i - 1])) {
                     pending.push_back(PendingNode{node.children[i - 1].get(), object_raw,
-                        &object_raw->style, false, i - 1});
+                        &object_raw->style, false, i - 1
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+                        , node_counter_program_ptr
+#endif
+                        });
                 }
             }
         }
@@ -910,6 +1082,19 @@ RenderObjectPtr RenderTreeBuilder::build_with_arena(const Node& document, Monoto
         contents_sources->complete = false;
     }
     if (has_contents || budget_reported) view->contents_sources = std::move(contents_sources);
+
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+    if (counter_content_seen) {
+        if (counter_topology_supported) {
+            detail::finalize_counter_tree(*view, counter_programs, options_.diagnostics);
+        } else {
+            report_diagnostic(options_.diagnostics, DiagnosticStage::RenderTree,
+                              DiagnosticSeverity::Warning, "css-counter-topology-refused",
+                              "Counter evaluation is limited to ordinary block-flow render trees",
+                              "Flex, Grid and display:contents counter interactions were omitted.");
+        }
+    }
+#endif
 
     if (reuse != nullptr) reuse->state_->pending_tree = view_raw;
 
