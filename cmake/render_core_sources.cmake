@@ -135,7 +135,8 @@ if(JELLYFRAME_ENABLE_CONTEXTUAL_TEXT)
     endif()
     set(JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED 1)
     list(APPEND JELLYFRAME_RENDER_CORE_BASE_SOURCES
-        src/contextual_text.cpp src/contextual_text_painter.cpp src/contextual_text_paragraph.cpp)
+        src/contextual_text.cpp src/contextual_text_painter.cpp src/contextual_text_paragraph.cpp
+        src/core_text_inline_source_map.cpp)
 else()
     set(JELLYFRAME_RENDER_CORE_CONTEXTUAL_TEXT_ENABLED 0)
 endif()
