@@ -9,6 +9,8 @@
 #define JELLYFRAME_CONTEXTUAL_TEXT_LAYOUT_API_VERSION 1
 #define JELLYFRAME_CONTEXTUAL_TEXT_HIT_CAPTURE_API_VERSION 1
 #define JELLYFRAME_CONTEXTUAL_SHARED_INLINE_API_VERSION 1
+#define JELLYFRAME_CONTEXTUAL_HIT_TEST_API_VERSION 1
+namespace jellyframe { class HitTester; }
 namespace jellyframe::contextual_text {
 // Explicit resource selection for every admitted paragraph. There is no scalar
 // fallback. Static ordinary blocks may nest. A block can contain direct text
@@ -70,6 +72,7 @@ private:
   std::shared_ptr<const State> state_;
   friend class ::jellyframe::LayoutEngine;
   friend class ::jellyframe::LayerTreeBuilder;
+  friend class ::jellyframe::HitTester;
 };
 // Retains both geometry and resource ownership. Background commands are frozen
 // in normal tree order; insert each paragraph after its corresponding command

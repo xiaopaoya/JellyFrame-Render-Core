@@ -98,8 +98,10 @@ its recorded generation are valid.
 
 Core verifies one real JFSP2 ligature spanning two DOM text nodes, equal
 packets and pixels against the unsplit text, and rejection of mixed styles or
-unsupported structure. Worker pointer dispatch and its overlap policy remain
-Stage C work.
+unsupported structure. Core hit testing selects the last contributing owner
+in source order when several owners share a glyph. It rejects hits outside the
+viewport and refuses stale or expired document snapshots. The Worker still
+needs to use the capture associated with the presented frame.
 
 ### Stage C: installed Runtime path
 

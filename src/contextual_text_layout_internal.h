@@ -18,6 +18,10 @@ struct LayoutResult::State {
   const Node* source_root = nullptr;
   std::uint64_t source_generation = 0;
   NodeLifetimeObserverRegistration source_lifetime;
+  bool source_is_current() const noexcept {
+    return source_lifetime.active() && !source_root->parent &&
+        source_root->mutation_generation == source_generation;
+  }
 };
 struct LayerCapture::State {
   LayoutResult layout;

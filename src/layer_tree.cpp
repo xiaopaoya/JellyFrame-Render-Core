@@ -2209,12 +2209,7 @@ bool LayerTreeBuilder::build_contextual_impl(const contextual_text::LayoutResult
                                              contextual_text::LayerCapture& output) const noexcept {
     if (!layout.valid() || !layout.tree() || !options_.max_layers ||
         (!hit_options && !layout.state_->shared_owners.empty())) return false;
-    const auto source_is_current = [&]() {
-        const auto& source = *layout.state_;
-        return source.source_lifetime.active() && !source.source_root->parent &&
-               source.source_root->mutation_generation == source.source_generation;
-    };
-    if (!source_is_current()) return false;
+    if (!layout.state_->source_is_current()) return false;
     try {
         std::size_t remaining = options_.max_display_commands;
         for (const auto& paragraph : layout.paragraphs()) {
@@ -2274,7 +2269,7 @@ bool LayerTreeBuilder::build_contextual_impl(const contextual_text::LayoutResult
         if (hit_options && !capture_contextual_text_hits(*layout.state_, root.bounds, *hit_options,
                                                         draft->text_hit_fragments))
             return false;
-        if (next_paragraph != layout.paragraphs().size() || !source_is_current()) return false;
+        if (next_paragraph != layout.paragraphs().size() || !layout.state_->source_is_current()) return false;
         output.state_ = std::move(draft);
         return true;
     } catch (const std::bad_alloc&) {

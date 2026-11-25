@@ -2,6 +2,7 @@
 #include "render_core/arena.h"
 #include "render_core/css_parser.h"
 #include "render_core/html_parser.h"
+#include "render_core/hit_test.h"
 #include "render_core/software_renderer.h"
 #include "contextual_text_fixture.h"
 #include "contextual_text_layout_internal.h"
@@ -183,6 +184,7 @@ void check_shared_inline_capture(const char* fixture_root) {
         !layout.text_owner(0, 4), "shared owners resolve to original DOM text nodes");
 
   bool ligature = false;
+  Rect ligature_ink{};
   const auto& hits = capture.text_hit_fragments();
   for (std::size_t i = 1; i < hits.size(); ++i) {
     const auto& left = hits[i - 1];
@@ -195,9 +197,21 @@ void check_shared_inline_capture(const char* fixture_root) {
           left.ink.x == right.ink.x && left.ink.y == right.ink.y &&
           left.ink.width == right.ink.width && left.ink.height == right.ink.height,
           "one ligature retains both owner-local ranges and their shared ink");
+    ligature_ink = right.ink;
     ligature = true;
   }
   check(ligature, "real JFSP2 ligature spans two text owners");
+
+  const HitTester tester;
+  const auto hit = tester.hit_test(capture, ligature_ink.x, ligature_ink.y);
+  check(hit && hit.node == second_owner->parent && hit.box == layout.paragraphs().front().owner,
+        "overlapping ligature ink selects the final contributing owner");
+  const auto background = tester.hit_test(capture, 1, 1);
+  check(background && background.node == first_owner->parent, "host background remains hittable");
+  check(!tester.hit_test(capture, -1, ligature_ink.y) &&
+        !tester.hit_test(capture, viewport.width, ligature_ink.y) &&
+        !tester.hit_test(LayerCapture{}, 0, 0),
+        "empty captures and positions outside the viewport are refused");
 
   const auto* previous = layout.tree();
   for (const char* html : {"<div>of<span style='color:red'>fice</span></div>",
@@ -216,6 +230,11 @@ void check_shared_inline_capture(const char* fixture_root) {
         !builder.build_contextual(layout, TextHitCaptureOptions{}, capture) &&
         capture.layout().tree() == previous,
         "DOM mutation invalidates owner resolution and preserves the prior capture");
+  check(!tester.hit_test(capture, ligature_ink.x, ligature_ink.y),
+        "stale capture rejects both text and fallback targets");
+  doc.reset();
+  check(!tester.hit_test(capture, ligature_ink.x, ligature_ink.y),
+        "expired capture never dereferences borrowed DOM nodes");
 }
 
 void check_capture(const char* fixture_root) {

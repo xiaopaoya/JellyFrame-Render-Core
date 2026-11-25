@@ -11,8 +11,7 @@ const std::vector<LayoutParagraph>& LayoutResult::paragraphs() const noexcept {
   return state_?state_->paragraphs:empty;
 }
 const Node* LayoutResult::text_owner(std::size_t paragraph, std::size_t owner) const noexcept {
-  if (!state_ || paragraph >= state_->paragraphs.size() || !state_->source_lifetime.active() ||
-      state_->source_root->parent || state_->source_root->mutation_generation != state_->source_generation)
+  if (!state_ || paragraph >= state_->paragraphs.size() || !state_->source_is_current())
     return nullptr;
   const auto& shared = state_->shared_owners;
   const auto entry = std::lower_bound(shared.begin(), shared.end(), paragraph,
