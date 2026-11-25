@@ -310,6 +310,46 @@ void check_nowrap_flex_row(const char* fixture_root) {
   const auto known_wrapped_ink = wrapped_pixels.pixel(4, 6);
   check(known_wrapped_ink.r == 0 && known_wrapped_ink.g == 0 && known_wrapped_ink.b == 0,
         "wrapped row paints the known Noto A pixel at its first-line origin");
+  const auto check_justification = [&](const char* justify,
+      std::int64_t first_x, std::int64_t second_x, std::int64_t third_x) {
+    auto justified_doc = HtmlParser().parse(
+        "<body><main id='row'><div id='first'>A</div><div id='second'>A</div>"
+        "<div id='third'>A</div></main></body>");
+    StyleResolver justified_styles(CssParser().parse(
+        std::string("body{margin:0}main{display:flex;flex-direction:row;flex-wrap:wrap;width:60px;"
+                    "column-gap:4px;justify-content:") +
+        justify + "}"
+        "#first{width:20px;min-width:0;flex:0 0 20px;font-size:16px;line-height:12px}"
+        "#second{width:30px;min-width:0;flex:0 0 30px;font-size:16px;line-height:12px}"
+        "#third{width:40px;min-width:0;flex:0 0 40px;font-size:16px;line-height:12px}"));
+    auto justified_render = RenderTreeBuilder(justified_styles).build(*justified_doc);
+    auto justified_work = budget;
+    LayoutResult justified_result;
+    check(LayoutEngine(justified_styles).layout_contextual(*justified_render, viewport.width,
+            viewport.height, options, justified_work, justified_result) == Status::ok,
+          "wrapped contextual row accepts a supported justify-content mode");
+    const auto* first = find_box_by_id(*justified_result.tree(), "first");
+    const auto* second = find_box_by_id(*justified_result.tree(), "second");
+    const auto* third = find_box_by_id(*justified_result.tree(), "third");
+    check(first && second && third && first->content_geometry.x == first_x &&
+          second->content_geometry.x == second_x && third->content_geometry.x == third_x &&
+          first->content_geometry.y == second->content_geometry.y &&
+          third->content_geometry.y > second->content_geometry.y,
+          "each wrapped line distributes free space independently using Q1000 geometry");
+    LayerCapture capture;
+    check(LayerTreeBuilder().build_contextual(justified_result, capture),
+          "capture justified contextual row");
+    FrameBuffer expected(viewport.width, viewport.height, {255, 255, 255, 255});
+    for (const auto& paragraph : justified_result.paragraphs()) paint_paragraph(paragraph, expected);
+    check(same_pixels(draw_capture(capture), expected),
+          "justified wrapped-row pixels match the final-geometry paint oracle");
+  };
+  check_justification("start", 0, 24000, 0);
+  check_justification("center", 3000, 27000, 10000);
+  check_justification("end", 6000, 30000, 20000);
+  check_justification("space-between", 0, 30000, 0);
+  check_justification("space-around", 1500, 28500, 10000);
+  check_justification("space-evenly", 2000, 28000, 10000);
   auto exact_doc = HtmlParser().parse(
       "<body><main id='exact'><div id='left'>A</div><div id='right'>A</div></main></body>");
   StyleResolver exact_styles(CssParser().parse(
@@ -330,7 +370,7 @@ void check_nowrap_flex_row(const char* fixture_root) {
   previous = previous_exact;
   auto overfull_doc = HtmlParser().parse("<body><main><div>A</div></main></body>");
   StyleResolver overfull_styles(CssParser().parse(
-      "body{margin:0}main{display:flex;flex-direction:row;flex-wrap:wrap;width:19px}"
+      "body{margin:0}main{display:flex;flex-direction:row;flex-wrap:wrap;width:19px;justify-content:center}"
       "div{width:20px;min-width:0;flex:0 0 20px;font-size:16px;line-height:12px}"));
   auto overfull_render = RenderTreeBuilder(overfull_styles).build(*overfull_doc);
   work = budget;

@@ -81,7 +81,7 @@ contextual_text::Status ContextualLayoutFrame::admit(const RenderObject& root,st
             o.style.max_width >= 0 || o.style.min_width_percent >= 0 || o.style.max_width_percent >= 0 ||
             o.style.flex_grow != 0 || o.style.align_content != JustifyContent::Start ||
             o.style.row_gap < 0 || o.style.column_gap < 0 ||
-            o.style.justify_content != JustifyContent::Start || o.style.box_sizing_border_box ||
+            o.style.box_sizing_border_box ||
             !zero(o.style.margin) || !zero(o.style.padding) || !zero(o.style.border_width)))
           return status=Status::invalid;
         if (!row && (o.style.width_percent >= 0 || o.style.min_width >= 0 || o.style.max_width >= 0))

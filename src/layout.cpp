@@ -1829,7 +1829,12 @@ bool LayoutEngine::layout_precise_flex(LayoutBox& box, std::int64_t width, std::
     const bool row = box.style.flex_direction == FlexDirection::Row;
 #if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
     if (parent.contextual && row && box.style.flex_wrap == 1) {
-        struct PlannedLine { std::size_t first = 0; std::size_t count = 0; std::int64_t height = 0; };
+        struct PlannedLine {
+            std::size_t first = 0;
+            std::size_t count = 0;
+            std::int64_t width = 0;
+            std::int64_t height = 0;
+        };
         std::vector<std::int64_t> item_widths;
         std::vector<PlannedLine> lines;
         item_widths.reserve(box.children.size());
@@ -1847,18 +1852,43 @@ bool LayoutEngine::layout_precise_flex(LayoutBox& box, std::int64_t width, std::
             const auto candidate = line_width + (lines.empty() || index == lines.back().first
                 ? 0 : gap) + item_width;
             if (lines.empty() || (lines.back().count != 0 && candidate > available)) {
-                lines.push_back({index, 0, 0});
+                lines.push_back({index, 0, item_width, 0});
                 line_width = item_width;
             } else {
                 line_width = candidate;
             }
             ++lines.back().count;
+            lines.back().width = line_width;
             item_widths.push_back(item_width);
         }
         std::int64_t line_y = y;
         for (std::size_t line_index = 0; line_index < lines.size(); ++line_index) {
             const auto& line = lines[line_index];
+            const std::int64_t free_space = available - line.width;
             std::int64_t item_x = x;
+            std::int64_t distributed_gap = 0;
+            switch (box.style.justify_content) {
+            case JustifyContent::End:
+                item_x += free_space;
+                break;
+            case JustifyContent::Center:
+                item_x += free_space / 2;
+                break;
+            case JustifyContent::SpaceAround:
+                distributed_gap = free_space / static_cast<std::int64_t>(line.count);
+                item_x += distributed_gap / 2;
+                break;
+            case JustifyContent::SpaceBetween:
+                if (line.count > 1)
+                    distributed_gap = free_space / static_cast<std::int64_t>(line.count - 1);
+                break;
+            case JustifyContent::SpaceEvenly:
+                distributed_gap = free_space / static_cast<std::int64_t>(line.count + 1);
+                item_x += distributed_gap;
+                break;
+            case JustifyContent::Start:
+                break;
+            }
             for (std::size_t offset = 0; offset < line.count; ++offset) {
                 const auto index = line.first + offset;
                 auto& child = *box.children[index];
@@ -1877,7 +1907,8 @@ bool LayoutEngine::layout_precise_flex(LayoutBox& box, std::int64_t width, std::
                 }
                 lines[line_index].height = std::max(lines[line_index].height,
                     child.content_geometry.height());
-                if (offset + 1 < line.count) item_x += item_widths[index] + gap;
+                if (offset + 1 < line.count)
+                    item_x += item_widths[index] + gap + distributed_gap;
             }
             auto& mutable_line = lines[line_index];
             item_x = x;

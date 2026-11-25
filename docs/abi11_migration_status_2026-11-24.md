@@ -1,6 +1,6 @@
 # ABI11 contextual migration status
 
-Last updated 2026-11-25. This file tracks the ABI11 contextual migration after
+Last updated 2026-11-26. This file tracks the ABI11 contextual migration after
 the signed Core 0.13.0 release and Runtime production-lock adoption. Merged PRs
 and successful tests are evidence for their stated scope only.
 
@@ -52,15 +52,24 @@ and successful tests are evidence for their stated scope only.
   `0861c451ff5cb81ea23e0b523b19f57aa0048f79`. Signed tag `v0.13.0` and the
   deterministic source archive are published. Runtime PR #159 adopted that
   package as the production lock, and both PR and post-merge CI passed 26/26.
+- Core PR #116 merged as
+  `28c061c6efe200e28f185206fe8828ce0cd1722b`. It adds bounded, opt-in decimal
+  CSS counters for ordinary block-flow trees, including `::before` and
+  `::after`, with explicit budget/topology refusal and style-reuse safeguards.
+  Core full, counter-off and cropped tests passed 43/43, 42/42 and 42/42. The
+  Runtime full/off/cropped installed-package qualification passed 41/41 for
+  each profile against the same Core source identity. Runtime PR #161 updates
+  the bilingual capability matrix and CSSWG support tables. This is an
+  optional Core feature and does not change Runtime's production lock.
 
 ## Migration gates and workstreams
 
 | Workstream | Current evidence | Required next evidence |
 | --- | --- | --- |
 | Shared inline ownership for shaped text | Core already maps shaping clusters to multiple UTF-8 source owners. Core PR #101 adds a regression for one cluster spanning two multibyte owners. Existing shared-inline spacing tests pass. | The shaped paragraph/source-range model is still not connected to shared-inline layout and paint. Implement this as a separate integration after an owner/cluster paint contract is designed. Preserve per-owner source ranges and refuse unsupported mixed-owner cases until geometry and pixel parity are proven. |
-| Contextual Flex topology | Core #100 and Runtime #156 cover a definite-width nowrap row. Core #101 adds bounded definite-pixel columns. Core #111 adds bounded row wrapping with geometry, baseline, pixel, refusal, and replay coverage. The route remains limited to admitted direct text items and fixed geometry; unsupported Flex combinations still refuse. Core 0.13.0 is signed and published, and Runtime #158 consumes it. | Broader Flex topology support remains a separate feature expansion. Any device claim is limited to the layouts actually exercised on that device. |
+| Contextual Flex topology | Core #100 and Runtime #156 cover a definite-width nowrap row. Core #101 adds bounded definite-pixel columns. Core #111 adds bounded row wrapping with geometry, baseline, pixel, refusal, and replay coverage. This change adds per-line `justify-content` distribution for the same admitted wrapped-row topology and tests all six supported modes against exact Q1000 geometry and final pixels. Contextual Core CTest passes 46/46 and the default feature-off contextual build passes 43/43. Runtime full/cropped/off installed-package qualification passes 41/41 for each profile against candidate commit `84c74bf83da0cdef54b83a92752b170cb551f674`; full and cropped signed shaped routes and all desktop consumers pass, with the production lock unchanged. The route remains limited to admitted direct text items and fixed geometry; unsupported Flex combinations still refuse. Core 0.13.0 is signed and published, and Runtime #159 consumes it. | Complete the Core PR CI and merge. Broader topology and any device claim remain separate gates, with device claims limited to layouts exercised on that device. |
 | Paired host qualification and release adoption | Runtime #158's exact installed-package qualification passed 41/41 in full, cropped, and disabled-feature profiles against the published Core 0.13.0 archive. Core standalone full/cropped/off suites passed 46/46, 45/45, and 42/42. Runtime PR #159 updated the production lock to Core 0.13.0 / ABI11 / source hash `290ff2ded3619d8be23e1320ad9530c07c81593cd5b94a8ff25faccb745e4dfd`; its 26 CI jobs passed, and post-merge master CI also passed 26/26. Signed `v0.13.0` points to Core master commit `0861c451ff5cb81ea23e0b523b19f57aa0048f79`; archive SHA-256 is `ec1773ad7d35b88f5e84903259433a6e5ceb922b6a391caec2cdcf2c453cf1f9`. | Complete. Future Core releases require their own package qualification and reviewed Runtime lock change. |
-| WS147 contextual device acceptance | Core 0.13.0 host and Runtime package checks confirm dark viewport pixels, and browser rendering centers Chinese/A/V text. Device acceptance remains unresolved: the last observed device app was 0.1.1, which showed a white empty viewport and bottom-aligned A/V text. The bg2 firmware and app 0.1.2 fit the 5 MiB slot, but the signed JFSG still needs the local PEM unlock and has not been installed. | Sign/install the exact bg2/0.1.2 candidate and record on-device background and text alignment. Host rendering does not establish device parity. |
+| WS147 contextual device acceptance | The latest reported device observation for Contextual Flex 0.1.4 showed the full background, centered/bottom-aligned A/V and left/bottom-aligned Chinese lines. The user noted that the browser alignment may differ. | Re-render the exact 0.1.4 app in a browser at the device viewport and compare the two alignment results before making a parity claim. Host rendering does not establish device parity. |
 
 ## Parallel execution
 
@@ -72,8 +81,10 @@ published, and Runtime #159 has adopted its exact source identity
 production lock. PR and post-merge Runtime CI both passed 26/26 jobs.
 
 The owner-map adapter remains experimental because it stores mapping data but
-has no shaped-glyph consumer. Remaining work is the separate shared-inline
-layout/paint integration and the WS147 bg2/0.1.2 visual retest after signing.
-The Core 0.13.0 release and Runtime production-lock migration are complete.
+has no shaped-glyph consumer. Remaining work includes the separate
+shared-inline layout/paint integration, Runtime qualification for the wrapped
+row `justify-content` slice, and a browser comparison for the latest WS147
+Contextual Flex app. The Core 0.13.0 release and Runtime production-lock
+migration are complete.
 Older ABI9 notes remain historical records unless explicitly updated with
 newer evidence.
