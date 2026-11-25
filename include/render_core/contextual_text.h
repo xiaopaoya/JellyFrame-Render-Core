@@ -12,6 +12,7 @@
 #define JELLYFRAME_CONTEXTUAL_TEXT_API_VERSION 1
 
 namespace jellyframe { struct FrameBuffer; struct Rect; struct Color; }
+namespace jellyframe::detail { struct ContextualTextInkBindingAccess; }
 namespace jellyframe::contextual_text {
 using Digest = std::array<unsigned char, 32>;
 // Exact independently authenticated resource identities. Providing digests alone
@@ -65,6 +66,7 @@ private:
   friend Status paint(const Binding&, std::string_view, ::jellyframe::FrameBuffer&,
                       std::int32_t, std::int32_t, const ::jellyframe::Rect&,
                       const ::jellyframe::Color&, const Limits&, std::uint64_t&) noexcept;
+  friend struct ::jellyframe::detail::ContextualTextInkBindingAccess;
 };
 // On refusal output/work remain unchanged; previous immutable owners survive.
 Status create_binding(const Inputs&, const Limits&, std::uint64_t& work, Binding& output) noexcept;

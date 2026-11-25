@@ -8,6 +8,7 @@
 #include "shaping_binding_owned.h"
 #include "shaping_normalization.h"
 #include "contextual_text_painter.h"
+#include "contextual_text_inline_geometry.h"
 #include "render_core/software_renderer.h"
 
 #include <algorithm>
@@ -231,8 +232,17 @@ Status paint(const Binding& binding, std::string_view bytes, FrameBuffer& target
   case contextual_painter::Status::identity_mismatch: return Status::identity_mismatch;
   case contextual_painter::Status::missing_glyph: return Status::malformed;
   case contextual_painter::Status::limit: return Status::limit;
+  case contextual_painter::Status::allocation: return Status::allocation;
   case contextual_painter::Status::invalid: return Status::invalid;
   }
   return Status::invalid;
 }
 } // namespace jellyframe::contextual_text
+
+namespace jellyframe::detail {
+const shaping_binding::Snapshot& ContextualTextInkBindingAccess::snapshot(
+    const contextual_text::Binding& binding) noexcept {
+  static const shaping_binding::Snapshot empty;
+  return binding.state_ ? binding.state_->snapshot : empty;
+}
+} // namespace jellyframe::detail

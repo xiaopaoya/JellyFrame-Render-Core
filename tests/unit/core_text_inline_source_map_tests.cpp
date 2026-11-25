@@ -1,5 +1,7 @@
 #include "core_text_inline_source_map.h"
+#include "contextual_text_inline_geometry.h"
 #include "contextual_text_fixture.h"
+#include "render_core/software_renderer.h"
 
 #include <iostream>
 
@@ -219,6 +221,59 @@ void refuses_malformed_source_tables_and_work_exhaustion(const std::string& fixt
         output.clusters.data() == prior_clusters && output.clusters.size() == 1,
         "over-budget cluster mapping preserves prior result");
 }
+
+void ink_bounds_cover_pixels_painted_by_the_same_packet(const std::string& fixture_root) {
+    Fixture fixture(fixture_root, "regular", true);
+    auto work = budget;
+    Binding binding;
+    check(create_binding(fixture.as_inputs(), {}, work, binding) == Status::ok,
+        "create ink geometry binding");
+
+    ParagraphOptions options;
+    options.size_q1000 = 24000;
+    options.width_q1000 = 240000;
+    Paragraph paragraph;
+    work = budget;
+    check(layout_paragraph(binding, "office", options, {}, work, paragraph) == Status::ok,
+        "shape ink geometry packet");
+
+    std::vector<ContextualTextGlyphInk> glyph_ink;
+    work = budget;
+    check(contextual_text_line_glyph_ink(paragraph, 0, 12000, 24000,
+        glyph_ink, work) == ContextualTextInkStatus::Complete,
+        "compute packet glyph ink bounds");
+    check(glyph_ink.size() == paragraph.lines()[0].metrics.glyph_count,
+        "one ink rectangle is retained for each packet glyph");
+
+    FrameBuffer target(120, 48, {0, 0, 0, 0});
+    work = budget;
+    check(paint(binding, paragraph.lines()[0].packet, target, 12000, 24000,
+        Rect{0, 0, target.width, target.height}, {255, 255, 255, 255}, {}, work) == Status::ok,
+        "paint geometry packet into transparent framebuffer");
+    std::size_t ink_pixels = 0;
+    for (int y = 0; y < target.height; ++y) {
+        for (int x = 0; x < target.width; ++x) {
+            if (!target.pixel(x, y).a) continue;
+            ++ink_pixels;
+            const bool covered = std::any_of(glyph_ink.begin(), glyph_ink.end(),
+                [x, y](const ContextualTextGlyphInk& glyph) {
+                    const auto& bounds = glyph.bounds;
+                    return x >= bounds.x && y >= bounds.y &&
+                        x < bounds.x + bounds.width && y < bounds.y + bounds.height;
+                });
+            check(covered, "painted ink lies inside its glyph bounds");
+        }
+    }
+    check(ink_pixels > 0, "the packet painted visible ink");
+
+    const auto* prior = glyph_ink.data();
+    const auto prior_size = glyph_ink.size();
+    auto insufficient_work = std::uint64_t{1};
+    check(contextual_text_line_glyph_ink(paragraph, 0, 12000, 24000,
+        glyph_ink, insufficient_work) == ContextualTextInkStatus::ResourceLimit &&
+        glyph_ink.data() == prior && glyph_ink.size() == prior_size && insufficient_work == 1,
+        "over-budget ink geometry preserves output and caller work");
+}
 }
 
 int main(int argc, char** argv) {
@@ -230,6 +285,7 @@ int main(int argc, char** argv) {
         maps_utf8_owner_ranges_on_scalar_boundaries(root);
         refuses_text_mismatch_transactionally(root);
         refuses_malformed_source_tables_and_work_exhaustion(root);
+        ink_bounds_cover_pixels_painted_by_the_same_packet(root);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
