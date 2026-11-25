@@ -20,7 +20,10 @@ pipelines.
   background layer tree and its associated contextual layout paragraphs.
 - Runtime's `RuntimeShapedTextBinding::layout_document` supplies the verified
   binding to `layout_contextual`. The installed Worker serializes contextual
-  paragraph packets alongside a scalar `DisplayList`.
+  paragraph packets alongside a scalar `DisplayList`. It creates its
+  `InputController` from the captured `LayerNode`; pointer input goes through
+  `HitTester::hit_test(const LayerNode&)` and currently has no contextual
+  cluster-owner side data.
 
 The migration gap spans layout, source ownership, hit testing, layer order and
 Runtime packet transport. Replacing scalar shaping in the current inline
@@ -35,7 +38,7 @@ installed app.
 2. Every contributing owner receives the cluster's source interval and ink
    rectangle for hit testing. The source interval stays local to its DOM text
    node. The integration must explicitly transport owner fragments into the
-   Runtime input path, which currently creates its input controller from the
+   Runtime input path through a retained owner map associated with that frame's
    captured layout/layer state. Tests must lock down overlapping-owner hit
    ordering.
 3. The first admitted run uses one uniform supported paint style across all
@@ -56,20 +59,25 @@ installed app.
 
 ### Stage A: source-map adapter
 
-Build owner tokens from the normalized paragraph's `CoreTextParagraph::sources`
-and original source ranges. Admit `white-space: normal` only. Feed the exact
-normalized text to `contextual_text::layout_paragraph`, then require its
-`Paragraph::text()` bytes to equal the Core normalized input before mapping.
-For each line packet, shift its cluster byte ranges by `line.source_begin` and
-map them against that line's visible source interval. Represent leading,
-collapsed, trimmed and consumed whitespace as omitted source records rather
-than glyph owners. Feed those tokens and decoded JFSP2 cluster/glyph intervals
-to `map_core_text_clusters`. An initial admission requires text-only spans,
-one matching font binding, uniform geometry and paint styles across the run,
-and no generated content, explicit break/opportunity events, atomics, preserved
-whitespace or unmappable normalization. Add split-owner ASCII ligature, split
-multibyte scalar, collapsed/trimmed whitespace and malformed/unsupported
-cluster cases. Unsupported normalization must refuse before publishing.
+Status: implemented in the current integration branch as an experimental,
+private adapter. It is included only when contextual text is enabled and is not
+called by `LayerCapture` or Runtime.
+
+The adapter builds owner tokens from `CoreTextParagraph::sources` and original
+owner strings, admits only text-only source spans, and maps each real
+contextual JFSP2 line packet to owner-local byte ranges. It verifies exact
+normalized-text identity, projects trimmed and consumed line whitespace into
+omitted records, checks UTF-8 scalar boundaries, and publishes only complete
+maps. The bounded work budget includes source validation, projection, packet
+decoding and cluster mapping. Unsupported source normalization and exhausted
+work refuse transactionally.
+
+Tests use real JFSP2 output for a ligature crossing two owners, split UTF-8
+owners, and collapsed/trimmed whitespace. They also cover malformed source
+tables, mismatched normalized text, truncated byte-offset tables, non-whitespace
+source gaps, exhausted work, and preservation of prior output. Stage A does not
+yet produce ink rectangles or input hit geometry. The contextual paint-style,
+geometry and binding admission checks remain responsibilities of Stage B.
 
 ### Stage B: retained contextual inline result
 
