@@ -8,6 +8,10 @@
 #include <string>
 #include <vector>
 
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+#define JELLYFRAME_CONTEXTUAL_INPUT_CONTROLLER_API_VERSION 1
+#endif
+
 namespace jellyframe {
 
 enum class PointerButton {
@@ -81,6 +85,16 @@ public:
     const Node* pointer_down(const PointerInput& input);
     const Node* pointer_up(const PointerInput& input);
     const Node* wheel(const WheelInput& input);
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    // Dispatch against the live snapshot whose layer the controller uses.
+    // The caller owns presentation identity and keeps the snapshot alive.
+    const Node* pointer_move(const PointerInput& input, const contextual_text::LayerCapture& capture);
+    const Node* pointer_down(const PointerInput& input, const contextual_text::LayerCapture& capture);
+    const Node* pointer_up(const PointerInput& input, const contextual_text::LayerCapture& capture);
+    const Node* wheel(const WheelInput& input, const contextual_text::LayerCapture& capture);
+    void set_interaction_state(const Node* hovered_node, const Node* active_node,
+                               const Node* focused_node, const contextual_text::LayerCapture& capture);
+#endif
     bool text_input(const std::string& utf8_text);
     bool key_down(const KeyInput& input);
     // Apply a deterministic semantic form action while preserving the same
@@ -104,7 +118,16 @@ private:
     const LayoutBox* active_box_ = nullptr;
 
     HitTestResult hit(int x, int y) const;
-    const Node* hit_node(int x, int y) const;
+    HitTestResult admit_hit(HitTestResult result) const;
+    const Node* move_at(const PointerInput& input, HitTestResult result);
+    const Node* down_at(const PointerInput& input, HitTestResult result);
+    const Node* up_at(const PointerInput& input, const Node* target);
+    const Node* wheel_at(const WheelInput& input, const Node* target);
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+    bool accepts_capture(const contextual_text::LayerCapture& capture) const;
+#endif
+    void restore_interaction_state(const Node* hovered_node, const Node* active_node,
+                                   const Node* focused_node, const LayoutBox* active_box);
     bool contains_node(const Node* node) const;
     bool visible_node(const Node* node) const;
     bool accepts_node(const Node* node) const;

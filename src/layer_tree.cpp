@@ -2098,6 +2098,10 @@ const LayerNode* contextual_text::LayerCapture::layer_tree() const noexcept {
     return state_ ? state_->layer_tree.get() : nullptr;
 }
 
+bool contextual_text::LayerCapture::source_is_current() const noexcept {
+    return state_ && state_->layout.state_ && state_->layout.state_->source_is_current();
+}
+
 const contextual_text::LayoutResult& contextual_text::LayerCapture::layout() const noexcept {
     static const LayoutResult empty;
     return state_ ? state_->layout : empty;
@@ -2226,6 +2230,7 @@ bool LayerTreeBuilder::build_contextual_impl(const contextual_text::LayoutResult
         auto& root = *draft->layer_tree;
         root.type = LayerType::Root;
         root.reasons = LayerReasonRoot;
+        if (hit_options) root.box = layout.tree();
         root.bounds = Rect{0, 0, layout.tree()->viewport_width, layout.tree()->viewport_height};
         root.clip_rect = root.bounds;
         draft->after_command_counts.reserve(layout.paragraphs().size());

@@ -3,6 +3,7 @@
 #include "render_core/css_parser.h"
 #include "render_core/html_parser.h"
 #include "render_core/hit_test.h"
+#include "render_core/input.h"
 #include "render_core/software_renderer.h"
 #include "contextual_text_fixture.h"
 #include "contextual_text_layout_internal.h"
@@ -206,6 +207,23 @@ void check_shared_inline_capture(const char* fixture_root) {
   const auto hit = tester.hit_test(capture, ligature_ink.x, ligature_ink.y);
   check(hit && hit.node == second_owner->parent && hit.box == layout.paragraphs().front().owner,
         "overlapping ligature ink selects the final contributing owner");
+  {
+    int clicks = 0;
+    second_owner->parent->add_event_listener("click", [&](Event&) { ++clicks; });
+    const InteractionInvalidationOptions invalidation{false, false, false};
+    InputController pressed(*capture.layer_tree(), invalidation, false);
+    const PointerInput down{ligature_ink.x, ligature_ink.y, PointerButton::Primary, 1, {}};
+    const PointerInput up{ligature_ink.x, ligature_ink.y, PointerButton::Primary, 0, {}};
+    check(pressed.pointer_down(down, capture) == hit.node, "pointerdown targets the shared glyph owner");
+    LayerCapture next;
+    check(builder.build_contextual(layout, TextHitCaptureOptions{}, next),
+          "a replacement capture retains shared owner geometry");
+    InputController released(*next.layer_tree(), invalidation, false);
+    released.set_interaction_state(pressed.hovered_node(), pressed.active_node(), pressed.focused_node(), next);
+    check(!released.pointer_up(up, capture) && clicks == 0, "controller refuses a foreign capture");
+    check(released.pointer_up(up, next) == hit.node && clicks == 1,
+          "the shared owner keeps its press state across capture replacement");
+  }
   const auto background = tester.hit_test(capture, 1, 1);
   check(background && background.node == first_owner->parent, "host background remains hittable");
   check(!tester.hit_test(capture, -1, ligature_ink.y) &&
