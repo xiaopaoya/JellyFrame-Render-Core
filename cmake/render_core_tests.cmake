@@ -166,6 +166,14 @@ add_executable(jellyframe_aspect_ratio_literal_tests
     "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/aspect_ratio_literal_tests.cpp")
 target_link_libraries(jellyframe_aspect_ratio_literal_tests PRIVATE jellyframe_render_core)
 add_test(NAME jellyframe_aspect_ratio_literal_tests COMMAND jellyframe_aspect_ratio_literal_tests)
+if(JELLYFRAME_ENABLE_CSS_COUNTERS)
+    add_executable(jellyframe_css_counter_runtime_tests
+        "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/tests/unit/css_counter_runtime_tests.cpp")
+    target_link_libraries(jellyframe_css_counter_runtime_tests PRIVATE jellyframe_render_core)
+    target_include_directories(jellyframe_css_counter_runtime_tests PRIVATE
+        "${JELLYFRAME_RENDER_CORE_SOURCE_ROOT}/src")
+    add_test(NAME jellyframe_css_counter_runtime_tests COMMAND jellyframe_css_counter_runtime_tests)
+endif()
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     add_test(NAME jellyframe_source_hash_private_headers

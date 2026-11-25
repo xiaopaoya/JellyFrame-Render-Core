@@ -1,4 +1,5 @@
 #include "render_core/css_parser.h"
+#include "render_core/feature_config.h"
 #include "render_core/html_parser.h"
 #include "render_core/layout.h"
 #include "render_core/hit_test.h"
@@ -1524,8 +1525,12 @@ void generated_text_fallback_and_invalidation() {
     auto fallback_layout = LayoutEngine(fallback_styles, options).layout(*fallback_dom, 100, 100);
     check(!find(*fallback_layout, "positioned").text_layout_cache.shared_inline,
         "positioned generated source refuses shared paragraph admission");
-    check(!find(*fallback_layout, "counter").text_layout_cache.shared_inline,
-        "counter generated source refuses shared paragraph admission");
+    const bool counter_shared = find(*fallback_layout, "counter").text_layout_cache.shared_inline != nullptr;
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+    check(counter_shared, "resolved decimal counter joins its ordinary block-flow paragraph");
+#else
+    check(!counter_shared, "disabled named counter retains ordinary layout fallback");
+#endif
     auto fallback_layers = LayerTreeBuilder(layer_options).build(*fallback_layout);
     const auto fallback_commands = LayerTreeBuilder(layer_options).flatten(*fallback_layers);
     std::size_t positioned_count = 0;
@@ -1549,12 +1554,15 @@ void generated_text_fallback_and_invalidation() {
                 positioned_weight_resource = true;
         }
         positioned_count += source == "P";
-        counter_count += source == "1.";
+        counter_count += source == "0.";
     }
     check(positioned_count == 1,
         "positioned generated source paints once through Core TextSystem fallback");
-    check(counter_count == 0,
-        "unsupported named counter is not guessed as the list ordinal");
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+    check(counter_count == 1, "implicit decimal counter resolves to zero without a prior reset");
+#else
+    check(counter_count == 0, "disabled named counters are not guessed as the list ordinal");
+#endif
     check(!legacy_generated_text, "TextSystem fallback emits no legacy generated Text commands");
     check(positioned_weight_resource, "generated pseudo font-weight selects its registered face on fallback");
 
@@ -1584,7 +1592,7 @@ void generated_text_fallback_and_invalidation() {
     for (const auto& command : incomplete_commands) {
         refused_legacy_generated_text = refused_legacy_generated_text ||
             (command.type() == DisplayCommandType::Text &&
-             (command.text == "Z" || command.text == "1."));
+             (command.text == "Z" || command.text == "0."));
     }
     check(!refused_legacy_generated_text,
         "missing generated glyphs do not fall back to legacy Text commands");
@@ -1595,7 +1603,7 @@ void generated_text_fallback_and_invalidation() {
     };
     check(has_refusal("layer-core-generated-inline-text-refused") &&
           has_refusal("layer-core-list-marker-text-refused"),
-        "generated pseudo, unsupported counter and list-marker refusal are diagnosed");
+        "missing glyph and list-marker refusals are diagnosed");
 
     const auto make_styles = [](const char* color, int weight) {
         return StyleResolver(CssParser{}.parse(
@@ -1689,8 +1697,13 @@ void generated_list_num_counter_sources() {
     auto unsupported_dom = HtmlParser{}.parse("<p id='p'><span>A</span></p>");
     auto unsupported_layout = LayoutEngine(unsupported_styles, options).layout(*unsupported_dom, 140, 100);
     const auto& unsupported_host = find(*unsupported_layout, "p");
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+    check(unsupported_host.text_layout_cache.shared_inline != nullptr,
+        "ordinary decimal counter joins the existing shared paragraph path");
+#else
     check(!unsupported_host.text_layout_cache.shared_inline,
         "unsupported named counters retain ordinary layout fallback");
+#endif
     const auto fallback_commands = LayerTreeBuilder(layer_options).flatten(
         *LayerTreeBuilder(layer_options).build(*unsupported_layout));
     std::size_t fallback_count = 0;
@@ -1707,10 +1720,14 @@ void generated_list_num_counter_sources() {
             check(packet.read(i, glyph), "fallback counter glyph reads");
             source.push_back(static_cast<char>(glyph.source_codepoint));
         }
-        fallback_count += source == "1.";
+        fallback_count += source == "1." || source == "0.";
     }
+#if JELLYFRAME_RENDER_CORE_CSS_COUNTERS_ENABLED
+    check(fallback_count == 1, "implicit decimal counter publishes its resolved zero");
+#else
     check(fallback_count == 0,
-        "unsupported named counter does not publish a guessed Core command");
+        "disabled named counter does not publish a guessed Core command");
+#endif
     check(!legacy_counter_command, "unsupported counter fallback emits no legacy Text command");
 }
 void native_list_markers_share_paragraphs() {

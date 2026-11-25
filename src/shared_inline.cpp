@@ -257,11 +257,15 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
             box.style.before_counter_name == "list-num") {
             result.before_counter_text = std::to_string(shared_list_item_ordinal(*box.node)) +
                 box.style.before_counter_suffix;
+        } else if (is_generated_counter(box.style.before_content_kind)) {
+            result.before_counter_text = box.style.before_content_text;
         }
         if (is_generated_counter(box.style.after_content_kind) &&
             box.style.after_counter_name == "list-num") {
             result.after_counter_text = std::to_string(shared_list_item_ordinal(*box.node)) +
                 box.style.after_counter_suffix;
+        } else if (is_generated_counter(box.style.after_content_kind)) {
+            result.after_counter_text = box.style.after_content_text;
         }
     }
     result.before_color = box.style.before_color;
@@ -279,13 +283,15 @@ SharedInlineProof proof(const LayoutBox& box, std::size_t parent) {
     return result;
 }
 bool generated_source_eligible(const Style& style, bool host) {
-    const auto supported = [](GeneratedContentKind kind, const std::string& counter_name) {
+    const auto supported = [](GeneratedContentKind kind, const std::string& counter_name,
+                              const std::string& resolved_counter_text) {
         return kind == GeneratedContentKind::None ||
             is_generated_text(kind) ||
-            (is_generated_counter(kind) && counter_name == "list-num");
+            (is_generated_counter(kind) && counter_name == "list-num") ||
+            (is_generated_counter(kind) && !counter_name.empty() && !resolved_counter_text.empty());
     };
-    return supported(style.before_content_kind, style.before_counter_name) &&
-        supported(style.after_content_kind, style.after_counter_name) &&
+    return supported(style.before_content_kind, style.before_counter_name, style.before_content_text) &&
+        supported(style.after_content_kind, style.after_counter_name, style.after_content_text) &&
         !style.before_left_specified && !style.after_left_specified &&
         (!host || style.display == Display::Block);
 }

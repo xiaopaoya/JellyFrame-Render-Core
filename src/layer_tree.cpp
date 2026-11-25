@@ -698,6 +698,7 @@ std::string generated_before_text(const LayoutBox& box) {
         return box.style.before_content_text;
     }
     if (is_generated_counter(box.style.before_content_kind) && box.node != nullptr) {
+        if (box.style.before_counter_name != "list-num") return box.style.before_content_text;
         return std::to_string(detail::shared_list_item_ordinal(*box.node)) + box.style.before_counter_suffix;
     }
     return {};
@@ -708,6 +709,7 @@ std::string generated_after_text(const LayoutBox& box) {
         return box.style.after_content_text;
     }
     if (is_generated_counter(box.style.after_content_kind) && box.node != nullptr) {
+        if (box.style.after_counter_name != "list-num") return box.style.after_content_text;
         return std::to_string(detail::shared_list_item_ordinal(*box.node)) + box.style.after_counter_suffix;
     }
     return {};
@@ -759,7 +761,7 @@ void paint_list_marker(const LayoutBox& box, DisplayList& display_list, const Te
     std::string marker = generated_before_text(box);
     bool generated = !marker.empty();
     if (text_system != nullptr && is_generated_counter(box.style.before_content_kind) &&
-        box.style.before_counter_name != "list-num") {
+        box.style.before_counter_name != "list-num" && box.style.before_content_text.empty()) {
         report_diagnostic(diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
                           "layer-core-list-marker-text-refused",
                           "Core TextSystem cannot resolve this list marker counter",
@@ -814,7 +816,8 @@ void paint_generated_inline_content(const LayoutBox& box,
     const auto content_kind = before ? box.style.before_content_kind : box.style.after_content_kind;
     const auto& counter_name = before ? box.style.before_counter_name : box.style.after_counter_name;
     if (text_system != nullptr && is_generated_counter(content_kind) &&
-        counter_name != "list-num") {
+        counter_name != "list-num" &&
+        (before ? box.style.before_content_text : box.style.after_content_text).empty()) {
         report_diagnostic(diagnostics, DiagnosticStage::LayerTree, DiagnosticSeverity::Warning,
                           "layer-core-generated-inline-text-refused",
                           "Core TextSystem cannot resolve this generated counter",
