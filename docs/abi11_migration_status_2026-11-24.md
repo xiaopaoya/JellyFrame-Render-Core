@@ -61,13 +61,20 @@ and successful tests are evidence for their stated scope only.
   each profile against the same Core source identity. Runtime PR #161 updates
   the bilingual capability matrix and CSSWG support tables. This is an
   optional Core feature and does not change Runtime's production lock.
+- Core PR #117 merged as
+  `abe401125bc94a53843403c5896d9a4b7011ddf8`. It adds all six `justify-content`
+  distributions to the existing fixed-width contextual wrapped-row subset.
+  Contextual CTest passed 46/46, the default build passed 43/43, and the Core
+  PR plus post-merge CI passed. Runtime full/off/cropped installed-package
+  qualification passed 41/41 in each profile against the candidate, with the
+  production lock unchanged.
 
 ## Migration gates and workstreams
 
 | Workstream | Current evidence | Required next evidence |
 | --- | --- | --- |
-| Shared inline ownership for shaped text | Core already maps shaping clusters to multiple UTF-8 source owners. Core PR #101 adds a regression for one cluster spanning two multibyte owners. Existing shared-inline spacing tests pass. | The shaped paragraph/source-range model is still not connected to shared-inline layout and paint. Implement this as a separate integration after an owner/cluster paint contract is designed. Preserve per-owner source ranges and refuse unsupported mixed-owner cases until geometry and pixel parity are proven. |
-| Contextual Flex topology | Core #100 and Runtime #156 cover a definite-width nowrap row. Core #101 adds bounded definite-pixel columns. Core #111 adds bounded row wrapping with geometry, baseline, pixel, refusal, and replay coverage. This change adds per-line `justify-content` distribution for the same admitted wrapped-row topology and tests all six supported modes against exact Q1000 geometry and final pixels. Contextual Core CTest passes 46/46 and the default feature-off contextual build passes 43/43. Runtime full/cropped/off installed-package qualification passes 41/41 for each profile against candidate commit `84c74bf83da0cdef54b83a92752b170cb551f674`; full and cropped signed shaped routes and all desktop consumers pass, with the production lock unchanged. The route remains limited to admitted direct text items and fixed geometry; unsupported Flex combinations still refuse. Core 0.13.0 is signed and published, and Runtime #159 consumes it. | Complete the Core PR CI and merge. Broader topology and any device claim remain separate gates, with device claims limited to layouts exercised on that device. |
+| Shared inline ownership for shaped text | Core's `CoreTextClusterMap` maps one JFSP2 cluster to ordered source-owner spans, and `CoreTextParagraph` already records normalized per-owner byte ranges. Production shared-inline still emits scalar `PreparedText`; the contextual layout route only admits a block with one direct text child, and Runtime's contextual worker serializes `LayoutResult::paragraphs()` plus a separate scalar display list. The owner map therefore has no production shaped-glyph consumer. | Follow `docs/evaluation/abi11_shared_inline_contextual_integration_2026-11-26.md`. The first implementation must route contextual packets through an ordered layer/worker output while retaining owner fragments for hit testing. Paint each cross-owner cluster once. Refuse a cluster whose contributing owners disagree on paint style, plus unsupported normalization/atomics, transactionally. Qualify Core pixels and owner hit ranges before Runtime full/cropped/off and device gates. |
+| Contextual Flex topology | Core #100 and Runtime #156 cover a definite-width nowrap row. Core #101 adds bounded definite-pixel columns. Core #111 adds bounded row wrapping with geometry, baseline, pixel, refusal, and replay coverage. Core #117 adds per-line `justify-content` distribution for the same admitted wrapped-row topology and tests all six supported modes against exact Q1000 geometry and final pixels. Contextual Core CTest passed 46/46 and the default build passed 43/43. Runtime full/off/cropped installed-package qualification passed 41/41 for each profile against Core commit `8e4ac459ca7398dc0a786cb297e7e46f28f172eb`, with full/cropped signed shaped routes and desktop consumers passing and the production lock unchanged. Core PR #117 and post-merge CI passed. The route remains limited to admitted direct text items and fixed geometry; unsupported Flex combinations still refuse. | Broader topology and any device claim remain separate gates, with device claims limited to layouts exercised on that device. |
 | Paired host qualification and release adoption | Runtime #158's exact installed-package qualification passed 41/41 in full, cropped, and disabled-feature profiles against the published Core 0.13.0 archive. Core standalone full/cropped/off suites passed 46/46, 45/45, and 42/42. Runtime PR #159 updated the production lock to Core 0.13.0 / ABI11 / source hash `290ff2ded3619d8be23e1320ad9530c07c81593cd5b94a8ff25faccb745e4dfd`; its 26 CI jobs passed, and post-merge master CI also passed 26/26. Signed `v0.13.0` points to Core master commit `0861c451ff5cb81ea23e0b523b19f57aa0048f79`; archive SHA-256 is `ec1773ad7d35b88f5e84903259433a6e5ceb922b6a391caec2cdcf2c453cf1f9`. | Complete. Future Core releases require their own package qualification and reviewed Runtime lock change. |
 | WS147 contextual device acceptance | The latest reported device observation for Contextual Flex 0.1.4 showed the full background, centered/bottom-aligned A/V and left/bottom-aligned Chinese lines. The user noted that the browser alignment may differ. | Re-render the exact 0.1.4 app in a browser at the device viewport and compare the two alignment results before making a parity claim. Host rendering does not establish device parity. |
 
@@ -81,10 +88,10 @@ published, and Runtime #159 has adopted its exact source identity
 production lock. PR and post-merge Runtime CI both passed 26/26 jobs.
 
 The owner-map adapter remains experimental because it stores mapping data but
-has no shaped-glyph consumer. Remaining work includes the separate
-shared-inline layout/paint integration, Runtime qualification for the wrapped
-row `justify-content` slice, and a browser comparison for the latest WS147
-Contextual Flex app. The Core 0.13.0 release and Runtime production-lock
-migration are complete.
+has no shaped-glyph consumer. Remaining work includes the shared-inline
+layout/paint integration described by the design document and a browser
+comparison for the latest WS147 Contextual Flex app. Core PR #117 and its
+Runtime package qualification are complete. The Core 0.13.0 release and
+Runtime production-lock migration are complete.
 Older ABI9 notes remain historical records unless explicitly updated with
 newer evidence.
