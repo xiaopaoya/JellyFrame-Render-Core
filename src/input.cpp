@@ -4,6 +4,9 @@
 #include "render_core/event.h"
 #include "render_core/feature_config.h"
 #include "render_core/form_control.h"
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+#include "render_core/contextual_text_layout.h"
+#endif
 #if JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED
 #include "render_core/form_submission.h"
 #endif
@@ -234,6 +237,12 @@ void InputController::set_interaction_state(const Node* hovered_node,
     hovered_node = accepts_node(hovered_node) && visible_node(hovered_node) ? hovered_node : nullptr;
     active_node = accepts_node(active_node) && visible_node(active_node) ? active_node : nullptr;
     focused_node = accepts_node(focused_node) && visible_node(focused_node) ? focused_node : nullptr;
+    restore_interaction_state(hovered_node, active_node, focused_node,
+                              find_layout_box_for_node(layer_tree_.box, active_node));
+}
+
+void InputController::restore_interaction_state(const Node* hovered_node, const Node* active_node,
+                                                const Node* focused_node, const LayoutBox* active_box) {
     const std::size_t prior_observers = observed_nodes_.size();
     try {
         observe_node(hovered_node);
@@ -246,7 +255,7 @@ void InputController::set_interaction_state(const Node* hovered_node,
     hovered_node_ = hovered_node;
     active_node_ = active_node;
     focused_node_ = focused_node;
-    active_box_ = find_layout_box_for_node(layer_tree_.box, active_node_);
+    active_box_ = active_box;
     unobserve_unused_nodes();
 }
 
@@ -270,7 +279,10 @@ void InputController::set_modal_root(const Node* node) {
 }
 
 const Node* InputController::pointer_move(const PointerInput& input) {
-    HitTestResult result = hit(input.x, input.y);
+    return move_at(input, hit(input.x, input.y));
+}
+
+const Node* InputController::move_at(const PointerInput& input, HitTestResult result) {
     const Node* target = result ? result.node : nullptr;
     if (disabled_target(target)) {
         return target;
@@ -293,7 +305,10 @@ const Node* InputController::pointer_move(const PointerInput& input) {
 }
 
 const Node* InputController::pointer_down(const PointerInput& input) {
-    HitTestResult result = hit(input.x, input.y);
+    return down_at(input, hit(input.x, input.y));
+}
+
+const Node* InputController::down_at(const PointerInput& input, HitTestResult result) {
     const Node* target = result ? result.node : nullptr;
 #if JELLYFRAME_RENDER_CORE_ADVANCED_FORMS_ENABLED
     if (layer_tree_.box != nullptr && layer_tree_.box->node != nullptr) {
@@ -347,7 +362,10 @@ const Node* InputController::pointer_down(const PointerInput& input) {
 }
 
 const Node* InputController::pointer_up(const PointerInput& input) {
-    const Node* target = hit_node(input.x, input.y);
+    return up_at(input, hit(input.x, input.y).node);
+}
+
+const Node* InputController::up_at(const PointerInput& input, const Node* target) {
     const Node* activation_target = active_node_;
     if (disabled_target(target) || disabled_target(activation_target)) {
         set_active_node(nullptr);
@@ -482,7 +500,10 @@ const Node* InputController::pointer_up(const PointerInput& input) {
 }
 
 const Node* InputController::wheel(const WheelInput& input) {
-    const Node* target = hit_node(input.x, input.y);
+    return wheel_at(input, hit(input.x, input.y).node);
+}
+
+const Node* InputController::wheel_at(const WheelInput& input, const Node* target) {
     WheelEvent event = make_wheel_event(input);
     if (target != nullptr) {
         dispatch_event(*target, event);
@@ -684,17 +705,69 @@ void InputController::clear_pointer_state() {
 }
 
 HitTestResult InputController::hit(int x, int y) const {
-    HitTestResult result = hit_tester_.hit_test(layer_tree_, x, y);
-    if (!result || accepts_node(result.node)) {
-        return result;
-    }
-    return {};
+    return admit_hit(hit_tester_.hit_test(layer_tree_, x, y));
 }
 
-const Node* InputController::hit_node(int x, int y) const {
-    HitTestResult result = hit(x, y);
-    return result ? result.node : nullptr;
+HitTestResult InputController::admit_hit(HitTestResult result) const {
+    return result && accepts_node(result.node) ? result : HitTestResult{};
 }
+
+#if JELLYFRAME_RENDER_CORE_CONTEXTUAL_LAYOUT_ENABLED
+bool InputController::accepts_capture(const contextual_text::LayerCapture& capture) const {
+    return capture.layer_tree() == &layer_tree_ && capture.source_is_current();
+}
+
+const Node* InputController::pointer_move(const PointerInput& input,
+                                         const contextual_text::LayerCapture& capture) {
+    if (!accepts_capture(capture)) return nullptr;
+    return move_at(input, admit_hit(hit_tester_.hit_test(capture, input.x, input.y)));
+}
+
+const Node* InputController::pointer_down(const PointerInput& input,
+                                         const contextual_text::LayerCapture& capture) {
+    if (!accepts_capture(capture)) return nullptr;
+    return down_at(input, admit_hit(hit_tester_.hit_test(capture, input.x, input.y)));
+}
+
+const Node* InputController::pointer_up(const PointerInput& input,
+                                       const contextual_text::LayerCapture& capture) {
+    if (!accepts_capture(capture)) return nullptr;
+    return up_at(input, admit_hit(hit_tester_.hit_test(capture, input.x, input.y)).node);
+}
+
+const Node* InputController::wheel(const WheelInput& input,
+                                  const contextual_text::LayerCapture& capture) {
+    if (!accepts_capture(capture)) return nullptr;
+    return wheel_at(input, admit_hit(hit_tester_.hit_test(capture, input.x, input.y)).node);
+}
+
+void InputController::set_interaction_state(const Node* hovered_node, const Node* active_node,
+                                            const Node* focused_node,
+                                            const contextual_text::LayerCapture& capture) {
+    if (!accepts_capture(capture)) return;
+    const auto box_for = [&](const Node* node) -> const LayoutBox* {
+        if (!node || !accepts_node(node)) return nullptr;
+        if (const auto* box = find_layout_box_for_node(layer_tree_.box, node))
+            return box->style.visibility_hidden ? nullptr : box;
+        // Neutral inline elements have no box in the contextual layout tree.
+        const auto& layout = capture.layout();
+        for (std::size_t index = 0; index < layout.paragraphs().size(); ++index) {
+            const auto* box = layout.paragraphs()[index].owner;
+            for (std::size_t owner = 0; const auto* text = layout.text_owner(index, owner); ++owner) {
+                for (const auto* ancestor = text->parent; ancestor && ancestor != box->node;
+                     ancestor = ancestor->parent) {
+                    if (ancestor == node) return box;
+                }
+            }
+        }
+        return nullptr;
+    };
+    const auto* active_box = box_for(active_node);
+    restore_interaction_state(box_for(hovered_node) ? hovered_node : nullptr,
+                              active_box ? active_node : nullptr,
+                              box_for(focused_node) ? focused_node : nullptr, active_box);
+}
+#endif
 
 bool InputController::contains_node(const Node* node) const {
     return node != nullptr && find_layout_box_for_node(layer_tree_.box, node) != nullptr;
