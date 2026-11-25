@@ -232,6 +232,7 @@ Status paint(const Binding& binding, std::string_view bytes, FrameBuffer& target
   case contextual_painter::Status::identity_mismatch: return Status::identity_mismatch;
   case contextual_painter::Status::missing_glyph: return Status::malformed;
   case contextual_painter::Status::limit: return Status::limit;
+  case contextual_painter::Status::allocation: return Status::allocation;
   case contextual_painter::Status::invalid: return Status::invalid;
   }
   return Status::invalid;

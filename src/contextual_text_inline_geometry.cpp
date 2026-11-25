@@ -59,6 +59,8 @@ ContextualTextInkStatus contextual_text_line_glyph_ink(
     if (positioned == contextual_painter::Status::missing_glyph ||
         positioned == contextual_painter::Status::invalid)
         return Status::InvalidInput;
+    if (positioned == contextual_painter::Status::allocation)
+        return Status::AllocationFailure;
     if (positioned != contextual_painter::Status::ok)
         return Status::ResourceLimit;
 

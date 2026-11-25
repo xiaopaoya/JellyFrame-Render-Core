@@ -10,7 +10,7 @@ namespace jellyframe {
 struct FrameBuffer;
 namespace contextual_painter {
 
-enum class Status { ok, invalid, identity_mismatch, missing_glyph, limit };
+enum class Status { ok, invalid, identity_mismatch, missing_glyph, limit, allocation };
 
 // Draws a decoded packet directly into a caller-owned framebuffer. The packet
 // and snapshot are borrowed and must remain immutable for the call.

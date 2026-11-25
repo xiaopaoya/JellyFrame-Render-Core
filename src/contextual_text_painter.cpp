@@ -106,9 +106,9 @@ Status glyph_ink_bounds(const shaped_packet::View &packet,
     work -= cost;
     return Status::ok;
   } catch (const std::bad_alloc &) {
-    return Status::limit;
+    return Status::allocation;
   } catch (const std::length_error &) {
-    return Status::limit;
+    return Status::allocation;
   }
 }
 
