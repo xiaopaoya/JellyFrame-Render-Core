@@ -53,7 +53,7 @@ and successful tests are evidence for their stated scope only.
   deterministic source archive are published. Runtime PR #159 adopted that
   package as the production lock, and both PR and post-merge CI passed 26/26.
 
-## Remaining gates and workstreams
+## Migration gates and workstreams
 
 | Workstream | Current evidence | Required next evidence |
 | --- | --- | --- |
